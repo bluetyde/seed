@@ -2,6 +2,7 @@
   "apps": [
     {
       "id": "openmc-studio",
+      "catalog": "openmc-studio",
       "name": "OpenMC Studio",
       "icon": "atom",
       "healthPath": "/api/ping",
@@ -9,11 +10,12 @@
       "startTimeoutMs": 120000,
       "start": {
         "command": "wsl.exe",
-        "args": ["-e", "bash", "-lc", "cd \"$(wslpath -a 'C:\\OpenMC')\" && export OPENMC_STUDIO_TOKEN='{token}' && exec bash studio/start.sh --no-browser --exit-with-launcher --port {port}"]
+        "args": ["-e", "bash", "-lc", "cd \"$(wslpath -a '{install}')\" && export OPENMC_STUDIO_TOKEN='{token}' && exec bash studio/start.sh --no-browser --exit-with-launcher --port {port}"]
       }
     },
     {
       "id": "nodal-studio",
+      "catalog": "nodal-studio",
       "name": "NODAL Studio",
       "icon": "pipe",
       "healthPath": "/",
@@ -21,12 +23,13 @@
       "start": {
         "command": "node",
         "args": ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--strictPort"],
-        "cwd": "C:\\Users\\jwncr\\Claude Code Test\\pipe-studio\\web",
+        "cwd": "{install}\\web",
         "env": { "NODAL_PORT": "{port}" }
       }
     },
     {
       "id": "virtual-reactor",
+      "catalog": "virtual-reactor",
       "name": "Virtual Reactor",
       "icon": "reactor",
       "healthPath": "/",
@@ -34,7 +37,7 @@
       "start": {
         "command": "node",
         "args": ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "{port}", "--strictPort"],
-        "cwd": "C:\\Users\\jwncr\\Claude Code Test\\virtual-reactor\\web"
+        "cwd": "{install}\\web"
       }
     }
   ]

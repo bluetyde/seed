@@ -22,11 +22,24 @@ REAL_APPS=1 SHELL_SHOTS=<folder> npm run e2e   # also opens the real NODAL and V
 - `src/main/tabs.ts` is the pure tab model. At most one tab per app. Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+1..9, Ctrl+W, Ctrl+T, Ctrl+R work even while an app has focus.
 - Closing a tab asks the app first, so an app's own "unsaved changes" prompt can stop it; the host shows "Close anyway / Stay". Quitting does the same for every tab and stops only the servers the host started.
 
+## Install and update the suite
+
+The Welcome page (File > Install and update apps) shows each app in `catalog.json` (OpenMC Studio, NODAL Studio, Virtual Reactor/RAFT) with what it can do next:
+
+- **Install**: clones the repository from GitHub into the install folder (default `~/SEED/apps`, changeable), checks the programs it needs first (Git, Node 24), then runs its install steps (`npm ci --ignore-scripts`). A failed step keeps its output on the card; running Install again repeats the steps.
+- **Use the existing copy / Choose a folder**: adopts a clone you already have. It must be a clone of the same GitHub repository; nothing in it is changed.
+- **Check for updates**: asks GitHub (fetch only). **Update**: fast-forwards the branch. It refuses, with the reason on the card, if the app is open, the copy has uncommitted changes or commits GitHub does not have, or it is on another branch. It never resets, forces or switches branches. Install steps rerun only if a watched file (the lockfile) changed.
+- **Forget this copy** only removes SEED's record of the folder.
+- Private repositories need your own GitHub sign-in on this computer (Git Credential Manager or `gh auth login`). SEED runs the git on your PATH with prompts disabled and stores no credentials.
+- OpenMC Studio runs from source inside WSL: SEED downloads and updates the code and warns when WSL or the `openmc-mcnp` conda environment is missing; it does not create them.
+
+Installed paths are saved in `installs.json` in the user data folder, and the app list refers to them as `{install}`.
+
 ## Register an app
 
 Help > Edit the app list copies `apps.default.json` to the user data folder as `apps.json`; edit it, then Help > Reload the app list. A bad entry is named in a banner and skipped; the defaults are not silently used instead of a broken file.
 
-Fields: `id` (lowercase, digits, dashes), `name`, `icon` (`atom`, `pipe`, `reactor`, `app`), `healthPath`, `urlPath` (`{token}` is replaced), `start` (`command`, `args`, `cwd`, `env`; `{port}` and `{token}` are replaced), optional `attachUrl` (http on this computer only), optional `startTimeoutMs`. The default paths assume this computer's layout (NODAL and Virtual Reactor from the shared workspace; OpenMC Studio from `C:\OpenMC` started inside WSL).
+Fields: `catalog` (optional: the `catalog.json` id that installs it; `{install}` then stands for its folder), `id` (lowercase, digits, dashes), `name`, `icon` (`atom`, `pipe`, `reactor`, `app`), `healthPath`, `urlPath` (`{token}` is replaced), `start` (`command`, `args`, `cwd`, `env`; `{port}` and `{token}` are replaced), optional `attachUrl` (http on this computer only), optional `startTimeoutMs`. The default paths assume this computer's layout (NODAL and Virtual Reactor from the shared workspace; OpenMC Studio from `C:\OpenMC` started inside WSL).
 
 ## Known gaps
 

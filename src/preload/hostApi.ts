@@ -11,6 +11,14 @@ const api: HostApi = {
   retry: (tabId) => ipcRenderer.send("tab:retry", tabId),
   menu: (action) => ipcRenderer.send("menu:action", action),
   setBarExpanded: (expanded) => ipcRenderer.send("bar:expand", expanded),
+  install: (id) => ipcRenderer.send("inst:install", id),
+  update: (id) => ipcRenderer.send("inst:update", id),
+  checkUpdates: (id) => ipcRenderer.send("inst:check", id),
+  cancelJob: (id) => ipcRenderer.send("inst:cancel", id),
+  adopt: (id) => ipcRenderer.send("inst:adopt", id),
+  useFound: (id) => ipcRenderer.send("inst:useFound", id),
+  forget: (id) => ipcRenderer.send("inst:forget", id),
+  chooseInstallRoot: () => ipcRenderer.send("inst:root"),
 };
 
 contextBridge.exposeInMainWorld("host", api);

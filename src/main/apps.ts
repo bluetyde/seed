@@ -23,6 +23,8 @@ export interface AppEntry {
   /** A server the user already runs. If it answers, the host uses it and never stops it. */
   attachUrl?: string;
   startTimeoutMs: number;
+  /** The catalog entry that installs this app. {install} in start.cwd, start.args and start.env stands for its folder. */
+  catalog?: string;
 }
 
 export interface RegistryResult {
@@ -68,8 +70,9 @@ export function parseRegistry(text: string): RegistryResult {
     if (!start && o.attachUrl === undefined) return bad("needs start or attachUrl, otherwise it cannot be opened");
     const timeout = o.startTimeoutMs === undefined ? 60_000 : o.startTimeoutMs;
     if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 600_000) return bad("startTimeoutMs must be 1000 to 600000");
+    if (o.catalog !== undefined && (typeof o.catalog !== "string" || !ID_RE.test(o.catalog))) return bad("catalog must be a catalog id");
     seen.add(o.id);
-    apps.push({ id: o.id, name: o.name, icon: typeof o.icon === "string" ? o.icon : "app", healthPath: o.healthPath, urlPath: o.urlPath, startTimeoutMs: timeout, ...(start ? { start } : {}), ...(o.attachUrl ? { attachUrl: o.attachUrl } : {}) });
+    apps.push({ ...(o.catalog ? { catalog: o.catalog } : {}), id: o.id, name: o.name, icon: typeof o.icon === "string" ? o.icon : "app", healthPath: o.healthPath, urlPath: o.urlPath, startTimeoutMs: timeout, ...(start ? { start } : {}), ...(o.attachUrl ? { attachUrl: o.attachUrl } : {}) });
   });
   return { apps, problems };
 }
@@ -78,4 +81,21 @@ export function parseRegistry(text: string): RegistryResult {
 export function loadRegistry(userPath: string, defaultPath: string): RegistryResult & { source: string } {
   if (fs.existsSync(userPath)) return { ...parseRegistry(fs.readFileSync(userPath, "utf-8")), source: userPath };
   return { ...parseRegistry(fs.readFileSync(defaultPath, "utf-8")), source: defaultPath };
+}
+
+/**
+ * Fills in {install} from where the app is installed. An entry that names a catalog app and has no install yet comes back with
+ * missingInstall set (and no start command), so the host shows "install it" instead of trying to run a path that is not there.
+ */
+export function applyInstall(entry: AppEntry, dir: string | undefined): AppEntry & { missingInstall?: boolean } {
+  if (!entry.catalog) return entry;
+  if (!dir) { const { start: _drop, ...rest } = entry; return { ...rest, missingInstall: true }; }
+  const sub = (s: string) => s.split("{install}").join(dir);
+  if (!entry.start) return entry;
+  const start: StartSpec = {
+    command: entry.start.command, args: entry.start.args.map(sub),
+    ...(entry.start.cwd ? { cwd: sub(entry.start.cwd) } : {}),
+    ...(entry.start.env ? { env: Object.fromEntries(Object.entries(entry.start.env).map(([k, v]) => [k, sub(v)])) } : {}),
+  };
+  return { ...entry, start };
 }

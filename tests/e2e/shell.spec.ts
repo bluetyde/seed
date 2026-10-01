@@ -1,6 +1,7 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { captureWindow } from "./capture";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { makeRemote } from "../helpers/repo";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -15,13 +16,17 @@ const entry = (id: string, name: string, extra: string[] = []) => ({
 
 let host: ElectronApplication | undefined;
 
-async function launch(apps: unknown[]): Promise<Page> {
+let installRoot = "";
+async function launch(apps: unknown[], catalogRepos: unknown[] = []): Promise<Page> {
   const dir = mkdtempSync(join(tmpdir(), "exp-studio-"));
   const registry = join(dir, "registry.json");
   writeFileSync(registry, JSON.stringify({ apps }));
+  const catalog = join(dir, "catalog.json");
+  writeFileSync(catalog, JSON.stringify({ repos: catalogRepos }));
+  installRoot = join(dir, "installs");
   const userData = join(dir, "user");
   mkdirSync(userData);
-  host = await electron.launch({ args: [root], env: { ...process.env, EXPERIMENT_STUDIO_APPS: registry, EXPERIMENT_STUDIO_USER_DATA: userData } });
+  host = await electron.launch({ args: [root], env: { ...process.env, EXPERIMENT_STUDIO_APPS: registry, EXPERIMENT_STUDIO_USER_DATA: userData, SEED_CATALOG: catalog, SEED_INSTALL_ROOT: installRoot } });
   const bar = await pageWhere((p) => p.url().endsWith("/renderer/index.html"));
   await bar.waitForSelector(".tabrow");
   return bar;
@@ -177,4 +182,63 @@ test("quitting stops every server the host started", async () => {
   await closed;
   host = undefined;
   for (const u of urls) await expect.poll(() => alive(u)).toBe(false);
+});
+
+// ---- installer / updater, against a local git remote (no network) ----
+
+async function installFixture() {
+  const remote = makeRemote({ "server.cjs": readFileSync(fake, "utf-8"), "package-lock.json": "1" });
+  const repo = {
+    id: "demo", name: "Demo", url: remote.url, branch: "main", folder: "demo", private: false, candidates: [], prerequisites: [],
+    steps: [{ label: "Install deps", cwd: ".", command: process.execPath, args: ["-e", "require('fs').writeFileSync('deps.ok', '1')"], watch: ["package-lock.json"] }],
+  };
+  const appEntry = { id: "demo", catalog: "demo", name: "Demo", icon: "app", healthPath: "/health", urlPath: "/", startTimeoutMs: 15_000, start: { command: process.execPath, args: ["{install}/server.cjs", "--port", "{port}", "--title", "Demo"] } };
+  const bar = await launch([appEntry], [repo]);
+  const welcome = await pageWhere((p) => p.url().endsWith("/renderer/welcome.html"));
+  return { remote, bar, welcome, card: welcome.locator('[data-app="demo"]') };
+}
+
+test("an app that is not installed offers Install, not Open; installing clones it, runs the steps and then it opens", async () => {
+  const { bar, welcome, card } = await installFixture();
+  await expect(card).toHaveAttribute("data-install-state", "not-installed");
+  await expect(card.locator("[data-open-app]")).toHaveCount(0);
+  await bar.evaluate(() => window.host.openApp("demo"));              // even asked directly, it cannot start a path that is not there
+  await expect(bar.locator('[data-tab="app:demo"]')).toHaveCount(0);
+  await card.locator("[data-install]").click();
+  await expect(card).toHaveAttribute("data-install-state", "up-to-date", { timeout: 30_000 });
+  expect(readFileSync(join(installRoot, "demo", "deps.ok"), "utf-8")).toBe("1");
+  await card.locator("[data-open-app]").click();
+  await appPage("Demo");
+  await shot("installer-open.png");
+});
+
+test("checking for updates finds a new commit and Update brings it in; the step reruns only because package-lock.json changed", async () => {
+  const { remote, welcome, card } = await installFixture();
+  await card.locator("[data-install]").click();
+  await expect(card).toHaveAttribute("data-install-state", "up-to-date", { timeout: 30_000 });
+  writeFileSync(join(installRoot, "demo", "deps.ok"), "stale");
+  remote.commit({ "package-lock.json": "2" });
+  await card.locator("[data-check]").click();
+  await expect(card).toHaveAttribute("data-install-state", "update-available", { timeout: 20_000 });
+  await expect(card).toContainText("1 new commit");
+  await shot("installer-update-available.png");
+  await card.locator("[data-update]").click();
+  await expect(card).toHaveAttribute("data-install-state", "up-to-date", { timeout: 30_000 });
+  expect(readFileSync(join(installRoot, "demo", "package-lock.json"), "utf-8")).toBe("2");
+  expect(readFileSync(join(installRoot, "demo", "deps.ok"), "utf-8")).toBe("1");        // rewritten by the rerun step
+  await expect(welcome.locator("[data-update]")).toHaveCount(0);
+});
+
+test("Update is refused while the app is open, with the reason on its card", async () => {
+  const { remote, bar, welcome, card } = await installFixture();
+  await card.locator("[data-install]").click();
+  await expect(card).toHaveAttribute("data-install-state", "up-to-date", { timeout: 30_000 });
+  await card.locator("[data-open-app]").click();
+  await appPage("Demo");
+  remote.commit({ "b.txt": "2" });
+  await bar.click('[data-tab="welcome"]');
+  await card.locator("[data-check]").click();
+  await expect(card).toHaveAttribute("data-install-state", "update-available", { timeout: 20_000 });
+  await card.locator("[data-update]").click();
+  await expect(card.locator('[role="alert"]')).toContainText("Close the Demo tab first");
 });

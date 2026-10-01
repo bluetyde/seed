@@ -12,6 +12,10 @@
       { label: "New tab", action: "newTab", key: "Ctrl+T" },
       { label: "Close tab", action: "closeTab", key: "Ctrl+W" },
       { sep: true, label: "" },
+      { label: "Install and update apps…", action: "newTab" },
+      { label: "Check for updates", action: "checkUpdates" },
+      { label: "Choose the install folder…", action: "chooseInstallRoot" },
+      { sep: true, label: "" },
       { label: "Quit", action: "quit" },
     ],
     View: [

@@ -4,7 +4,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell, WebContentsView, type Input, type WebContents } from "electron";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { loadRegistry, type AppEntry } from "./apps";
+import { applyInstall, loadRegistry, type AppEntry } from "./apps";
+import { loadCatalog } from "./catalog";
+import { Git } from "./git";
+import { defaultCheckCmd, defaultRunCmd, Installer } from "./installer";
+import { InstallStore } from "./store";
+import * as os from "node:os";
 import { ProcessManager } from "./processes";
 import { TabModel } from "./tabs";
 
@@ -32,9 +37,15 @@ let barView: WebContentsView;
 let pageView: WebContentsView;
 let barExpanded = false;
 let quitting = false;
-let registry: AppEntry[] = [];
+let rawRegistry: AppEntry[] = [];
+let installer: Installer;
+let store: InstallStore;
 let registrySource = "";
 let registryProblems: string[] = [];
+/** The app list with each catalog app's install folder filled in. */
+function registry(): (AppEntry & { missingInstall?: boolean })[] {
+  return rawRegistry.map((e) => applyInstall(e, e.catalog ? installer?.installPath(e.catalog) : undefined));
+}
 const tabs = new TabModel();
 const runtime = new Map<string, TabRuntime>();
 const processes = new ProcessManager();
@@ -47,11 +58,13 @@ function snapshot(): HostState {
   return {
     tabs: tabs.tabs.map((t) => {
       const rt = runtime.get(t.id);
-      const a = registry.find((x) => x.id === t.appId);
+      const a = registry().find((x) => x.id === t.appId);
       return { id: t.id, kind: t.kind, ...(t.appId ? { appId: t.appId } : {}), title: t.title, icon: t.kind === "welcome" ? "home" : a?.icon ?? "app", status: t.kind === "welcome" ? "running" : status(t.id), ...(rt?.error ? { error: rt.error } : {}) };
     }),
     activeId: tabs.activeId,
-    apps: registry.map((a) => ({ id: a.id, name: a.name, icon: a.icon, status: status(`app:${a.id}`) })),
+    apps: registry().map((a) => ({ id: a.id, name: a.name, icon: a.icon, available: !a.missingInstall, status: status(`app:${a.id}`) })),
+    installs: installer?.list() ?? [],
+    installRoot: store?.load().installRoot ?? "",
     registrySource,
     registryProblems,
   };
@@ -154,8 +167,9 @@ function destroyView(rt: TabRuntime, appId?: string): void {
 }
 
 async function openApp(appId: string): Promise<void> {
-  const entry = registry.find((a) => a.id === appId);
+  const entry = registry().find((a) => a.id === appId);
   if (!entry) return;
+  if (entry.missingInstall) { tabs.openWelcome(); refresh(); return; }       // nothing to start: the Welcome page offers the install
   const tab = tabs.openApp(entry.id, entry.name);
   const have = runtime.get(tab.id);
   if (have && (have.status === "starting" || have.status === "running")) { refresh(); return; }
@@ -223,7 +237,7 @@ function activeAppView(): WebContents | undefined {
 
 function reloadRegistry(): void {
   const r = loadRegistry(userRegistry(), defaultRegistry());
-  registry = r.apps;
+  rawRegistry = r.apps;
   registryProblems = r.problems;
   registrySource = r.source;
   refresh();
@@ -252,6 +266,8 @@ function menuAction(a: MenuAction): void {
       break;
     }
     case "reloadRegistry": reloadRegistry(); break;
+    case "chooseInstallRoot": void chooseInstallRoot(); break;
+    case "checkUpdates": void installer.checkAll(); tabs.openWelcome(); refresh(); break;
     case "about": void dialog.showMessageBox(win, { type: "info", title: "SEED", message: "SEED", detail: `Opens the suite apps as tabs.\nElectron ${process.versions.electron}\nApp list: ${registrySource}` }); break;
   }
 }
@@ -316,15 +332,34 @@ function createWindow(): void {
   });
 }
 
+async function chooseInstallRoot(): Promise<void> {
+  const r = await dialog.showOpenDialog(win, { title: "Folder for new installs", defaultPath: store.load().installRoot, properties: ["openDirectory", "createDirectory"] });
+  if (!r.canceled && r.filePaths[0]) await installer.setInstallRoot(r.filePaths[0]);
+}
+
+async function adoptFolder(id: string): Promise<void> {
+  const r = await dialog.showOpenDialog(win, { title: "Choose the existing clone", defaultPath: store.load().installRoot, properties: ["openDirectory"] });
+  if (!r.canceled && r.filePaths[0]) await installer.adopt(id, r.filePaths[0]);
+}
+
 function checkSender(e: { sender: WebContents }): boolean {
   return e.sender === barView.webContents || e.sender === pageView.webContents;
 }
 
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  const catalogFile = process.env.SEED_CATALOG ?? path.join(DIST, "..", "catalog.json");
+  const catalog = loadCatalog(catalogFile, !!process.env.SEED_CATALOG);
+  store = new InstallStore(path.join(app.getPath("userData"), "installs.json"), process.env.SEED_INSTALL_ROOT ?? path.join(os.homedir(), "SEED", "apps"));
+  installer = new Installer({
+    repos: catalog.repos, store, git: new Git(), runCmd: defaultRunCmd, checkCmd: defaultCheckCmd,
+    isRunning: (id) => tabs.tabs.some((t) => t.id === `app:${id}`),
+    onChange: () => refresh(),
+  });
   reloadRegistry();
   createWindow();
-  processes.onExit = (appId, code) => setError(`app:${appId}`, `${registry.find((a) => a.id === appId)?.name ?? appId} stopped by itself (exit code ${code ?? "unknown"}).`, processes.output(appId));
+  void installer.refreshAll();
+  processes.onExit = (appId, code) => setError(`app:${appId}`, `${registry().find((a) => a.id === appId)?.name ?? appId} stopped by itself (exit code ${code ?? "unknown"}).`, processes.output(appId));
 
   ipcMain.handle("state:get", (e) => (checkSender(e) ? snapshot() : undefined));
   ipcMain.on("tab:openApp", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void openApp(id); });
@@ -333,6 +368,19 @@ app.whenReady().then(() => {
   ipcMain.on("tab:close", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void closeTab(id); });
   ipcMain.on("tab:retry", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void retry(id); });
   ipcMain.on("menu:action", (e, a: unknown) => { if (checkSender(e) && typeof a === "string") menuAction(a as MenuAction); });
+  const known = (id: unknown): id is string => typeof id === "string" && installer.list().some((i) => i.id === id);
+  const guarded = (p: Promise<void>) => { void p.catch((e: Error) => dialog.showErrorBox("SEED", e.message)); };
+  ipcMain.on("inst:install", (e, id: unknown) => { if (checkSender(e) && known(id)) guarded(installer.install(id).then(reloadRegistry)); });
+  ipcMain.on("inst:update", (e, id: unknown) => { if (checkSender(e) && known(id)) guarded(installer.update(id)); });
+  ipcMain.on("inst:check", (e, id: unknown) => { if (checkSender(e)) guarded(known(id) ? installer.check(id) : installer.checkAll()); });
+  ipcMain.on("inst:cancel", (e, id: unknown) => { if (checkSender(e) && known(id)) installer.cancel(id); });
+  ipcMain.on("inst:adopt", (e, id: unknown) => { if (checkSender(e) && known(id)) guarded(adoptFolder(id).then(reloadRegistry)); });
+  ipcMain.on("inst:useFound", (e, id: unknown) => {
+    const found = checkSender(e) && known(id) ? installer.list().find((i) => i.id === id)?.candidate : undefined;
+    if (found && known(id)) guarded(installer.adopt(id, found).then(reloadRegistry));
+  });
+  ipcMain.on("inst:forget", (e, id: unknown) => { if (checkSender(e) && known(id)) guarded(installer.forget(id).then(reloadRegistry)); });
+  ipcMain.on("inst:root", (e) => { if (checkSender(e)) guarded(chooseInstallRoot()); });
   ipcMain.on("bar:expand", (e, on: unknown) => { if (checkSender(e)) { barExpanded = on === true; layout(); } });
 
   tabs.openWelcome();
