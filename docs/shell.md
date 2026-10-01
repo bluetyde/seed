@@ -31,7 +31,7 @@ Fields: `id` (lowercase, digits, dashes), `name`, `icon` (`atom`, `pipe`, `react
 ## Known gaps
 
 - Windows only so far. macOS and the Mac SSD layout need their own start commands.
-- The "Close anyway / Stay" box is not covered by an automated test: Playwright's debugger answers the page's prompt before Electron raises `will-prevent-unload`. Check by hand.
+- The "Close anyway / Stay" box is not covered by an automated test: Playwright's debugger answers the page's prompt before Electron raises `will-prevent-unload`. Checked by hand by the user on 2026-10-01: the native box appears and works.
 - If the host process itself is killed, servers it started can be left running (they are not children of a job object).
 - No packaging/installer, no auto-update, no signing.
 - Not started: project manifest, adapters, runs, sweeps, reports (see PLAN.md E0, E2 and later).
