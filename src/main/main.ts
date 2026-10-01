@@ -323,7 +323,10 @@ function createWindow(): void {
     v.webContents.on("will-navigate", (e) => e.preventDefault());
   }
   win.on("resize", layout);
-  win.once("ready-to-show", () => win.show());
+  // The BrowserWindow itself loads no document: its child views do. Waiting
+  // for the parent's ready-to-show leaves the native window hidden indefinitely.
+  win.show();
+  win.focus();
   win.on("close", (e) => {
     if (quitting) return;
     e.preventDefault();
@@ -397,4 +400,11 @@ app.whenReady().then(() => {
   refresh();
 });
 
+app.on("activate", () => {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+});
 app.on("window-all-closed", () => app.quit());
