@@ -1,0 +1,108 @@
+import * as http from "node:http";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { AppEntry } from "../src/main/apps";
+import { freePort, ProcessManager } from "../src/main/processes";
+
+const fake = join(__dirname, "fixtures", "fake-app.cjs");
+const app = (extra: string[] = [], over: Partial<AppEntry> = {}): AppEntry => ({
+  id: "fake", name: "Fake", icon: "app", healthPath: "/health", urlPath: "/?token={token}", startTimeoutMs: 10_000,
+  start: { command: process.execPath, args: [fake, "--port", "{port}", ...extra] }, ...over,
+});
+
+const managers: ProcessManager[] = [];
+const servers: http.Server[] = [];
+const manager = () => { const m = new ProcessManager(); managers.push(m); return m; };
+afterEach(async () => {
+  await Promise.all(managers.splice(0).map((m) => m.stopAll()));
+  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+});
+
+const answers = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(1000) })).status; } catch { return 0; } };
+
+describe("ProcessManager", () => {
+  it("starts a server, waits for health, gives a url with a fresh token, and stops it (port freed)", async () => {
+    const m = manager();
+    const r = await m.ensure(app(["--delay", "400"]));
+    expect(r.owned).toBe(true);
+    expect(r.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?token=[0-9a-f]{32}$/);
+    expect(await answers(`http://127.0.0.1:${r.port}/health`)).toBe(200);
+    await m.stop("fake");
+    expect(await answers(`http://127.0.0.1:${r.port}/health`)).toBe(0);
+    expect(m.running("fake")).toBeUndefined();
+  });
+
+  it("starts once for concurrent opens", async () => {
+    const m = manager();
+    const [a, b] = await Promise.all([m.ensure(app()), m.ensure(app())]);
+    expect(a.port).toBe(b.port);
+  });
+
+  it("reports the output when the server stops before it is ready", async () => {
+    const m = manager();
+    await expect(m.ensure(app(["--exit", "2"]))).rejects.toMatchObject({
+      name: "AppStartError",
+      message: expect.stringContaining("exit code 2"),
+      output: expect.stringContaining("ModuleNotFoundError: foo"),
+    });
+  });
+
+  it("reports a missing command instead of hanging", async () => {
+    const m = manager();
+    await expect(m.ensure(app([], { start: { command: "definitely-not-a-command-xyz", args: [] } }))).rejects.toMatchObject({ name: "AppStartError" });
+  });
+
+  it("times out a server that never answers and stops it", async () => {
+    const m = manager();
+    await expect(m.ensure(app(["--delay", "60000"], { startTimeoutMs: 1500 }))).rejects.toMatchObject({ message: expect.stringContaining("did not answer") });
+    expect(m.running("fake")).toBeUndefined();
+  });
+
+  it("uses a server that is already running and never stops it", async () => {
+    const port = await freePort();
+    const s = http.createServer((_q, res) => { res.writeHead(200); res.end("hi"); });
+    servers.push(s);
+    await new Promise<void>((r) => s.listen(port, "127.0.0.1", r));
+    const m = manager();
+    const r = await m.ensure(app([], { attachUrl: `http://127.0.0.1:${port}/` }));
+    expect(r.owned).toBe(false);
+    expect(r.url).toContain(`127.0.0.1:${port}`);
+    await m.stop("fake");
+    expect(await answers(`http://127.0.0.1:${port}/health`)).toBe(200);
+  });
+
+  it("starts its own server when the attach address does not answer", async () => {
+    const dead = await freePort();
+    const m = manager();
+    const r = await m.ensure(app([], { attachUrl: `http://127.0.0.1:${dead}/` }));
+    expect(r.owned).toBe(true);
+  });
+
+  it("with nothing to start and nothing to attach to, says so", async () => {
+    const dead = await freePort();
+    const m = manager();
+    const a = app([], { attachUrl: `http://127.0.0.1:${dead}/` });
+    delete a.start;
+    await expect(m.ensure(a)).rejects.toMatchObject({ message: expect.stringContaining("no start command") });
+  });
+
+  it("tells the host when a server it started stops by itself", async () => {
+    const m = manager();
+    const exits: [string, number | null][] = [];
+    m.onExit = (id, code) => exits.push([id, code]);
+    await m.ensure(app(["--crash-after", "800"]));
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(exits).toEqual([["fake", 3]]);
+    expect(m.running("fake")).toBeUndefined();
+  });
+
+  it("stopping a deliberate stop does not report an exit", async () => {
+    const m = manager();
+    const exits: string[] = [];
+    m.onExit = (id) => exits.push(id);
+    await m.ensure(app());
+    await m.stop("fake");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(exits).toEqual([]);
+  });
+});

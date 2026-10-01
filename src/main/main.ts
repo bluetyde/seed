@@ -1,0 +1,313 @@
+// The host window: a thin top bar (menu row + tab row) and, below it, the active tab's page. App tabs are separate web views, each
+// with its own storage, loading a server this host started (or attached to). Nothing from the host is drawn over an app.
+
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell, WebContentsView, type Input, type WebContents } from "electron";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { loadRegistry, type AppEntry } from "./apps";
+import { ProcessManager } from "./processes";
+import { TabModel } from "./tabs";
+
+const MENU_H = 32;
+const TAB_H = 36;
+const BAR_H = MENU_H + TAB_H;
+const BG = "#0e1013";
+const DIST = path.join(__dirname, "..");
+
+// Tests point these at a scratch folder and a fake-app registry.
+if (process.env.EXPERIMENT_STUDIO_USER_DATA) app.setPath("userData", process.env.EXPERIMENT_STUDIO_USER_DATA);
+const userRegistry = () => path.join(app.getPath("userData"), "apps.json");
+const defaultRegistry = () => process.env.EXPERIMENT_STUDIO_APPS ?? path.join(DIST, "..", "apps.default.json");
+
+nativeTheme.themeSource = "dark";
+
+interface TabRuntime {
+  status: TabStatus;
+  error?: { message: string; output: string };
+  view?: WebContentsView;
+}
+
+let win: BrowserWindow;
+let barView: WebContentsView;
+let pageView: WebContentsView;
+let barExpanded = false;
+let quitting = false;
+let registry: AppEntry[] = [];
+let registrySource = "";
+let registryProblems: string[] = [];
+const tabs = new TabModel();
+const runtime = new Map<string, TabRuntime>();
+const processes = new ProcessManager();
+
+// ---- state shown in the bar and the welcome page ----
+
+function snapshot(): HostState {
+  const status = (id: string): TabStatus => runtime.get(id)?.status ?? "idle";
+  return {
+    tabs: tabs.tabs.map((t) => {
+      const rt = runtime.get(t.id);
+      const a = registry.find((x) => x.id === t.appId);
+      return { id: t.id, kind: t.kind, ...(t.appId ? { appId: t.appId } : {}), title: t.title, icon: t.kind === "welcome" ? "home" : a?.icon ?? "app", status: t.kind === "welcome" ? "running" : status(t.id), ...(rt?.error ? { error: rt.error } : {}) };
+    }),
+    activeId: tabs.activeId,
+    apps: registry.map((a) => ({ id: a.id, name: a.name, icon: a.icon, status: status(`app:${a.id}`) })),
+    registrySource,
+    registryProblems,
+  };
+}
+
+function refresh(): void {
+  layout();
+  const s = snapshot();
+  for (const v of [barView, pageView]) if (v && !v.webContents.isDestroyed()) v.webContents.send("state", s);
+}
+
+/** Which view fills the area under the bar: the app itself once it is running, otherwise the host's own page (welcome, starting, error). */
+function layout(): void {
+  if (!win || win.isDestroyed()) return;
+  const [w, h] = win.getContentSize() as [number, number];
+  barView.setBounds({ x: 0, y: 0, width: w, height: barExpanded ? h : BAR_H });
+  const area = { x: 0, y: BAR_H, width: w, height: Math.max(0, h - BAR_H) };
+  const activeRt = tabs.activeId ? runtime.get(tabs.activeId) : undefined;
+  const showApp = activeRt?.status === "running" && !!activeRt.view;
+  pageView.setBounds(area);
+  pageView.setVisible(!showApp);
+  for (const [id, rt] of runtime) {
+    if (!rt.view) continue;
+    rt.view.setBounds(area);
+    rt.view.setVisible(showApp && id === tabs.activeId);
+  }
+  if (showApp && tabs.activeId) runtime.get(tabs.activeId)!.view!.webContents.focus();
+}
+
+// ---- opening and closing tabs ----
+
+function openExternalSafe(url: string): void {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "https:" || u.protocol === "http:") void shell.openExternal(url);
+  } catch { /* not a URL: ignore it */ }
+}
+
+function createAppView(entry: AppEntry, url: string): WebContentsView {
+  const view = new WebContentsView({
+    webPreferences: { partition: `persist:${entry.id}`, contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  view.setBackgroundColor(BG);
+  const origin = new URL(url).origin;
+  const wc = view.webContents;
+  wc.setWindowOpenHandler(({ url: target }) => { openExternalSafe(target); return { action: "deny" }; });
+  wc.on("will-navigate", (e, target) => {
+    if (new URL(target).origin !== origin) { e.preventDefault(); openExternalSafe(target); }
+  });
+  wc.on("did-fail-load", (_e, code, desc, failedUrl, isMain) => {
+    if (!isMain || code === -3) return;       // -3: the load was replaced by another one
+    setError(`app:${entry.id}`, `${entry.name} could not be loaded from ${failedUrl}: ${desc} (${code}).`, processes.output(entry.id));
+  });
+  watchShortcuts(wc);
+  return view;
+}
+
+function setError(id: string, message: string, output: string): void {
+  const rt = runtime.get(id) ?? { status: "error" as TabStatus };
+  rt.status = "error";
+  rt.error = { message, output };
+  if (rt.view) destroyView(rt);
+  runtime.set(id, rt);
+  refresh();
+}
+
+function destroyView(rt: TabRuntime): void {
+  const v = rt.view;
+  rt.view = undefined;
+  if (!v) return;
+  if (!win.isDestroyed()) win.contentView.removeChildView(v);
+  if (!v.webContents.isDestroyed()) v.webContents.close();
+}
+
+async function openApp(appId: string): Promise<void> {
+  const entry = registry.find((a) => a.id === appId);
+  if (!entry) return;
+  const tab = tabs.openApp(entry.id, entry.name);
+  const have = runtime.get(tab.id);
+  if (have && (have.status === "starting" || have.status === "running")) { refresh(); return; }
+  runtime.set(tab.id, { status: "starting" });
+  refresh();
+  try {
+    const running = await processes.ensure(entry);
+    const rt = runtime.get(tab.id);
+    if (!tabs.tabs.some((t) => t.id === tab.id) || !rt) return;      // closed while starting; closeTab already stopped the server
+    const view = createAppView(entry, running.url);
+    rt.view = view;
+    rt.status = "running";
+    delete rt.error;
+    win.contentView.addChildView(view);
+    win.contentView.addChildView(barView);             // keep the bar on top
+    void view.webContents.loadURL(running.url);
+    refresh();
+  } catch (e) {
+    if (!tabs.tabs.some((t) => t.id === tab.id)) return;
+    const output = (e as { output?: string }).output ?? "";
+    setError(tab.id, (e as Error).message, output);
+  }
+}
+
+/** Closes a tab. The app is asked first, so its own "unsaved changes" prompt can stop it. Resolves false if the user chose to stay. */
+async function closeTab(id: string): Promise<boolean> {
+  const tab = tabs.tabs.find((t) => t.id === id);
+  if (!tab) return true;
+  const rt = runtime.get(id);
+  if (rt?.view && !rt.view.webContents.isDestroyed()) {
+    const wc = rt.view.webContents;
+    const closed = await new Promise<boolean>((resolve) => {
+      const onPrevent = (e: { preventDefault(): void }) => {
+        const choice = dialog.showMessageBoxSync(win, { type: "question", buttons: ["Close anyway", "Stay"], defaultId: 1, cancelId: 1, title: "Unsaved changes", message: `${tab.title} has unsaved changes.`, detail: "Close the tab and lose them?" });
+        if (choice === 0) e.preventDefault();         // ignore the page's prompt: the unload goes ahead
+        else { wc.removeListener("will-prevent-unload", onPrevent); resolve(false); }
+      };
+      wc.on("will-prevent-unload", onPrevent);
+      wc.once("destroyed", () => resolve(true));
+      wc.close({ waitForBeforeUnload: true });
+    });
+    if (!closed) return false;
+    rt.view = undefined;
+  }
+  if (rt?.view) destroyView(rt);
+  runtime.delete(id);
+  tabs.close(id);
+  if (tab.appId) await processes.stop(tab.appId);
+  refresh();
+  return true;
+}
+
+async function closeAll(): Promise<boolean> {
+  for (const t of [...tabs.tabs]) if (!(await closeTab(t.id))) return false;
+  return true;
+}
+
+// ---- menu actions and shortcuts ----
+
+function activeAppView(): WebContents | undefined {
+  const rt = tabs.activeId ? runtime.get(tabs.activeId) : undefined;
+  return rt?.view?.webContents;
+}
+
+function reloadRegistry(): void {
+  const r = loadRegistry(userRegistry(), defaultRegistry());
+  registry = r.apps;
+  registryProblems = r.problems;
+  registrySource = r.source;
+  refresh();
+}
+
+function menuAction(a: MenuAction): void {
+  switch (a) {
+    case "newTab": tabs.openWelcome(); refresh(); break;
+    case "closeTab": if (tabs.activeId) void closeTab(tabs.activeId); break;
+    case "quit": win.close(); break;
+    case "nextTab": tabs.next(); refresh(); break;
+    case "prevTab": tabs.prev(); refresh(); break;
+    case "reloadTab": {
+      const id = tabs.activeId;
+      const rt = id ? runtime.get(id) : undefined;
+      if (rt?.view) rt.view.webContents.reload();
+      else if (id?.startsWith("app:")) void retry(id);
+      break;
+    }
+    case "devTools": activeAppView()?.openDevTools({ mode: "detach" }); break;
+    case "fullscreen": win.setFullScreen(!win.isFullScreen()); break;
+    case "editRegistry": {
+      const p = userRegistry();
+      if (!fs.existsSync(p)) { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.copyFileSync(defaultRegistry(), p); }
+      shell.showItemInFolder(p);
+      break;
+    }
+    case "reloadRegistry": reloadRegistry(); break;
+    case "about": void dialog.showMessageBox(win, { type: "info", title: "Experiment Studio", message: "Experiment Studio", detail: `Opens the suite apps as tabs.\nElectron ${process.versions.electron}\nApp list: ${registrySource}` }); break;
+  }
+}
+
+async function retry(tabId: string): Promise<void> {
+  const rt = runtime.get(tabId);
+  if (rt?.view) destroyView(rt);
+  runtime.delete(tabId);
+  const appId = tabs.tabs.find((t) => t.id === tabId)?.appId;
+  if (appId) { await processes.stop(appId); await openApp(appId); }
+}
+
+function watchShortcuts(wc: WebContents): void {
+  wc.on("before-input-event", (e: { preventDefault(): void }, input: Input) => {
+    if (input.type !== "keyDown" || !(input.control || input.meta) || input.alt) return;
+    const k = input.key.toLowerCase();
+    let handled = true;
+    if (k === "tab") menuAction(input.shift ? "prevTab" : "nextTab");
+    else if (k === "w") menuAction("closeTab");
+    else if (k === "t") menuAction("newTab");
+    else if (k === "r" && !input.shift) menuAction("reloadTab");
+    else if (/^[1-9]$/.test(k)) { if (tabs.activateIndex(Number(k))) refresh(); }
+    else handled = false;
+    if (handled) e.preventDefault();
+  });
+}
+
+// ---- start up ----
+
+function createWindow(): void {
+  win = new BrowserWindow({
+    width: 1500, height: 950, minWidth: 800, minHeight: 500, show: false, backgroundColor: BG, title: "Experiment Studio",
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: "#1b1e22", symbolColor: "#d8dde3", height: MENU_H },
+  });
+  Menu.setApplicationMenu(null);
+  const hostPrefs = { preload: path.join(__dirname, "..", "preload", "hostApi.js"), contextIsolation: true, nodeIntegration: false, sandbox: true };
+  pageView = new WebContentsView({ webPreferences: hostPrefs });
+  pageView.setBackgroundColor(BG);
+  barView = new WebContentsView({ webPreferences: hostPrefs });
+  barView.setBackgroundColor("#00000000");
+  win.contentView.addChildView(pageView);
+  win.contentView.addChildView(barView);
+  void pageView.webContents.loadFile(path.join(DIST, "renderer", "welcome.html"));
+  void barView.webContents.loadFile(path.join(DIST, "renderer", "index.html"));
+  for (const v of [pageView, barView]) {
+    watchShortcuts(v.webContents);
+    v.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    v.webContents.on("will-navigate", (e) => e.preventDefault());
+  }
+  win.on("resize", layout);
+  win.once("ready-to-show", () => win.show());
+  win.on("close", (e) => {
+    if (quitting) return;
+    e.preventDefault();
+    void (async () => {
+      if (!(await closeAll())) return;           // the user stayed to keep unsaved work
+      await processes.stopAll();
+      quitting = true;
+      win.close();
+    })();
+  });
+}
+
+function checkSender(e: { sender: WebContents }): boolean {
+  return e.sender === barView.webContents || e.sender === pageView.webContents;
+}
+
+app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  reloadRegistry();
+  createWindow();
+  processes.onExit = (appId, code) => setError(`app:${appId}`, `${registry.find((a) => a.id === appId)?.name ?? appId} stopped by itself (exit code ${code ?? "unknown"}).`, processes.output(appId));
+
+  ipcMain.handle("state:get", (e) => (checkSender(e) ? snapshot() : undefined));
+  ipcMain.on("tab:openApp", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void openApp(id); });
+  ipcMain.on("tab:new", (e) => { if (checkSender(e)) menuAction("newTab"); });
+  ipcMain.on("tab:activate", (e, id: unknown) => { if (checkSender(e) && typeof id === "string" && tabs.activate(id)) refresh(); });
+  ipcMain.on("tab:close", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void closeTab(id); });
+  ipcMain.on("tab:retry", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void retry(id); });
+  ipcMain.on("menu:action", (e, a: unknown) => { if (checkSender(e) && typeof a === "string") menuAction(a as MenuAction); });
+  ipcMain.on("bar:expand", (e, on: unknown) => { if (checkSender(e)) { barExpanded = on === true; layout(); } });
+
+  tabs.openWelcome();
+  refresh();
+});
+
+app.on("window-all-closed", () => app.quit());

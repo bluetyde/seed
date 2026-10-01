@@ -1,6 +1,6 @@
 # Experiment & Analysis Studio (SEED, System for Engineering and Experimental Design)
 
-Planning skeleton created 2026-09-30. No runnable application, installed engine or committed framework exists yet.
+Planning skeleton created 2026-09-30. As of 2026-10-01 there is a runnable **host shell** (Electron) that opens the suite apps as tabs: see [docs/shell.md](docs/shell.md). Projects, adapters, runs and reports are not implemented.
 
 Start with [PLAN.md](PLAN.md), then [TODO.md](TODO.md). Suite decisions and cross-app contracts live in [the integration draft](../plans/nuclear-suite-integration.md).
 
