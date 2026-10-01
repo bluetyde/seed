@@ -1,0 +1,21 @@
+{
+  "name": "experiment-studio",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment & Analysis Studio: desktop host that opens the suite apps as tabs",
+  "main": "dist/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-renderer.cjs",
+    "start": "npm run build && electron .",
+    "test": "vitest run",
+    "e2e": "npm run build && playwright test -c tests/e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.3",
+    "electron": "^44.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
