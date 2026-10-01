@@ -47,13 +47,21 @@ svg { flex: none; }
 .menu small { margin-left: auto; color: var(--muted); font: 11px var(--mono); padding-left: 16px; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 
+.card .path { color: var(--muted); font: 11.5px var(--mono); overflow-wrap: anywhere; }
+.card .msg { font-size: 12px; color: var(--muted); }
+.card .msg.warn { color: var(--warn); } .card .msg.err { color: var(--err); }
+.btnrow, .toolrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.toolrow { margin-bottom: 14px; }
+.btn.secondary { align-self: auto; }
+pre.out.small { max-height: 180px; font-size: 11px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 /* ---- the host's own page: welcome, starting, error ---- */
 body.barbody { background: transparent; }
 body.page { background: var(--ground); }
 .wrap { max-width: 920px; margin: 0 auto; padding: 28px 24px; }
 h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
 .sub { color: var(--muted); margin: 0 0 20px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .card h2 { margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .card h2 svg { color: var(--accent); }
