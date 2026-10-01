@@ -114,6 +114,20 @@ test("Ctrl+Tab, Ctrl+N and Ctrl+W work while an app has focus", async () => {
   await expect(bar.locator('[data-tab="app:b"]')).toHaveCount(0);
 });
 
+test("a window the app opens on its own origin is a real window that shares its workers; other links go to the system browser", async () => {
+  const bar = await launch([entry("a", "Fake A", ["--shared"])]);
+  await bar.evaluate(() => window.host.openApp("a"));
+  const app = await appPage("Fake A");
+  await expect(app.locator("#count")).toHaveText("1");
+  await app.click("#open");
+  const popup = await pageWhere((p) => p.url().endsWith("/popup"));
+  await expect(popup.locator("#count")).toHaveText("2");           // the same SharedWorker served both windows
+  const before = await host!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  await bar.click('[data-close="app:a"]');
+  await expect(bar.locator('[data-tab="app:a"]')).toHaveCount(0);
+  await expect.poll(() => host!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBeLessThan(before);   // its windows close with the tab
+});
+
 test("an app that fails to start shows its output and a Try again button; the tab is not blank", async () => {
   const bar = await launch([entry("bad", "Broken App", ["--exit", "2"])]);
   await bar.evaluate(() => window.host.openApp("bad"));

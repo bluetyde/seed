@@ -1,8 +1,8 @@
 {
-  "name": "experiment-studio",
+  "name": "seed",
   "version": "0.0.0",
   "private": true,
-  "description": "Experiment & Analysis Studio: desktop host that opens the suite apps as tabs",
+  "description": "SEED, System for Engineering and Experimental Design: desktop host that opens the suite apps as tabs",
   "main": "dist/main/main.js",
   "type": "commonjs",
   "scripts": {

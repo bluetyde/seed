@@ -7,8 +7,8 @@
 
   function welcome(s: HostState): HTMLElement[] {
     const out: HTMLElement[] = [
-      el("h1", {}, "Experiment Studio"),
-      el("p", { class: "sub" }, "Open an app in a tab. Each app keeps its own saved settings, and the host starts and stops its server for you."),
+      el("h1", {}, "SEED"),
+      el("p", { class: "sub" }, "System for Engineering and Experimental Design. Open an app in a tab. Each app keeps its own saved settings, and the host starts and stops its server for you."),
     ];
     const cards = el("div", { class: "cards" });
     for (const a of s.apps) {

@@ -38,6 +38,7 @@ let registryProblems: string[] = [];
 const tabs = new TabModel();
 const runtime = new Map<string, TabRuntime>();
 const processes = new ProcessManager();
+const childWindows = new Map<string, Set<BrowserWindow>>();
 
 // ---- state shown in the bar and the welcome page ----
 
@@ -96,10 +97,7 @@ function createAppView(entry: AppEntry, url: string): WebContentsView {
   view.setBackgroundColor(BG);
   const origin = new URL(url).origin;
   const wc = view.webContents;
-  wc.setWindowOpenHandler(({ url: target }) => { openExternalSafe(target); return { action: "deny" }; });
-  wc.on("will-navigate", (e, target) => {
-    if (new URL(target).origin !== origin) { e.preventDefault(); openExternalSafe(target); }
-  });
+  guardContents(wc, origin, entry.id);
   wc.on("did-fail-load", (_e, code, desc, failedUrl, isMain) => {
     if (!isMain || code === -3) return;       // -3: the load was replaced by another one
     setError(`app:${entry.id}`, `${entry.name} could not be loaded from ${failedUrl}: ${desc} (${code}).`, processes.output(entry.id));
@@ -108,16 +106,46 @@ function createAppView(entry: AppEntry, url: string): WebContentsView {
   return view;
 }
 
+/**
+ * Navigation rules for an app's pages. A window the app opens on its own origin (Virtual Reactor's operator window) is a real window
+ * that shares the app's storage and workers; anything else opens in the system browser. Those windows close with the app's tab.
+ */
+function guardContents(wc: WebContents, origin: string, appId: string): void {
+  wc.setWindowOpenHandler(({ url: target }) => {
+    let sameOrigin = false;
+    try { sameOrigin = new URL(target).origin === origin; } catch { /* not a URL: treated as foreign */ }
+    if (!sameOrigin) { openExternalSafe(target); return { action: "deny" }; }
+    return { action: "allow", overrideBrowserWindowOptions: { width: 1200, height: 800, backgroundColor: BG, autoHideMenuBar: true } };
+  });
+  wc.on("did-create-window", (child) => {
+    child.setMenu(null);
+    guardContents(child.webContents, origin, appId);
+    const set = childWindows.get(appId) ?? new Set<BrowserWindow>();
+    set.add(child);
+    childWindows.set(appId, set);
+    child.once("closed", () => set.delete(child));
+  });
+  wc.on("will-navigate", (e, target) => {
+    if (new URL(target).origin !== origin) { e.preventDefault(); openExternalSafe(target); }
+  });
+}
+
+function closeChildWindows(appId: string): void {
+  for (const w of [...(childWindows.get(appId) ?? [])]) if (!w.isDestroyed()) w.destroy();
+  childWindows.delete(appId);
+}
+
 function setError(id: string, message: string, output: string): void {
   const rt = runtime.get(id) ?? { status: "error" as TabStatus };
   rt.status = "error";
   rt.error = { message, output };
-  if (rt.view) destroyView(rt);
+  if (rt.view) destroyView(rt, id.replace(/^app:/, ""));
   runtime.set(id, rt);
   refresh();
 }
 
-function destroyView(rt: TabRuntime): void {
+function destroyView(rt: TabRuntime, appId?: string): void {
+  if (appId) closeChildWindows(appId);
   const v = rt.view;
   rt.view = undefined;
   if (!v) return;
@@ -172,6 +200,7 @@ async function closeTab(id: string): Promise<boolean> {
     if (!closed) return false;
     rt.view = undefined;
   }
+  if (tab.appId) closeChildWindows(tab.appId);
   if (rt?.view) destroyView(rt);
   runtime.delete(id);
   tabs.close(id);
@@ -223,13 +252,13 @@ function menuAction(a: MenuAction): void {
       break;
     }
     case "reloadRegistry": reloadRegistry(); break;
-    case "about": void dialog.showMessageBox(win, { type: "info", title: "Experiment Studio", message: "Experiment Studio", detail: `Opens the suite apps as tabs.\nElectron ${process.versions.electron}\nApp list: ${registrySource}` }); break;
+    case "about": void dialog.showMessageBox(win, { type: "info", title: "SEED", message: "SEED", detail: `Opens the suite apps as tabs.\nElectron ${process.versions.electron}\nApp list: ${registrySource}` }); break;
   }
 }
 
 async function retry(tabId: string): Promise<void> {
   const rt = runtime.get(tabId);
-  if (rt?.view) destroyView(rt);
+  if (rt?.view) destroyView(rt, tabId.replace(/^app:/, ""));
   runtime.delete(tabId);
   const appId = tabs.tabs.find((t) => t.id === tabId)?.appId;
   if (appId) { await processes.stop(appId); await openApp(appId); }
@@ -254,7 +283,7 @@ function watchShortcuts(wc: WebContents): void {
 
 function createWindow(): void {
   win = new BrowserWindow({
-    width: 1500, height: 950, minWidth: 800, minHeight: 500, show: false, backgroundColor: BG, title: "Experiment Studio",
+    width: 1500, height: 950, minWidth: 800, minHeight: 500, show: false, backgroundColor: BG, title: "SEED",
     titleBarStyle: "hidden",
     titleBarOverlay: { color: "#1b1e22", symbolColor: "#d8dde3", height: MENU_H },
   });

@@ -11,11 +11,15 @@ if (opt("exit") !== undefined) {
   console.error("Traceback: ModuleNotFoundError: foo");
   process.exit(Number(opt("exit")));
 }
+const worker = "let n = 0; onconnect = (e) => { n += 1; e.ports[0].postMessage(n); };";
+const shared = '<p id="count">-</p><button id="open" onclick="window.open(\'/popup\')">open window</button><a id="ext" href="https://example.com/" target="_blank">external</a>' +
+  '<script>const w = new SharedWorker("/sw.js"); w.port.onmessage = (e) => { document.getElementById("count").textContent = String(e.data); };</script>';
 const page = `<!doctype html><title>${title}</title><body style="background:#223;color:#eee;font:16px sans-serif"><h1 id="t">${title}</h1><input id="x">` +
-  (args.includes("--beforeunload") ? `<script>window.addEventListener("beforeunload",(e)=>{e.preventDefault();e.returnValue="";});document.getElementById("x").addEventListener("input",()=>{});</script>` : "") + `</body>`;
+  (args.includes("--shared") ? shared : "") + (args.includes("--beforeunload") ? `<script>window.addEventListener("beforeunload",(e)=>{e.preventDefault();e.returnValue="";});document.getElementById("x").addEventListener("input",()=>{});</script>` : "") + `</body>`;
 setTimeout(() => {
   http.createServer((req, res) => {
     if (req.url.startsWith("/health")) { res.writeHead(200); return res.end("ok"); }
+    if (req.url === "/sw.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end(worker); }
     res.writeHead(200, { "content-type": "text/html" });
     res.end(page);
   }).listen(port, "127.0.0.1", () => console.log("fake app listening on " + port));

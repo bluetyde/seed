@@ -1,6 +1,6 @@
-# Experiment Studio shell (skeleton)
+# SEED shell (skeleton)
 
-A desktop host (Electron) that opens the suite apps as tabs. While an app is open the host shows only a thin top bar: a menu row (File, View, Window, Help) and a tab row (one tab per open app, a + button that opens the Welcome page). The apps themselves are unchanged web apps.
+SEED (System for Engineering and Experimental Design) is a desktop host (Electron) that opens the suite apps as tabs. While an app is open the host shows only a thin top bar: a menu row (File, View, Window, Help) and a tab row (one tab per open app, a + button that opens the Welcome page). The apps themselves are unchanged web apps.
 
 Status: skeleton for milestone E1 (launcher). There are no adapters, project files, runs, comparisons or reports yet, and no menu entries pretend to offer them.
 

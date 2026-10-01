@@ -1,4 +1,4 @@
-# Experiment & Analysis Studio (SEED, System for Engineering and Experimental Design)
+# SEED: System for Engineering and Experimental Design
 
 Planning skeleton created 2026-09-30. As of 2026-10-01 there is a runnable **host shell** (Electron) that opens the suite apps as tabs: see [docs/shell.md](docs/shell.md). Projects, adapters, runs and reports are not implemented.
 

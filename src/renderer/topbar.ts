@@ -29,7 +29,7 @@
       { label: "Edit the app list…", action: "editRegistry" },
       { label: "Reload the app list", action: "reloadRegistry" },
       { sep: true, label: "" },
-      { label: "About Experiment Studio", action: "about" },
+      { label: "About SEED", action: "about" },
     ],
   };
 
@@ -40,7 +40,7 @@
   }
 
   function menuRow(): HTMLElement {
-    const row = el("div", { class: "menurow", role: "menubar", "aria-label": "Menu" }, el("div", { class: "brandmark" }, svgNode("flask", 16), "Experiment Studio"));
+    const row = el("div", { class: "menurow", role: "menubar", "aria-label": "Menu" }, el("div", { class: "brandmark" }, svgNode("flask", 16), "SEED"));
     for (const name of Object.keys(MENUS)) {
       row.append(el("button", {
         class: "mbtn", type: "button", role: "menuitem", "aria-haspopup": "true", "aria-expanded": String(openMenu === name), "data-menu": name,
