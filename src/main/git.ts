@@ -57,7 +57,13 @@ export function sameRepo(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
-const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+const samePath = (a: string, b: string) => {
+  const canonical = (p: string) => {
+    const real = fs.realpathSync(p);
+    return process.platform === "win32" ? real.toLowerCase() : real;
+  };
+  return canonical(a) === canonical(b);
+};
 
 export class Git {
   constructor(private readonly run: Run = runGit) {}

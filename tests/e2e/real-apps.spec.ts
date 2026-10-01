@@ -11,11 +11,9 @@ test.skip(!process.env.REAL_APPS, "set REAL_APPS=1 to run against the real apps"
 
 test("NODAL Studio and Virtual Reactor open as tabs under the bar", async () => {
   const dir = mkdtempSync(join(tmpdir(), "exp-studio-real-"));
-  // Where the apps are installed: a SEED install folder (REAL_INSTALL_ROOT, e.g. one made by the installer), else the shared checkouts.
-  const base = process.env.REAL_INSTALL_ROOT;
-  const paths = base
-    ? { "nodal-studio": join(base, "nodal-studio"), "virtual-reactor": join(base, "raft") }
-    : { "nodal-studio": "C:\Users\jwncr\Claude Code Test\pipe-studio", "virtual-reactor": "C:\Users\jwncr\Claude Code Test\virtual-reactor" };
+  // Override the sibling checkout layout with REAL_INSTALL_ROOT.
+  const base = process.env.REAL_INSTALL_ROOT ?? resolve(root, "..");
+  const paths = { "nodal-studio": join(base, "nodal-studio"), "virtual-reactor": join(base, "raft") };
   writeFileSync(join(dir, "installs.json"), JSON.stringify({ installRoot: base ?? dir, paths }));
   const host = await electron.launch({ args: [root], env: { ...process.env, EXPERIMENT_STUDIO_USER_DATA: dir } });
   try {

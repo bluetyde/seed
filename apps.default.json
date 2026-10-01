@@ -9,8 +9,18 @@
       "urlPath": "/?token={token}",
       "startTimeoutMs": 120000,
       "start": {
-        "command": "wsl.exe",
-        "args": ["-e", "bash", "-lc", "cd \"$(wslpath -a '{install}')\" && export OPENMC_STUDIO_TOKEN='{token}' && exec bash studio/start.sh --no-browser --exit-with-launcher --port {port}"]
+        "command": "/bin/bash",
+        "args": [
+          "studio/start.sh",
+          "--no-browser",
+          "--exit-with-launcher",
+          "--port",
+          "{port}"
+        ],
+        "cwd": "{install}",
+        "env": {
+          "OPENMC_STUDIO_TOKEN": "{token}"
+        }
       }
     },
     {
@@ -22,9 +32,16 @@
       "urlPath": "/",
       "start": {
         "command": "node",
-        "args": ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--strictPort"],
-        "cwd": "{install}\\web",
-        "env": { "NODAL_PORT": "{port}" }
+        "args": [
+          "node_modules/vite/bin/vite.js",
+          "--host",
+          "127.0.0.1",
+          "--strictPort"
+        ],
+        "cwd": "{install}/web",
+        "env": {
+          "NODAL_PORT": "{port}"
+        }
       }
     },
     {
@@ -36,8 +53,15 @@
       "urlPath": "/",
       "start": {
         "command": "node",
-        "args": ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "{port}", "--strictPort"],
-        "cwd": "{install}\\web"
+        "args": [
+          "node_modules/vite/bin/vite.js",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "{port}",
+          "--strictPort"
+        ],
+        "cwd": "{install}/web"
       }
     }
   ]

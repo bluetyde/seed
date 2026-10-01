@@ -7,12 +7,43 @@
       "branch": "main",
       "folder": "openmc-studio",
       "private": false,
-      "notes": "Runs from source inside WSL. SEED downloads and updates the code; it does not create the conda environment or the nuclear data.",
-      "candidates": ["C:\\OpenMC", "D:\\OpenMC"],
+      "notes": "Runs natively on macOS/Linux and through WSL on Windows. Requires the openmc-mcnp conda environment and nuclear data; SEED does not install those dependencies.",
+      "candidates": [],
       "prerequisites": [
-        { "id": "git", "label": "Git", "command": "git", "args": ["--version"], "fix": "Install Git for Windows from git-scm.com.", "when": "install" },
-        { "id": "wsl", "label": "WSL with a Linux distribution", "command": "wsl.exe", "args": ["-e", "true"], "fix": "Install WSL: open a terminal as administrator and run `wsl --install`.", "when": "run" },
-        { "id": "conda-env", "label": "The openmc-mcnp conda environment in WSL", "command": "wsl.exe", "args": ["-e", "bash", "-lc", "source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null; conda env list | grep -q openmc-mcnp"], "fix": "Create the environment as described in the OpenMC Studio README (setup folder).", "when": "run" }
+        {
+          "id": "git",
+          "label": "Git",
+          "command": "git",
+          "args": [
+            "--version"
+          ],
+          "fix": "Install Git for your operating system and make it available on PATH.",
+          "when": "install"
+        },
+        {
+          "id": "wsl",
+          "label": "WSL with a Linux distribution",
+          "command": "wsl.exe",
+          "args": [
+            "-e",
+            "true"
+          ],
+          "fix": "Install WSL: open a terminal as administrator and run `wsl --install`.",
+          "when": "run"
+        },
+        {
+          "id": "conda-env",
+          "label": "The openmc-mcnp conda environment in WSL",
+          "command": "wsl.exe",
+          "args": [
+            "-e",
+            "bash",
+            "-lc",
+            "source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null; conda env list | grep -q openmc-mcnp"
+          ],
+          "fix": "Create the environment as described in the OpenMC Studio README (setup folder).",
+          "when": "run"
+        }
       ],
       "steps": []
     },
@@ -24,13 +55,43 @@
       "folder": "nodal-studio",
       "private": true,
       "notes": "Private repository: sign in to GitHub once on this computer (Git Credential Manager or gh auth login).",
-      "candidates": ["C:\\Users\\jwncr\\Claude Code Test\\pipe-studio"],
+      "candidates": [],
       "prerequisites": [
-        { "id": "git", "label": "Git", "command": "git", "args": ["--version"], "fix": "Install Git for Windows from git-scm.com.", "when": "install" },
-        { "id": "node", "label": "Node.js 24 or newer", "command": "node", "args": ["-e", "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)"], "fix": "Install Node.js 24 or newer from nodejs.org.", "when": "install" }
+        {
+          "id": "git",
+          "label": "Git",
+          "command": "git",
+          "args": [
+            "--version"
+          ],
+          "fix": "Install Git for your operating system and make it available on PATH.",
+          "when": "install"
+        },
+        {
+          "id": "node",
+          "label": "Node.js 24 or newer",
+          "command": "node",
+          "args": [
+            "-e",
+            "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)"
+          ],
+          "fix": "Install Node.js 24 or newer from nodejs.org.",
+          "when": "install"
+        }
       ],
       "steps": [
-        { "label": "Install web dependencies", "cwd": "web", "command": "npm", "args": ["ci", "--ignore-scripts"], "watch": ["web/package-lock.json"] }
+        {
+          "label": "Install web dependencies",
+          "cwd": "web",
+          "command": "npm",
+          "args": [
+            "ci",
+            "--ignore-scripts"
+          ],
+          "watch": [
+            "web/package-lock.json"
+          ]
+        }
       ]
     },
     {
@@ -41,13 +102,43 @@
       "folder": "raft",
       "private": true,
       "notes": "Private repository: sign in to GitHub once on this computer (Git Credential Manager or gh auth login).",
-      "candidates": ["C:\\Users\\jwncr\\Claude Code Test\\virtual-reactor"],
+      "candidates": [],
       "prerequisites": [
-        { "id": "git", "label": "Git", "command": "git", "args": ["--version"], "fix": "Install Git for Windows from git-scm.com.", "when": "install" },
-        { "id": "node", "label": "Node.js 24 or newer", "command": "node", "args": ["-e", "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)"], "fix": "Install Node.js 24 or newer from nodejs.org.", "when": "install" }
+        {
+          "id": "git",
+          "label": "Git",
+          "command": "git",
+          "args": [
+            "--version"
+          ],
+          "fix": "Install Git for your operating system and make it available on PATH.",
+          "when": "install"
+        },
+        {
+          "id": "node",
+          "label": "Node.js 24 or newer",
+          "command": "node",
+          "args": [
+            "-e",
+            "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)"
+          ],
+          "fix": "Install Node.js 24 or newer from nodejs.org.",
+          "when": "install"
+        }
       ],
       "steps": [
-        { "label": "Install web dependencies", "cwd": "web", "command": "npm", "args": ["ci", "--ignore-scripts"], "watch": ["web/package-lock.json"] }
+        {
+          "label": "Install web dependencies",
+          "cwd": "web",
+          "command": "npm",
+          "args": [
+            "ci",
+            "--ignore-scripts"
+          ],
+          "watch": [
+            "web/package-lock.json"
+          ]
+        }
       ]
     }
   ]

@@ -7,8 +7,8 @@ const ok = { id: "demo", name: "Demo", healthPath: "/health", urlPath: "/", star
 const reg = (...apps: unknown[]) => parseRegistry(JSON.stringify({ apps }));
 
 describe("registry", () => {
-  it("accepts the shipped defaults with no problems", () => {
-    const r = parseRegistry(readFileSync(join(__dirname, "..", "apps.default.json"), "utf-8"));
+  it.each(["apps.default.json", "apps.windows.json"])("accepts %s with no problems", (file) => {
+    const r = parseRegistry(readFileSync(join(__dirname, "..", file), "utf-8"));
     expect(r.problems).toEqual([]);
     expect(r.apps.map((a) => a.id)).toEqual(["openmc-studio", "nodal-studio", "virtual-reactor"]);
   });
