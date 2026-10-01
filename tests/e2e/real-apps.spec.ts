@@ -22,9 +22,18 @@ test("NODAL Studio and Virtual Reactor open as tabs under the bar", async () => 
     await expect(bar!.locator('[data-tab="app:virtual-reactor"] .dot')).toHaveClass(/running/, { timeout: 90_000 });
     await new Promise((r) => setTimeout(r, 2500));
     const shot = async (name: string) => {
-      await captureWindow(host, join(process.env.SHELL_SHOTS, name));
+      if (process.env.SHELL_SHOTS) await captureWindow(host, join(process.env.SHELL_SHOTS, name));
     };
     await shot("real-virtual-reactor.png");
+    // Virtual Reactor's operator window must open as a window of the same app (it shares a SharedWorker with the main window)
+    const vr = host.windows().find((p) => p.url().includes("role=") === false && p.url().startsWith("http://127.0.0.1:") && /virtual/i.test(p.url() + ""))
+      ?? (await (async () => { for (const p of host.windows()) if (p.url().startsWith("http://127.0.0.1:") && (await p.title()) === "Virtual Reactor") return p; })())!;
+    await vr.click('[data-op="open-operator"]');
+    let op;
+    for (let i = 0; i < 100 && !op; i++) { op = host.windows().find((p) => p.url().includes("role=operator")); await new Promise((r) => setTimeout(r, 100)); }
+    expect(op, "the operator window opened inside the host").toBeTruthy();
+    await expect(op!.locator('[data-op="window"]')).toContainText("operator window");
+    await expect(vr.locator('[data-op="window"]')).toContainText("full window");
     await bar!.click('[data-tab="app:nodal-studio"]');
     await new Promise((r) => setTimeout(r, 1500));
     await shot("real-nodal.png");

@@ -1,4 +1,4 @@
-# Experiment & Analysis Studio: initial plan
+# SEED: initial plan
 
 Status: draft, 2026-09-30. The three-app scope and materials behavior follow the user request; implementation choices below remain proposals.
 
