@@ -5,3 +5,8 @@ dist/
 runs/
 *.log
 test-results/
+
+# Local machine settings and generated integration reports
+/apps.json
+/installs.json
+/seed-smoke-*/

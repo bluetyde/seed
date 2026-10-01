@@ -18,7 +18,7 @@ Materials are project data with app-specific property sets, not a library applic
 | Milestone | Deliverable | Exit evidence |
 |---|---|---|
 | E0: contracts | Inventory current formats; decide adapter transport and project manifest; create a fake adapter fixture | Open vs run distinction, revisions, material preservation and status semantics documented |
-| E1: project launcher | Discover configured apps, attach native models, open/focus editors, import completed runs | Reopen project; missing app is actionable; paths with spaces and Windows/WSL mapping work; no physics required |
+| E1: project launcher | Discover configured apps, attach native models, open/focus editors, import completed runs | Reopen project; missing app is actionable; portable install discovery and paths with spaces work on macOS, Linux and Windows (WSL for OpenMC); no physics required |
 | E2: single-app runs | One real adapter, validate/run/status/cancel/collect, immutable inputs | GUI/direct/workspace results agree; cancellation, crash and stale edit handled; standalone launch unaffected |
 | E3: experiments | Typed parameter catalog, bounded sweeps, resource budgets, results comparison and report | Failed cases remain visible; same seed/input replay; each result traces to its exact case |
 | E4: reviewed pipeline | One-way DAG of verified transfers between two apps | Unit/mesh/time/normalization checks pass; incompatible edge blocked; downstream runs invalidated after input change |

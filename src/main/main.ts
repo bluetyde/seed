@@ -22,7 +22,7 @@ const DIST = path.join(__dirname, "..");
 // Tests point these at a scratch folder and a fake-app registry.
 if (process.env.EXPERIMENT_STUDIO_USER_DATA) app.setPath("userData", process.env.EXPERIMENT_STUDIO_USER_DATA);
 const userRegistry = () => path.join(app.getPath("userData"), "apps.json");
-const defaultRegistry = () => process.env.EXPERIMENT_STUDIO_APPS ?? path.join(DIST, "..", "apps.default.json");
+const defaultRegistry = () => process.env.EXPERIMENT_STUDIO_APPS ?? path.join(DIST, "..", process.platform === "win32" ? "apps.windows.json" : "apps.default.json");
 
 nativeTheme.themeSource = "dark";
 
@@ -301,6 +301,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1500, height: 950, minWidth: 800, minHeight: 500, show: false, backgroundColor: BG, title: "SEED",
     titleBarStyle: "hidden",
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 12, y: 9 } } : {}),
     titleBarOverlay: { color: "#1b1e22", symbolColor: "#d8dde3", height: MENU_H },
   });
   Menu.setApplicationMenu(null);
@@ -313,6 +314,9 @@ function createWindow(): void {
   win.contentView.addChildView(barView);
   void pageView.webContents.loadFile(path.join(DIST, "renderer", "welcome.html"));
   void barView.webContents.loadFile(path.join(DIST, "renderer", "index.html"));
+  if (process.platform === "darwin") barView.webContents.on("did-finish-load", () => {
+    void barView.webContents.insertCSS(".menurow { padding-left: 84px; padding-right: 8px; }");
+  });
   for (const v of [pageView, barView]) {
     watchShortcuts(v.webContents);
     v.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -350,6 +354,12 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   const catalogFile = process.env.SEED_CATALOG ?? path.join(DIST, "..", "catalog.json");
   const catalog = loadCatalog(catalogFile, !!process.env.SEED_CATALOG);
+  if (!process.env.SEED_CATALOG) {
+    for (const repo of catalog.repos) {
+      repo.candidates = [path.join(os.homedir(), repo.folder), path.resolve(DIST, "..", "..", repo.folder)];
+      if (process.platform !== "win32") repo.prerequisites = repo.prerequisites.filter((p) => p.id !== "wsl" && p.id !== "conda-env");
+    }
+  }
   store = new InstallStore(path.join(app.getPath("userData"), "installs.json"), process.env.SEED_INSTALL_ROOT ?? path.join(os.homedir(), "SEED", "apps"));
   installer = new Installer({
     repos: catalog.repos, store, git: new Git(), runCmd: defaultRunCmd, checkCmd: defaultCheckCmd,

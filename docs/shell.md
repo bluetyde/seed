@@ -31,7 +31,7 @@ The Welcome page (File > Install and update apps) shows each app in `catalog.jso
 - **Check for updates**: asks GitHub (fetch only). **Update**: fast-forwards the branch. It refuses, with the reason on the card, if the app is open, the copy has uncommitted changes or commits GitHub does not have, or it is on another branch. It never resets, forces or switches branches. Install steps rerun only if a watched file (the lockfile) changed.
 - **Forget this copy** only removes SEED's record of the folder.
 - Private repositories need your own GitHub sign-in on this computer (Git Credential Manager or `gh auth login`). SEED runs the git on your PATH with prompts disabled and stores no credentials.
-- OpenMC Studio runs from source inside WSL: SEED downloads and updates the code and warns when WSL or the `openmc-mcnp` conda environment is missing; it does not create them.
+- OpenMC Studio runs natively on macOS/Linux and through WSL on Windows. Its launcher checks the conda environment; SEED does not create the environment or install nuclear data.
 
 Installed paths are saved in `installs.json` in the user data folder, and the app list refers to them as `{install}`.
 
@@ -39,12 +39,21 @@ Installed paths are saved in `installs.json` in the user data folder, and the ap
 
 Help > Edit the app list copies `apps.default.json` to the user data folder as `apps.json`; edit it, then Help > Reload the app list. A bad entry is named in a banner and skipped; the defaults are not silently used instead of a broken file.
 
-Fields: `catalog` (optional: the `catalog.json` id that installs it; `{install}` then stands for its folder), `id` (lowercase, digits, dashes), `name`, `icon` (`atom`, `pipe`, `reactor`, `app`), `healthPath`, `urlPath` (`{token}` is replaced), `start` (`command`, `args`, `cwd`, `env`; `{port}` and `{token}` are replaced), optional `attachUrl` (http on this computer only), optional `startTimeoutMs`. The default paths assume this computer's layout (NODAL and Virtual Reactor from the shared workspace; OpenMC Studio from `C:\OpenMC` started inside WSL).
+Fields: `catalog` (optional: the `catalog.json` id that installs it; `{install}` then stands for its folder), `id` (lowercase, digits, dashes), `name`, `icon` (`atom`, `pipe`, `reactor`, `app`), `healthPath`, `urlPath` (`{token}` is replaced), `start` (`command`, `args`, `cwd`, `env`; `{port}` and `{token}` are replaced), optional `attachUrl` (http on this computer only), optional `startTimeoutMs`. Install paths come from local settings or a folder you adopt; shipped files contain no personal checkout paths.
 
 ## Known gaps
 
-- Windows only so far. macOS and the Mac SSD layout need their own start commands.
+- macOS/Linux use `apps.default.json`; Windows uses `apps.windows.json`. Run `npm start` on any platform, `Start SEED.command` on macOS (or via bash on Linux), or `Start SEED.cmd` on Windows. Node 24+ must be on PATH; the shell launcher also accepts `SEED_NODE_BIN` for a custom Node bin directory. The Welcome page offers home-directory and sibling clones.
 - The "Close anyway / Stay" box is not covered by an automated test: Playwright's debugger answers the page's prompt before Electron raises `will-prevent-unload`. Checked by hand by the user on 2026-10-01: the native box appears and works.
 - If the host process itself is killed, servers it started can be left running (they are not children of a job object).
 - No packaging/installer, no auto-update, no signing.
 - Not started: project manifest, adapters, runs, sweeps, reports (see PLAN.md E0, E2 and later).
+
+## Real-app opening check
+
+After adopting the three installed apps, run `npm run build` followed by
+`node scripts/smoke-apps.cjs` with Node 24+ on PATH. This opens the real apps
+in SEED, checks their rendered canvases, switches tabs, and verifies each owned
+server stops when its tab closes. It saves screenshots and a JSON report in a
+printed temporary folder. It uses the current SEED profile; close SEED first.
+This checks app integration, not simulation accuracy or optional AI services.
