@@ -60,6 +60,7 @@ test.afterEach(async () => { await host?.close().catch(() => undefined); host = 
 
 test("starts with only the Welcome tab and lists the registered apps", async () => {
   const bar = await launch([entry("a", "Fake A"), entry("b", "Fake B")]);
+  await expect.poll(() => host!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(true);
   await expect(bar.locator(".tab")).toHaveCount(1);
   await expect(bar.locator(".tab")).toContainText("Welcome");
   const welcome = await pageWhere((p) => p.url().endsWith("/renderer/welcome.html"));

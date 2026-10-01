@@ -10,6 +10,7 @@ console.log('Screenshots and results:',output);
  try {
   let bar; await expect.poll(()=>{bar=host.windows().find(p=>p.url().endsWith('/renderer/index.html'));return !!bar}).toBe(true);
   await bar.waitForSelector('.tabrow');
+  await expect.poll(()=>host.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible())).toBe(true);
   const results=[];
   for(const [id,title] of [['openmc-studio','OpenMC Studio'],['nodal-studio','NODAL Studio'],['virtual-reactor','Virtual Reactor']]){
    await bar.evaluate(id=>window.host.openApp(id),id);
