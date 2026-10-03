@@ -28,6 +28,8 @@ export type LockOptions = {
   isAlive?: (pid: number) => boolean;
   host?: string;
   now?: () => Date;
+  /** Test hook: runs after a lock was judged stale and before it is renamed away (to force the takeover race). */
+  beforeTakeover?: () => void;
 };
 
 export const MANIFEST_FILE = "seed.project.json";
@@ -303,6 +305,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
     // Lock directory already exists. Check if stale.
     let isStale = false;
     let ownerReadOk = false;
+    let judgedToken: string | undefined;
     let ownerData: { pid?: number; host?: string; acquiredAt?: string; [key: string]: unknown } | null = null;
 
     try {
@@ -317,6 +320,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
       ) {
         ownerData = parsed;
         ownerReadOk = true;
+        judgedToken = typeof parsed.token === "string" ? parsed.token : undefined;
       }
     } catch {
       ownerReadOk = false;
@@ -360,6 +364,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
     if (isStale) {
       const staleDir = join(seedDir, `lock.stale-${randomBytes(8).toString("hex")}`);
       let renamed = false;
+      opts?.beforeTakeover?.();
       try {
         renameSync(lockDir, staleDir);
         renamed = true;
@@ -368,6 +373,26 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
         if (nodeErr && nodeErr.code === "ENOENT") {
           continue;
         } else {
+          renamed = false;
+        }
+      }
+
+      if (renamed) {
+        // Another process may have replaced the stale lock between our judgement and the rename: then we moved
+        // a live lock. Compare the token we judged with the one in the directory we now hold; put a live lock back.
+        let movedToken: string | undefined;
+        try {
+          const moved = JSON.parse(readFileSync(join(staleDir, "owner.json"), "utf8")) as { token?: unknown };
+          movedToken = typeof moved.token === "string" ? moved.token : undefined;
+        } catch {
+          movedToken = undefined; // no readable owner: nothing live to protect beyond what we judged
+        }
+        if (movedToken !== undefined && movedToken !== judgedToken) {
+          try {
+            renameSync(staleDir, lockDir);
+          } catch (err: unknown) {
+            return { ok: false, errors: [toInternalError(err)] };
+          }
           renamed = false;
         }
       }
