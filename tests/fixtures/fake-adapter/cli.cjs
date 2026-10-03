@@ -138,8 +138,7 @@ process.stdin.on("end", async () => {
       warnings: doc.warnings || [],
       ...(doc.result !== undefined ? { result: doc.result } : {}),
     };
-    process.stdout.write(JSON.stringify(fullReply) + "\n");
-    process.exit(0);
+    process.stdout.write(JSON.stringify(fullReply) + "\n", () => process.exit(0));
   }
 
   const fakeExt = request && request.extensions && request.extensions.fake;
@@ -160,8 +159,8 @@ process.stdin.on("end", async () => {
       return;
     }
     if (fakeMode === "garbage") {
-      process.stdout.write("not json\n");
-      process.exit(0);
+      process.stdout.write("not json\n", () => process.exit(0));
+      return;
     }
     if (fakeMode === "huge-reply") {
       const padding = "x".repeat(2.5 * 1024 * 1024);
@@ -182,8 +181,8 @@ process.stdin.on("end", async () => {
           padding,
         },
       };
-      process.stdout.write(JSON.stringify(reply) + "\n");
-      process.exit(0);
+      process.stdout.write(JSON.stringify(reply) + "\n", () => process.exit(0));
+      return;
     }
     if (fakeMode === "schema-invalid") {
       const reply = {
@@ -193,8 +192,8 @@ process.stdin.on("end", async () => {
         errors: [],
         warnings: [],
       };
-      process.stdout.write(JSON.stringify(reply) + "\n");
-      process.exit(0);
+      process.stdout.write(JSON.stringify(reply) + "\n", () => process.exit(0));
+      return;
     }
     if (fakeMode === "wrong-request-id") {
       const reply = {
@@ -206,8 +205,8 @@ process.stdin.on("end", async () => {
         warnings: [],
         result: { editor: "opened" },
       };
-      process.stdout.write(JSON.stringify(reply) + "\n");
-      process.exit(0);
+      process.stdout.write(JSON.stringify(reply) + "\n", () => process.exit(0));
+      return;
     }
     if (fakeMode === "wrong-verb") {
       const wrongVerb = verb === "describe" ? "open" : "describe";
@@ -220,8 +219,8 @@ process.stdin.on("end", async () => {
         warnings: [],
         result: { editor: "opened" },
       };
-      process.stdout.write(JSON.stringify(reply) + "\n");
-      process.exit(0);
+      process.stdout.write(JSON.stringify(reply) + "\n", () => process.exit(0));
+      return;
     }
     if (fakeMode === "injection-error") {
       const reply = {
@@ -239,8 +238,8 @@ process.stdin.on("end", async () => {
         ],
         warnings: [],
       };
-      process.stdout.write(JSON.stringify(reply) + "\n");
-      process.exit(0);
+      process.stdout.write(JSON.stringify(reply) + "\n", () => process.exit(0));
+      return;
     }
   }
 
