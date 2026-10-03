@@ -162,3 +162,7 @@ experiment-studio/                (repo bluetyde/seed)
 - E1 (project, headless core) and the E0 harness tests can proceed in parallel once the schemas settle.
 - E2 depends on the E0 inventory confirming a usable headless entry point in Virtual Reactor (decision D5). PRA follows when its own P2 gate passes; if RAFT has no usable entry point, fall back to PRA or NODAL and record a new decision.
 - E4 depends on Fuel Performance Studio F3 and an OpenMC result adapter, which are owned by those apps' plans.
+
+## Managed runtime boundary (planned)
+
+The core also owns a runtime registry, artifact transactions and launch/job ownership; apps supply recipes and native oracles. Editor servers and calculation jobs have separate identities and lifetimes. GUI, CLI and MCP clients share this core. Native solver/export logic stays in each app. See [plan 11](plans/11-runtime-and-shared-acceptance.md).

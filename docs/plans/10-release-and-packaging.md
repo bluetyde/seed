@@ -11,7 +11,7 @@ How SEED becomes something a student or another developer can install. Not befor
 | Signed installers with auto-update | Best experience | Cost, certificates, release engineering |
 | Bundled with the turnkey OpenMC Studio package | One download for the neutronics side | Size (the Windows package is about 20 GiB); coupling of release cycles |
 
-SEED itself is small. Engines and nuclear data are the weight, and stay owned by the apps' packaging (see the turnkey Windows package for OpenMC Studio).
+SEED itself is small. Apps publish versioned runtime recipes, compatibility metadata and native checks; SEED owns installation, activation, cache, upgrade and lifecycle. Engine/data artifacts may ship separately and be reused offline. See [plan 11](11-runtime-and-shared-acceptance.md); the turnkey OpenMC package is a candidate artifact, not a second mandatory installer.
 
 ## Licensing and provenance
 
@@ -42,3 +42,7 @@ Describe the verbs, the schemas, the oracle entry format, the fake adapter as a 
 - Code signing and notarization cost and ownership.
 - Update channel for SEED itself (the installer today updates the apps, not SEED).
 - Telemetry: none by default; any addition needs an explicit decision.
+
+## Incremental acceptance
+
+Managed runtime development and fake-artifact testing can begin before E2; the release gate remains separate. Test the supported platform/app matrix rather than requiring unsupported combinations. Include plan 11 R1-R10, final-version owned-process cleanup, offline run/save/reopen, corrupted/interrupted installation and rollback in the shipped subset's acceptance evidence.

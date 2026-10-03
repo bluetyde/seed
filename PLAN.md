@@ -132,3 +132,7 @@ Still open:
 - Policy file format and who may sign it; per-agent tokens and budgets.
 - One log convention for dev agents and engineering agents, without mixing them.
 - License of bundled engines and of any redistributed packages; distribution model.
+
+## Runtime ownership and shared acceptance (2026-10-03)
+
+See [plan 11](docs/plans/11-runtime-and-shared-acceptance.md). SEED owns managed runtime installation and launch/cleanup/offline availability. Apps own native save/open, solver and export correctness; slow MCNP export remains OpenMC work. Shared acceptance proves an offline SEED-to-OpenMC run, save, clean close and reopen. Existing packaging recipes are reused; no second full OpenMC installer/updater or competing watchdog is planned. This is planned scope, not current implementation.

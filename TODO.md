@@ -164,3 +164,24 @@ Still waiting (the user's):
 - [x] 2026-10-01: Installer/updater (first version, docs/shell.md): clone, adopt, check, fast-forward update, dependency steps, prerequisite checks, per-app card with output and cancel.
 - [x] 2026-10-01: Platform-aware default launch commands for macOS/Linux and Windows; home/sibling install discovery without machine-specific paths. macOS: all three apps opened, rendered, switched and stopped in SEED; unit suite passes.
 - [x] 2026-10-01: The unsaved-work prompt ("Close anyway / Stay") checked by hand by the user.
+
+## Runtime ownership and shared acceptance (2026-10-03)
+
+See [plan 11](docs/plans/11-runtime-and-shared-acceptance.md). SEED owns managed runtime installation and launch/cleanup/offline availability. Apps own native save/open, solver and export correctness; slow MCNP export remains OpenMC work. Shared acceptance proves an offline SEED-to-OpenMC run, save, clean close and reopen. Existing packaging recipes are reused; no second full OpenMC installer/updater or competing watchdog is planned. This is planned scope, not current implementation.
+
+- [ ] W1: inventory SEED process/installer entry points and OpenMC portable candidate e4d67df; document recipe reuse and lifecycle ownership.
+- [ ] W2: specify runtime metadata, staged install/rollback, offline cache, managed/adopted resources and process identities before code.
+- [ ] W3: fake-process lifecycle tests R4/R5, including forced host termination, WSL-side cleanup and unowned-process survival; then implement fixes.
+- [ ] W4: local fake-artifact install, corruption, interruption, upgrade and rollback tests R1-R3/R6; no real engine needed.
+- [ ] W5: complete E0 contracts/fake adapter with the corrected harness semantics below; no app private-port bypass.
+- [ ] W6: integrate the reviewed OpenMC runtime recipe and run R7-R9 on the final artifact, plus material preservation R10.
+- [ ] Coordinate W7 (large-import MCNP export) in OpenMC's own repo; SEED only records relevant integration/version effects.
+- [ ] Keep implementation and verification states separate; sign off each platform/app combination actually tested.
+
+## Runtime foundation progress (2026-10-03, Codex)
+
+- [x] SEED-only entry-point inventory: docs/runtime-inventory.md. App-package inspection remains outside this claim.
+- [x] Startup cancellation generation: pending attach/port/readiness work cannot revive a closed app; concurrent reopen waits for cleanup; HTTP 2xx required for readiness.
+- [x] Regression evidence: 72 full-suite tests passed before the last added real-child test; targeted final lifecycle suite 16/16; build passed; Electron e2e 10 passed/3 existing skips. Four new race/readiness checks fail on the previous source.
+- [ ] Runtime manifest/activation transaction implementation and fake-artifact R1-R3/R6.
+- [ ] Forced host-death cleanup, WSL-side leases, process-start identity and authenticated health remain unimplemented; do not mark all W3 done.
