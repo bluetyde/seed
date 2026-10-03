@@ -1,0 +1,217 @@
+{
+  "$id": "https://seed.invalid/schema/common.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "time": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$"
+    },
+    "relPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\\\:\\u0000]+(?:/(?!\\.{1,2}(?:/|$))[^/\\\\:\\u0000]+)*$"
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "normalization": {
+      "type": "string",
+      "enum": [
+        "none",
+        "per-source-particle",
+        "per-fission",
+        "per-demand",
+        "per-hour",
+        "per-second",
+        "per-watt"
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "required": ["maxWallSeconds", "maxCores", "maxMemoryMB", "maxDiskMB"],
+      "additionalProperties": false,
+      "properties": {
+        "maxWallSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCores": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxMemoryMB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxDiskMB": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "revision": {
+      "type": "object",
+      "required": ["hash", "counter"],
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "counter": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["human", "agent", "system"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "toolVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "agent"
+          }
+        }
+      },
+      "then": {
+        "required": ["model"],
+        "properties": {
+          "model": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "terminated-by-trip"
+      ]
+    },
+    "nativeStatus": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "field", "message", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[EW]_[A-Z0-9_]{2,40}$"
+        },
+        "field": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "range": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            }
+          },
+          "anyOf": [
+            {
+              "required": ["min"],
+              "properties": {
+                "min": {
+                  "type": "number"
+                }
+              }
+            },
+            {
+              "required": ["max"],
+              "properties": {
+                "max": {
+                  "type": "number"
+                }
+              }
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["seed", "app-content"]
+        }
+      }
+    },
+    "inputRef": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relPath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

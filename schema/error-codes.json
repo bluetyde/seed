@@ -1,0 +1,90 @@
+{
+  "E_SCHEMA_INVALID": {
+    "severity": "error",
+    "meaning": "document does not satisfy its schema"
+  },
+  "E_SCHEMA_VERSION": {
+    "severity": "error",
+    "meaning": "unsupported schema family or version"
+  },
+  "E_VERB_UNKNOWN": {
+    "severity": "error",
+    "meaning": "request names a verb the adapter does not support"
+  },
+  "E_NOT_PERMITTED": {
+    "severity": "error",
+    "meaning": "the actor's tier does not allow the operation"
+  },
+  "E_BUDGET_EXCEEDED": {
+    "severity": "error",
+    "meaning": "request would exceed the study budget"
+  },
+  "E_BOUNDS_EXCEEDED": {
+    "severity": "error",
+    "meaning": "parameter outside the study's declared bounds"
+  },
+  "E_STALE_REVISION": {
+    "severity": "error",
+    "meaning": "an input or expected revision is not current"
+  },
+  "E_REQUEST_CONFLICT": {
+    "severity": "error",
+    "meaning": "same requestId with a different payload"
+  },
+  "E_PROP_MISSING": {
+    "severity": "error",
+    "meaning": "a property the operation needs is absent"
+  },
+  "E_UNITS": {
+    "severity": "error",
+    "meaning": "missing, unknown or mismatched units"
+  },
+  "E_OUT_OF_DOMAIN": {
+    "severity": "error",
+    "meaning": "value or result outside the declared domain"
+  },
+  "E_UNSUPPORTED": {
+    "severity": "error",
+    "meaning": "construct or feature not supported"
+  },
+  "E_PATH_INVALID": {
+    "severity": "error",
+    "meaning": "path is malformed for its kind"
+  },
+  "E_PATH_TRAVERSAL": {
+    "severity": "error",
+    "meaning": "path escapes its root"
+  },
+  "E_PATH_UNMAPPABLE": {
+    "severity": "error",
+    "meaning": "path has no equivalent in the target kind"
+  },
+  "E_OUTPUT_INCOMPLETE": {
+    "severity": "error",
+    "meaning": "declared outputs missing, partial or not finite"
+  },
+  "E_APP_FAILED": {
+    "severity": "error",
+    "meaning": "the app or engine failed"
+  },
+  "E_TIMEOUT": {
+    "severity": "error",
+    "meaning": "the operation exceeded its time limit"
+  },
+  "E_CANCELLED": {
+    "severity": "error",
+    "meaning": "the operation was cancelled"
+  },
+  "E_NOT_OWNED": {
+    "severity": "error",
+    "meaning": "the job or process is not owned by this SEED run"
+  },
+  "E_SETUP_REQUIRED": {
+    "severity": "error",
+    "meaning": "a missing dependency or runtime must be set up first"
+  },
+  "E_INTERNAL": {
+    "severity": "error",
+    "meaning": "unexpected failure inside SEED"
+  }
+}

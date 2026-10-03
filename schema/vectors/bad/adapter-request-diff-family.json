@@ -1,0 +1,10 @@
+{
+  "schema": "seed.project/0.1",
+  "verb": "describe",
+  "requestId": "req-1",
+  "actor": {
+    "kind": "human",
+    "name": "Alice",
+    "toolVersion": "1.0.0"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema": "seed.project/0.1",
+  "projectId": "proj-1",
+  "name": "Small Modular Reactor Core",
+  "created": "2026-10-03T10:00:00Z",
+  "updated": "2026-10-03T12:00:00Z",
+  "seedVersion": "0.1.0",
+  "folders": {
+    "models": "models",
+    "runs": "runs",
+    "studies": "studies",
+    "oracles": "oracles"
+  },
+  "artifacts": [
+    {
+      "id": "art-core",
+      "app": "openmc",
+      "path": "models/core.xml",
+      "format": "openmc-xml",
+      "formatVersion": "1.0",
+      "revision": {
+        "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "counter": -1
+      }
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat-fuel",
+      "revision": 1,
+      "name": "UO2 Fuel 4.5%",
+      "sets": {
+        "openmc.composition": {
+          "schema": "openmc.composition/0.1",
+          "enrichment": 0.045
+        }
+      }
+    }
+  ]
+}

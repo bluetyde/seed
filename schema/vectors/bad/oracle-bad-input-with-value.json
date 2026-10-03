@@ -1,0 +1,36 @@
+{
+  "schema": "seed.oracle/0.1",
+  "oracleId": "oracle-missing-density",
+  "entryVersion": 1,
+  "adapter": "openmc-adapter",
+  "adapterVersions": [
+    "*"
+  ],
+  "tag": "bad-input",
+  "inputs": [
+    {
+      "path": "models/no-density.xml",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "expected": {
+    "quantity": "q",
+    "value": 1,
+    "unit": "1"
+  },
+  "source": {
+    "kind": "hand",
+    "text": "Expect adapter refusal when material density is absent"
+  },
+  "coverage": {
+    "quantities": [
+      "density"
+    ],
+    "domain": "input-validation"
+  },
+  "toleranceHash": "127d1e0fe66ba8635a27c05df81c4883cc47920ccbb50ef00cf04a1919ee2d6f",
+  "tolerance": {
+    "abs": 0,
+    "rel": 0
+  }
+}
