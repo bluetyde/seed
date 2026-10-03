@@ -76,3 +76,7 @@ A gate that cannot fail is useless. For each level there is a test that feeds a 
 - Never tune an oracle to fit a result. A changed expected value needs a source.
 - Keep sourced, computed and assumed values apart and labelled.
 - Say what an oracle does not cover.
+
+## Shared runtime acceptance
+
+Native numerical oracles complement, not replace, [plan 11 R1-R10](11-runtime-and-shared-acceptance.md). Fake artifacts/processes test installation and lifecycle first; the final real OpenMC recipe must pass offline calculation/save/reopen and interruption checks. Revalidate coverage when runtime/engine/adapter/data versions change. Harness acceptance now also includes cases 11-17 in [plan 05](05-agent-harness.md).

@@ -44,10 +44,14 @@ Show an existing completed run with its **actual native status and provenance**.
 - Stale input: dependents marked stale; cache key changes with each key component (one test per component).
 - Budget: the case that would exceed any single limit is refused and recorded.
 - Orphan recovery after a simulated host crash.
-- Same snapshot, settings and seed: same run ID or an explicit non-idempotence statement.
+- Same request key and payload: same operation; a new request can create a separate replicate. Explicit retry and cache reuse retain original attempt provenance.
 
 ## Open
 
 - Measured per-adapter resource limits (needs real adapters).
 - Whether the scheduler is a library inside the core or a separate process (affects headless survival of GUI close).
 - Retention and cleanup policy for run directories (disk budget).
+
+## Runtime lifecycle dependency
+
+Follow [plan 11](11-runtime-and-shared-acceptance.md) for managed/attached ownership, Windows/WSL boundaries and runtime version pinning. Requested headless continuation must be explicit; GUI close does not define job cancellation policy implicitly. Setup installation permissions are separate from study execution permissions. Harness completeness clarifications in [plan 05](05-agent-harness.md) define retries, diagnostics and approval scope.
