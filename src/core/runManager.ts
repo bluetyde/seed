@@ -1,0 +1,1311 @@
+import { randomBytes } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { performance } from "node:perf_hooks";
+import { callAdapter, type AdapterSpec } from "./adapterClient";
+import { appendLine, writeFileAtomic } from "./atomicFile";
+import { canonicalJson, sha256Hex } from "./canonical";
+import { isPortableRelative, resolveInside } from "./paths";
+import { checkResultsIndex } from "./semantic";
+import { validate, type TypedError } from "./validate";
+
+export type Budget = {
+  maxWallSeconds: number;
+  maxCores: number;
+  maxMemoryMB: number;
+  maxDiskMB: number;
+};
+
+export type RunManagerOptions = {
+  projectRoot: string;
+  runsFolder: string;
+  adapter: AdapterSpec & { id: string; version: string };
+  now?: () => Date;
+  newId?: () => string;
+  pollMs?: number;
+  callTimeoutMs?: number;
+};
+
+export type StartRequest = {
+  requestId: string;
+  actor: { kind: "human" | "agent" | "system"; name: string; model?: string; toolVersion?: string };
+  artifact: { path: string; revision: { hash: string; counter: number } };
+  inputs: { path: string; sha256: string }[];
+  settings?: Record<string, unknown>;
+  seed?: number;
+  budget: Budget;
+  studyBudget?: Budget;
+  wallLimitMs?: number;
+  extensions?: Record<string, unknown>;
+};
+
+export type RunOutcome =
+  | { ok: true; runId: string; state: string; record: Record<string, unknown>; replayed?: boolean }
+  | { ok: false; errors: TypedError[]; runId?: string };
+
+export const TERMINAL_STATES: readonly string[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+  "terminated-by-trip",
+];
+
+export function isLegalTransition(from: string, to: string): boolean {
+  if (from === "queued") {
+    return to === "running" || to === "failed" || to === "cancelled" || to === "interrupted";
+  }
+  if (from === "running") {
+    return (
+      to === "completed" ||
+      to === "failed" ||
+      to === "cancelled" ||
+      to === "terminated-by-trip" ||
+      to === "interrupted"
+    );
+  }
+  return false;
+}
+
+function assertResolved(res: { ok: true; value: string } | { ok: false; error: unknown }): string {
+  if (!res.ok) {
+    throw new Error("Path resolution failed");
+  }
+  return res.value;
+}
+
+interface InFlightRequest {
+  requestId: string;
+  payloadHash: string;
+  promise: Promise<RunOutcome>;
+}
+
+interface InFlightRun {
+  runId: string;
+  cancelRequested: boolean;
+  promise: Promise<RunOutcome>;
+}
+
+function computePayloadHash(req: StartRequest): string {
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(req)) {
+    if (k !== "wallLimitMs" && v !== undefined) {
+      clean[k] = v;
+    }
+  }
+  const sanitized = JSON.parse(JSON.stringify(clean));
+  return sha256Hex(canonicalJson(sanitized));
+}
+
+function updateRequestsFile(
+  requestsJsonPath: string,
+  requestId: string,
+  entry: { payloadHash: string; runId: string }
+): void {
+  let map: Record<string, { payloadHash: string; runId: string }> = {};
+  if (existsSync(requestsJsonPath)) {
+    try {
+      map = JSON.parse(readFileSync(requestsJsonPath, "utf8"));
+    } catch {
+      map = {};
+    }
+  }
+  map[requestId] = entry;
+  writeFileAtomic(requestsJsonPath, JSON.stringify(map, null, 2) + "\n");
+}
+
+export class RunManager {
+  private readonly projectRoot: string;
+  private readonly runsFolder: string;
+  private readonly adapter: AdapterSpec & { id: string; version: string };
+  private readonly now: () => Date;
+  private readonly newId: () => string;
+  private readonly pollMs: number;
+  private readonly callTimeoutMs: number;
+
+  private inFlightByRequestId = new Map<string, InFlightRequest>();
+  private inFlightRuns = new Map<string, InFlightRun>();
+
+  constructor(opts: RunManagerOptions) {
+    this.projectRoot = opts.projectRoot;
+    this.runsFolder = opts.runsFolder;
+    this.adapter = opts.adapter;
+    this.now = opts.now ?? (() => new Date());
+    this.newId = opts.newId ?? (() => randomBytes(6).toString("hex"));
+    this.pollMs = opts.pollMs ?? 200;
+    this.callTimeoutMs = opts.callTimeoutMs ?? 15000;
+  }
+
+  public transition(runId: string, to: string, reason: string): void {
+    const runRelDir = `${this.runsFolder}/${runId}`;
+    const runAbsDir = assertResolved(resolveInside(this.projectRoot, runRelDir));
+    const recPath = join(runAbsDir, "run-record.json");
+    if (!existsSync(recPath)) {
+      throw new Error(`Run record not found for ${runId}`);
+    }
+    const record = JSON.parse(readFileSync(recPath, "utf8")) as Record<string, unknown>;
+    const from = record.state as string;
+    if (!isLegalTransition(from, to)) {
+      throw new Error(`Illegal state transition from "${from}" to "${to}"`);
+    }
+    appendLine(
+      join(runAbsDir, "log", "transitions.jsonl"),
+      JSON.stringify({
+        time: this.now().toISOString(),
+        from,
+        to,
+        reason,
+      })
+    );
+    record.state = to;
+    if (TERMINAL_STATES.includes(to)) {
+      record.finishedAt = this.now().toISOString();
+    }
+    const v = validate("run-record", record);
+    if (!v.ok) {
+      throw new Error("run-record became invalid after transition: " + v.errors.map((e) => e.message).join(", "));
+    }
+    writeFileAtomic(recPath, JSON.stringify(record, null, 2) + "\n");
+  }
+
+  async start(req: StartRequest): Promise<RunOutcome> {
+    // 1. Request validation
+    if (req.artifact && typeof req.artifact.path === "string") {
+      const artPathRes = isPortableRelative(req.artifact.path);
+      if (!artPathRes.ok) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: artPathRes.error.code,
+              field: "/artifact/path",
+              message: artPathRes.error.message,
+              source: "seed",
+            },
+          ],
+        };
+      }
+    }
+
+    if (Array.isArray(req.inputs)) {
+      for (let i = 0; i < req.inputs.length; i++) {
+        const inp = req.inputs[i];
+        if (inp && typeof inp.path === "string") {
+          const pRes = isPortableRelative(inp.path);
+          if (!pRes.ok) {
+            return {
+              ok: false,
+              errors: [
+                {
+                  code: pRes.error.code,
+                  field: `/inputs/${i}/path`,
+                  message: pRes.error.message,
+                  source: "seed",
+                },
+              ],
+            };
+          }
+        }
+      }
+    }
+
+    const candidateRunReq = {
+      schema: "seed.adapter-request/0.1",
+      verb: "run",
+      requestId: req.requestId,
+      actor: req.actor,
+      snapshot: {
+        inputs: req.inputs,
+      },
+      runDir: `${this.runsFolder}/r-placeholder`,
+      budget: req.budget,
+      ...(req.settings !== undefined ? { settings: req.settings } : {}),
+      ...(req.seed !== undefined ? { seed: req.seed } : {}),
+      ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+    };
+    const valCandidate = validate("adapter-request", candidateRunReq);
+    if (!valCandidate.ok) {
+      return { ok: false, errors: valCandidate.errors };
+    }
+
+    // 2. Budget gate
+    if (req.studyBudget) {
+      const budgetKeys: (keyof Budget)[] = ["maxWallSeconds", "maxCores", "maxMemoryMB", "maxDiskMB"];
+      const offending: string[] = [];
+      const errors: TypedError[] = [];
+      for (const k of budgetKeys) {
+        if (typeof req.budget[k] === "number" && typeof req.studyBudget[k] === "number") {
+          if (req.budget[k] > req.studyBudget[k]) {
+            offending.push(k);
+            errors.push({
+              code: "E_BUDGET_EXCEEDED",
+              field: `/budget/${k}`,
+              message: `budget.${k} (${req.budget[k]}) exceeds study budget (${req.studyBudget[k]})`,
+              source: "seed",
+            });
+          }
+        }
+      }
+      if (offending.length > 0) {
+        const runsDir = join(this.projectRoot, this.runsFolder);
+        mkdirSync(runsDir, { recursive: true });
+        const gateStopsPath = join(runsDir, "gate-stops.jsonl");
+        const gateStopLine = JSON.stringify({
+          time: this.now().toISOString(),
+          requestId: req.requestId,
+          actor: req.actor,
+          rule: "budget",
+          fields: offending,
+        });
+        appendLine(gateStopsPath, gateStopLine);
+        return { ok: false, errors };
+      }
+    }
+
+    // 3. Idempotency check
+    const payloadHash = computePayloadHash(req);
+
+    // Check if in flight in this manager
+    const inFlightReq = this.inFlightByRequestId.get(req.requestId);
+    if (inFlightReq) {
+      if (inFlightReq.payloadHash !== payloadHash) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_REQUEST_CONFLICT",
+              field: "/requestId",
+              message: `Request conflict for requestId ${req.requestId}`,
+              source: "seed",
+            },
+          ],
+        };
+      }
+      const outcome = await inFlightReq.promise;
+      if (outcome.ok) {
+        return { ...outcome, replayed: true };
+      }
+      return outcome;
+    }
+
+    // Check requests.json on disk
+    const runsDir = join(this.projectRoot, this.runsFolder);
+    mkdirSync(runsDir, { recursive: true });
+    const requestsJsonPath = join(runsDir, "requests.json");
+    let requestsMap: Record<string, { payloadHash: string; runId: string }> = {};
+    if (existsSync(requestsJsonPath)) {
+      try {
+        requestsMap = JSON.parse(readFileSync(requestsJsonPath, "utf8"));
+      } catch {
+        requestsMap = {};
+      }
+    }
+
+    const existingEntry = requestsMap[req.requestId];
+    if (existingEntry) {
+      if (existingEntry.payloadHash !== payloadHash) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_REQUEST_CONFLICT",
+              field: "/requestId",
+              message: `Request conflict for requestId ${req.requestId}`,
+              source: "seed",
+            },
+          ],
+        };
+      }
+      const inFlightRun = this.inFlightRuns.get(existingEntry.runId);
+      if (inFlightRun) {
+        const outcome = await inFlightRun.promise;
+        if (outcome.ok) {
+          return { ...outcome, replayed: true };
+        }
+        return outcome;
+      }
+      const recPath = join(runsDir, existingEntry.runId, "run-record.json");
+      if (existsSync(recPath)) {
+        const record = JSON.parse(readFileSync(recPath, "utf8")) as Record<string, unknown>;
+        return {
+          ok: true,
+          runId: existingEntry.runId,
+          state: record.state as string,
+          record,
+          replayed: true,
+        };
+      }
+    }
+
+    // Register in flight promise for this requestId
+    let resolveRun!: (outcome: RunOutcome) => void;
+    const runPromise = new Promise<RunOutcome>((resolve) => {
+      resolveRun = resolve;
+    });
+
+    this.inFlightByRequestId.set(req.requestId, {
+      requestId: req.requestId,
+      payloadHash,
+      promise: runPromise,
+    });
+
+    try {
+      const outcome = await this.executeRun(req, payloadHash, runPromise, requestsJsonPath, requestsMap);
+      resolveRun(outcome);
+      return outcome;
+    } catch (err) {
+      const errOutcome: RunOutcome = {
+        ok: false,
+        errors: [
+          {
+            code: "E_INTERNAL",
+            field: "",
+            message: err instanceof Error ? err.message : String(err),
+            source: "seed",
+          },
+        ],
+      };
+      resolveRun(errOutcome);
+      return errOutcome;
+    } finally {
+      this.inFlightByRequestId.delete(req.requestId);
+    }
+  }
+
+  private async executeRun(
+    req: StartRequest,
+    payloadHash: string,
+    runPromise: Promise<RunOutcome>,
+    requestsJsonPath: string,
+    requestsMap: Record<string, { payloadHash: string; runId: string }>
+  ): Promise<RunOutcome> {
+    // 4. Snapshot hashing
+    for (let i = 0; i < req.inputs.length; i++) {
+      const input = req.inputs[i]!;
+      const resInside = resolveInside(this.projectRoot, input.path);
+      if (!resInside.ok) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: resInside.error.code,
+              field: `/inputs/${i}/path`,
+              message: resInside.error.message,
+              source: "seed",
+            },
+          ],
+        };
+      }
+      const inputAbs = resInside.value;
+      if (!existsSync(inputAbs)) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_PROP_MISSING",
+              field: `/inputs/${i}/path`,
+              message: `Input file does not exist: ${input.path}`,
+              source: "seed",
+            },
+          ],
+        };
+      }
+      const fileBytes = readFileSync(inputAbs);
+      const actualHash = sha256Hex(fileBytes);
+      if (actualHash !== input.sha256) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_STALE_REVISION",
+              field: `/inputs/${i}/sha256`,
+              message: `Input sha256 mismatch: declared ${input.sha256}, actual ${actualHash}`,
+              source: "seed",
+            },
+          ],
+        };
+      }
+    }
+
+    // 5. Validate verb
+    const valReq = {
+      schema: "seed.adapter-request/0.1",
+      verb: "validate",
+      requestId: req.requestId,
+      actor: req.actor,
+      artifact: req.artifact,
+      operation: "run",
+      ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+    };
+    const valOutcome = await callAdapter(this.adapter, valReq, {
+      projectRoot: this.projectRoot,
+      timeoutMs: this.callTimeoutMs,
+    });
+    if (!valOutcome.ok) {
+      return { ok: false, errors: valOutcome.errors };
+    }
+    const valReply = valOutcome.reply as Record<string, unknown>;
+    if (!valReply.ok) {
+      return { ok: false, errors: valReply.errors as TypedError[] };
+    }
+    const valResult = valReply.result as { valid: boolean; problems?: TypedError[] };
+    if (valResult.valid === false) {
+      const eProblems = (valResult.problems ?? []).filter((p) => p.code.startsWith("E_"));
+      return { ok: false, errors: eProblems };
+    }
+
+    // 6. Create the run
+    const runId = "r-" + this.newId();
+    const runRelDir = `${this.runsFolder}/${runId}`;
+    const runAbsDir = assertResolved(resolveInside(this.projectRoot, runRelDir));
+
+    mkdirSync(join(runAbsDir, "inputs"), { recursive: true });
+    mkdirSync(join(runAbsDir, "native"), { recursive: true });
+    mkdirSync(join(runAbsDir, "log"), { recursive: true });
+
+    let copyMismatch = false;
+    let mismatchIndex = 0;
+    for (let i = 0; i < req.inputs.length; i++) {
+      const input = req.inputs[i]!;
+      const src = assertResolved(resolveInside(this.projectRoot, input.path));
+      const dest = assertResolved(resolveInside(runAbsDir, `inputs/${input.path}`));
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(src, dest);
+      const copyHash = sha256Hex(readFileSync(dest));
+      if (copyHash !== input.sha256) {
+        copyMismatch = true;
+        mismatchIndex = i;
+        break;
+      }
+    }
+
+    const declaredInputs = req.inputs.map((i) => ({ path: i.path, sha256: i.sha256 }));
+    const cacheKey = sha256Hex(
+      canonicalJson({
+        adapter: { id: this.adapter.id, version: this.adapter.version },
+        inputs: declaredInputs,
+        seed: req.seed ?? null,
+        settings: req.settings ?? {},
+      })
+    );
+
+    const record: Record<string, unknown> = {
+      schema: "seed.run-record/0.1",
+      runId,
+      attempt: 1,
+      adapter: { id: this.adapter.id, version: this.adapter.version },
+      state: "queued",
+      inputs: declaredInputs,
+      settings: req.settings ?? {},
+      budget: req.budget,
+      createdAt: this.now().toISOString(),
+      cacheKey,
+      ...(req.seed !== undefined ? { seed: req.seed } : {}),
+      ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+    };
+
+    if (copyMismatch) {
+      const copyErr: TypedError[] = [
+        {
+          code: "E_STALE_REVISION",
+          field: `/inputs/${mismatchIndex}/sha256`,
+          message: "Source input changed during copy",
+          source: "seed",
+        },
+      ];
+      writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(copyErr, null, 2) + "\n");
+      appendLine(
+        join(runAbsDir, "log", "transitions.jsonl"),
+        JSON.stringify({
+          time: this.now().toISOString(),
+          from: "queued",
+          to: "failed",
+          reason: "stale revision during copy",
+        })
+      );
+      record.state = "failed";
+      record.finishedAt = this.now().toISOString();
+      const v = validate("run-record", record);
+      if (!v.ok) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_INTERNAL",
+              field: "",
+              message: "run-record failed schema validation: " + v.errors.map((e) => e.message).join(", "),
+              source: "seed",
+            },
+          ],
+        };
+      }
+      writeFileAtomic(join(runAbsDir, "run-record.json"), JSON.stringify(record, null, 2) + "\n");
+      updateRequestsFile(requestsJsonPath, req.requestId, { payloadHash, runId });
+      return { ok: true, runId, state: "failed", record };
+    }
+
+    const vRec = validate("run-record", record);
+    if (!vRec.ok) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_INTERNAL",
+            field: "",
+            message: "run-record failed schema validation: " + vRec.errors.map((e) => e.message).join(", "),
+            source: "seed",
+          },
+        ],
+      };
+    }
+
+    writeFileAtomic(join(runAbsDir, "run-record.json"), JSON.stringify(record, null, 2) + "\n");
+    updateRequestsFile(requestsJsonPath, req.requestId, { payloadHash, runId });
+
+    const inFlightRun: InFlightRun = {
+      runId,
+      cancelRequested: false,
+      promise: runPromise,
+    };
+    this.inFlightRuns.set(runId, inFlightRun);
+
+    const transition = (to: string, reason: string): void => {
+      const from = record.state as string;
+      if (!isLegalTransition(from, to)) {
+        throw new Error(`Illegal state transition from "${from}" to "${to}"`);
+      }
+      appendLine(
+        join(runAbsDir, "log", "transitions.jsonl"),
+        JSON.stringify({
+          time: this.now().toISOString(),
+          from,
+          to,
+          reason,
+        })
+      );
+      record.state = to;
+      if (TERMINAL_STATES.includes(to)) {
+        record.finishedAt = this.now().toISOString();
+      }
+      const v = validate("run-record", record);
+      if (!v.ok) {
+        throw new Error("run-record became invalid after transition: " + v.errors.map((e) => e.message).join(", "));
+      }
+      writeFileAtomic(join(runAbsDir, "run-record.json"), JSON.stringify(record, null, 2) + "\n");
+    };
+
+    try {
+      // Check if cancellation was requested before start
+      if (inFlightRun.cancelRequested) {
+        record.native = { status: "cancelled" };
+        transition("cancelled", "cancelled before job started");
+        return { ok: true, runId, state: "cancelled", record };
+      }
+
+      // 7. Run verb
+      const runReq = {
+        schema: "seed.adapter-request/0.1",
+        verb: "run",
+        requestId: req.requestId,
+        actor: req.actor,
+        snapshot: {
+          inputs: declaredInputs,
+        },
+        runDir: runRelDir,
+        budget: req.budget,
+        ...(req.settings !== undefined ? { settings: req.settings } : {}),
+        ...(req.seed !== undefined ? { seed: req.seed } : {}),
+        ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+      };
+
+      const runOutcome = await callAdapter(this.adapter, runReq, {
+        projectRoot: this.projectRoot,
+        timeoutMs: this.callTimeoutMs,
+      });
+
+      if (!runOutcome.ok || !(runOutcome.reply as Record<string, unknown>).ok) {
+        const errs: TypedError[] = !runOutcome.ok
+          ? runOutcome.errors
+          : ((runOutcome.reply as Record<string, unknown>).errors as TypedError[]) ?? [];
+        const firstCode = errs[0]?.code ?? "unknown";
+        record.native = { status: "adapter-error", detail: firstCode };
+        writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(errs, null, 2) + "\n");
+        transition("failed", "adapter run failed");
+        return { ok: true, runId, state: "failed", record };
+      }
+
+      const runReply = runOutcome.reply as Record<string, unknown>;
+      const runResult = runReply.result as { jobId: string; runDir: string; lifecycle: string };
+
+      record.jobId = runResult.jobId;
+      record.startedAt = this.now().toISOString();
+      transition("running", "adapter started job");
+
+      // 8. Poll loop
+      const startTime = performance.now();
+      const wallLimitMs = req.wallLimitMs ?? req.budget.maxWallSeconds * 1000;
+      let consecutiveStatusFailures = 0;
+
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, this.pollMs));
+
+        // Timeout check
+        const elapsed = performance.now() - startTime;
+        if (elapsed >= wallLimitMs) {
+          await callAdapter(
+            this.adapter,
+            {
+              schema: "seed.adapter-request/0.1",
+              verb: "cancel",
+              requestId: `cancel-${this.newId()}`,
+              actor: req.actor,
+              jobId: record.jobId,
+              ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+            },
+            { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+          );
+          const timeoutErrors: TypedError[] = [
+            {
+              code: "E_TIMEOUT",
+              field: "",
+              message: `Run timed out after ${elapsed.toFixed(0)} ms`,
+              source: "seed",
+            },
+          ];
+          writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(timeoutErrors, null, 2) + "\n");
+          record.native = { status: "timeout" };
+          transition("failed", "timeout");
+          return { ok: true, runId, state: "failed", record };
+        }
+
+        // Cancel requested check
+        if (inFlightRun.cancelRequested) {
+          const cancelOutcome = await callAdapter(
+            this.adapter,
+            {
+              schema: "seed.adapter-request/0.1",
+              verb: "cancel",
+              requestId: `cancel-${this.newId()}`,
+              actor: req.actor,
+              jobId: record.jobId,
+              ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+            },
+            { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+          );
+          if (cancelOutcome.ok && (cancelOutcome.reply as Record<string, unknown>).ok) {
+            const cancelReply = cancelOutcome.reply as Record<string, unknown>;
+            const cancelResult = cancelReply.result as { jobId: string; lifecycle: string; cancelled: boolean };
+            if (!cancelResult.cancelled) {
+              if (cancelResult.lifecycle === "completed") {
+                return await this.collectAndFinalize(record, runAbsDir, runRelDir, req, transition);
+              }
+              if (TERMINAL_STATES.includes(cancelResult.lifecycle)) {
+                transition(cancelResult.lifecycle, `job finished with ${cancelResult.lifecycle}`);
+                return { ok: true, runId, state: cancelResult.lifecycle, record };
+              }
+            }
+          }
+          record.native = { status: "cancelled" };
+          transition("cancelled", "cancelled by user");
+          return { ok: true, runId, state: "cancelled", record };
+        }
+
+        // Status call
+        const statusOutcome = await callAdapter(
+          this.adapter,
+          {
+            schema: "seed.adapter-request/0.1",
+            verb: "status",
+            requestId: `status-${this.newId()}`,
+            actor: req.actor,
+            jobId: record.jobId,
+            ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+          },
+          { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+        );
+
+        if (!statusOutcome.ok || !(statusOutcome.reply as Record<string, unknown>).ok) {
+          consecutiveStatusFailures++;
+          if (consecutiveStatusFailures >= 3) {
+            await callAdapter(
+              this.adapter,
+              {
+                schema: "seed.adapter-request/0.1",
+                verb: "cancel",
+                requestId: `cancel-${this.newId()}`,
+                actor: req.actor,
+                jobId: record.jobId,
+                ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+              },
+              { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+            );
+            const appFailedErrors: TypedError[] = [
+              {
+                code: "E_APP_FAILED",
+                field: "",
+                message: "Status call failed 3 consecutive times",
+                source: "seed",
+              },
+            ];
+            writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(appFailedErrors, null, 2) + "\n");
+            record.native = { status: "status-unavailable" };
+            transition("failed", "status unavailable");
+            return { ok: true, runId, state: "failed", record };
+          }
+          continue;
+        }
+
+        consecutiveStatusFailures = 0;
+        const statusReply = statusOutcome.reply as Record<string, unknown>;
+        const statusResult = statusReply.result as {
+          jobId: string;
+          lifecycle: string;
+          native: { status: string; detail?: string };
+          startedAt?: string;
+          finishedAt?: string;
+        };
+
+        let nativeChanged = false;
+        const curNative = record.native as { status: string; detail?: string } | undefined;
+        if (!curNative || curNative.status !== statusResult.native.status || curNative.detail !== statusResult.native.detail) {
+          record.native = {
+            status: statusResult.native.status,
+            ...(statusResult.native.detail ? { detail: statusResult.native.detail } : {}),
+          };
+          nativeChanged = true;
+        }
+        if (statusResult.startedAt && !record.startedAt) {
+          record.startedAt = statusResult.startedAt;
+          nativeChanged = true;
+        }
+
+        if (nativeChanged && record.state === "running") {
+          const v = validate("run-record", record);
+          if (v.ok) {
+            writeFileAtomic(join(runAbsDir, "run-record.json"), JSON.stringify(record, null, 2) + "\n");
+          }
+        }
+
+        const lc = statusResult.lifecycle;
+        if (lc === "running" || lc === "queued") {
+          continue;
+        }
+
+        if (lc === "completed") {
+          return await this.collectAndFinalize(record, runAbsDir, runRelDir, req, transition);
+        }
+
+        if (lc === "failed") {
+          transition("failed", "adapter reported failed");
+          return { ok: true, runId, state: "failed", record };
+        }
+
+        if (lc === "terminated-by-trip") {
+          transition("terminated-by-trip", "adapter reported trip");
+          return { ok: true, runId, state: "terminated-by-trip", record };
+        }
+
+        if (lc === "cancelled") {
+          transition("cancelled", "adapter reported cancelled");
+          return { ok: true, runId, state: "cancelled", record };
+        }
+
+        if (lc === "interrupted") {
+          transition("interrupted", "adapter reported interrupted");
+          return { ok: true, runId, state: "interrupted", record };
+        }
+      }
+    } finally {
+      this.inFlightRuns.delete(runId);
+    }
+  }
+
+  private async collectAndFinalize(
+    record: Record<string, unknown>,
+    runAbsDir: string,
+    runRelDir: string,
+    req: StartRequest,
+    transition: (to: string, reason: string) => void
+  ): Promise<RunOutcome> {
+    const runId = record.runId as string;
+    const collectReq = {
+      schema: "seed.adapter-request/0.1",
+      verb: "collect",
+      requestId: `collect-${this.newId()}`,
+      actor: req.actor,
+      jobId: record.jobId,
+      runDir: runRelDir,
+      ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+    };
+
+    const collectOutcome = await callAdapter(this.adapter, collectReq, {
+      projectRoot: this.projectRoot,
+      timeoutMs: this.callTimeoutMs,
+    });
+
+    const markCollectFailed = (errors: TypedError[], reason: string): RunOutcome => {
+      writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(errors, null, 2) + "\n");
+      delete record.outputs;
+      transition("failed", reason);
+      return { ok: true, runId, state: "failed", record };
+    };
+
+    if (!collectOutcome.ok || !(collectOutcome.reply as Record<string, unknown>).ok) {
+      const errs: TypedError[] = !collectOutcome.ok
+        ? collectOutcome.errors
+        : ((collectOutcome.reply as Record<string, unknown>).errors as TypedError[]) ?? [];
+      return markCollectFailed(errs, "adapter collect failed");
+    }
+
+    const collectReply = collectOutcome.reply as Record<string, unknown>;
+    const collectResult = collectReply.result as {
+      jobId: string;
+      lifecycle: string;
+      resultsIndex: string;
+      resultsSha256: string;
+    };
+
+    const resolvedIndex = resolveInside(this.projectRoot, collectResult.resultsIndex);
+    if (!resolvedIndex.ok) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: "/resultsIndex",
+            message: resolvedIndex.error.message,
+            source: "seed",
+          },
+        ],
+        "resultsIndex path invalid"
+      );
+    }
+
+    if (!existsSync(resolvedIndex.value)) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: "/resultsIndex",
+            message: "resultsIndex file not found",
+            source: "seed",
+          },
+        ],
+        "resultsIndex file not found"
+      );
+    }
+
+    const indexBytes = readFileSync(resolvedIndex.value);
+    const actualIndexSha = sha256Hex(indexBytes);
+    if (actualIndexSha !== collectResult.resultsSha256) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: "/resultsIndex",
+            message: `resultsSha256 mismatch: declared ${collectResult.resultsSha256}, actual ${actualIndexSha}`,
+            source: "seed",
+          },
+        ],
+        "resultsSha256 mismatch"
+      );
+    }
+
+    let indexDoc: Record<string, unknown>;
+    try {
+      indexDoc = JSON.parse(indexBytes.toString("utf8"));
+    } catch {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: "/resultsIndex",
+            message: "resultsIndex is not valid JSON",
+            source: "seed",
+          },
+        ],
+        "resultsIndex json parse error"
+      );
+    }
+
+    const vIdx = validate("results-index", indexDoc);
+    if (!vIdx.ok) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: vIdx.errors[0]?.field || "/resultsIndex",
+            message: `results-index schema validation failed: ${vIdx.errors[0]?.message}`,
+            source: "seed",
+          },
+        ],
+        "resultsIndex schema error"
+      );
+    }
+
+    const semanticErrs = checkResultsIndex(indexDoc);
+    if (semanticErrs.length > 0) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: semanticErrs[0]?.field || "/resultsIndex",
+            message: `results-index semantic check failed: ${semanticErrs[0]?.message}`,
+            source: "seed",
+          },
+        ],
+        "resultsIndex semantic error"
+      );
+    }
+
+    if (indexDoc.runId !== runId) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: "/runId",
+            message: `results-index runId ${indexDoc.runId} does not match runId ${runId}`,
+            source: "seed",
+          },
+        ],
+        "runId mismatch in resultsIndex"
+      );
+    }
+
+    const quantities = (indexDoc.quantities as Array<{ data?: { path?: string; sha256?: string } }>) ?? [];
+    const outputsMap = new Map<string, string>();
+    outputsMap.set(collectResult.resultsIndex, collectResult.resultsSha256);
+
+    for (let i = 0; i < quantities.length; i++) {
+      const q = quantities[i]!;
+      if (!q.data || typeof q.data.path !== "string" || typeof q.data.sha256 !== "string") {
+        return markCollectFailed(
+          [
+            {
+              code: "E_OUTPUT_INCOMPLETE",
+              field: `/quantities/${i}/data`,
+              message: "Missing quantity data path or sha256",
+              source: "seed",
+            },
+          ],
+          "quantity data incomplete"
+        );
+      }
+
+      const resolvedData = resolveInside(this.projectRoot, q.data.path);
+      if (!resolvedData.ok) {
+        return markCollectFailed(
+          [
+            {
+              code: "E_OUTPUT_INCOMPLETE",
+              field: `/quantities/${i}/data/path`,
+              message: resolvedData.error.message,
+              source: "seed",
+            },
+          ],
+          "quantity data path invalid"
+        );
+      }
+
+      if (!existsSync(resolvedData.value)) {
+        return markCollectFailed(
+          [
+            {
+              code: "E_OUTPUT_INCOMPLETE",
+              field: `/quantities/${i}/data/path`,
+              message: `Data file not found: ${q.data.path}`,
+              source: "seed",
+            },
+          ],
+          "quantity data file not found"
+        );
+      }
+
+      const dataBytes = readFileSync(resolvedData.value);
+      const actualDataSha = sha256Hex(dataBytes);
+      if (actualDataSha !== q.data.sha256) {
+        return markCollectFailed(
+          [
+            {
+              code: "E_OUTPUT_INCOMPLETE",
+              field: `/quantities/${i}/data/sha256`,
+              message: `Quantity data sha256 mismatch: declared ${q.data.sha256}, actual ${actualDataSha}`,
+              source: "seed",
+            },
+          ],
+          "quantity data sha256 mismatch"
+        );
+      }
+
+      outputsMap.set(q.data.path, q.data.sha256);
+    }
+
+    const outputs = Array.from(outputsMap.entries()).map(([path, sha256]) => ({ path, sha256 }));
+    record.outputs = outputs;
+    transition("completed", "collected all valid outputs");
+    return { ok: true, runId, state: "completed", record };
+  }
+
+  async cancel(runId: string): Promise<RunOutcome> {
+    const inFlight = this.inFlightRuns.get(runId);
+    if (inFlight) {
+      inFlight.cancelRequested = true;
+      return await inFlight.promise;
+    }
+
+    const runRelDir = `${this.runsFolder}/${runId}`;
+    const runAbsDirRes = resolveInside(this.projectRoot, runRelDir);
+    if (!runAbsDirRes.ok) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_PROP_MISSING",
+            field: "/runId",
+            message: `Unknown runId: ${runId}`,
+            source: "seed",
+          },
+        ],
+      };
+    }
+
+    const runAbsDir = runAbsDirRes.value;
+    const recordPath = join(runAbsDir, "run-record.json");
+
+    if (!existsSync(recordPath)) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_PROP_MISSING",
+            field: "/runId",
+            message: `Unknown runId: ${runId}`,
+            source: "seed",
+          },
+        ],
+      };
+    }
+
+    let record: Record<string, unknown>;
+    try {
+      record = JSON.parse(readFileSync(recordPath, "utf8"));
+    } catch {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_PROP_MISSING",
+            field: "/runId",
+            message: `Cannot read run-record for ${runId}`,
+            source: "seed",
+          },
+        ],
+      };
+    }
+
+    const curState = record.state as string;
+    if (TERMINAL_STATES.includes(curState)) {
+      return { ok: true, runId, state: curState, record };
+    }
+
+    if (record.jobId && typeof record.jobId === "string") {
+      const cancelOutcome = await callAdapter(
+        this.adapter,
+        {
+          schema: "seed.adapter-request/0.1",
+          verb: "cancel",
+          requestId: `cancel-${this.newId()}`,
+          actor: { kind: "system", name: "seed-cancel" },
+          jobId: record.jobId,
+        },
+        { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+      );
+
+      if (!cancelOutcome.ok) {
+        return { ok: false, errors: cancelOutcome.errors };
+      }
+
+      const cancelReply = cancelOutcome.reply as Record<string, unknown>;
+      if (!cancelReply.ok) {
+        return { ok: false, errors: cancelReply.errors as TypedError[] };
+      }
+
+      const cancelResult = cancelReply.result as { jobId: string; lifecycle: string; cancelled: boolean };
+      if (cancelResult.cancelled) {
+        if (!isLegalTransition(curState, "cancelled")) {
+          throw new Error(`Illegal state transition from "${curState}" to "cancelled"`);
+        }
+        appendLine(
+          join(runAbsDir, "log", "transitions.jsonl"),
+          JSON.stringify({
+            time: this.now().toISOString(),
+            from: curState,
+            to: "cancelled",
+            reason: "cancelled via external cancel",
+          })
+        );
+        record.state = "cancelled";
+        record.native = { status: "cancelled" };
+        record.finishedAt = this.now().toISOString();
+        const v = validate("run-record", record);
+        if (!v.ok) {
+          throw new Error("run-record became invalid after cancel: " + v.errors.map((e) => e.message).join(", "));
+        }
+        writeFileAtomic(recordPath, JSON.stringify(record, null, 2) + "\n");
+        return { ok: true, runId, state: "cancelled", record };
+      } else {
+        return { ok: true, runId, state: curState, record };
+      }
+    } else {
+      if (!isLegalTransition(curState, "cancelled")) {
+        throw new Error(`Illegal state transition from "${curState}" to "cancelled"`);
+      }
+      appendLine(
+        join(runAbsDir, "log", "transitions.jsonl"),
+        JSON.stringify({
+          time: this.now().toISOString(),
+          from: curState,
+          to: "cancelled",
+          reason: "cancelled before start",
+        })
+      );
+      record.state = "cancelled";
+      record.native = { status: "cancelled" };
+      record.finishedAt = this.now().toISOString();
+      const v = validate("run-record", record);
+      if (!v.ok) {
+        throw new Error("run-record became invalid after cancel: " + v.errors.map((e) => e.message).join(", "));
+      }
+      writeFileAtomic(recordPath, JSON.stringify(record, null, 2) + "\n");
+      return { ok: true, runId, state: "cancelled", record };
+    }
+  }
+
+  async recover(): Promise<{ runId: string; from: string; to: string }[]> {
+    const runsDirRes = resolveInside(this.projectRoot, this.runsFolder);
+    if (!runsDirRes.ok) {
+      return [];
+    }
+    const runsDir = runsDirRes.value;
+    if (!existsSync(runsDir)) {
+      return [];
+    }
+
+    const entries = readdirSync(runsDir, { withFileTypes: true });
+    const results: { runId: string; from: string; to: string }[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const runAbsDir = join(runsDir, entry.name);
+      const recPath = join(runAbsDir, "run-record.json");
+      if (!existsSync(recPath)) continue;
+
+      let record: Record<string, unknown>;
+      try {
+        record = JSON.parse(readFileSync(recPath, "utf8"));
+      } catch {
+        results.push({ runId: entry.name, from: "invalid", to: "invalid" });
+        continue;
+      }
+
+      const val = validate("run-record", record);
+      if (!val.ok) {
+        const parsedId = typeof record.runId === "string" ? record.runId : entry.name;
+        results.push({ runId: parsedId, from: "invalid", to: "invalid" });
+        continue;
+      }
+
+      const runId = record.runId as string;
+      const fromState = record.state as string;
+
+      if (fromState !== "queued" && fromState !== "running") {
+        continue;
+      }
+      if (this.inFlightRuns.has(runId)) {
+        continue;
+      }
+
+      const recTransition = (to: string, reason: string): void => {
+        if (!isLegalTransition(record.state as string, to)) {
+          throw new Error(`Illegal state transition from "${record.state}" to "${to}"`);
+        }
+        appendLine(
+          join(runAbsDir, "log", "transitions.jsonl"),
+          JSON.stringify({
+            time: this.now().toISOString(),
+            from: record.state,
+            to,
+            reason,
+          })
+        );
+        record.state = to;
+        record.finishedAt = this.now().toISOString();
+        const v = validate("run-record", record);
+        if (!v.ok) {
+          throw new Error("run-record became invalid after recovery: " + v.errors.map((e) => e.message).join(", "));
+        }
+        writeFileAtomic(recPath, JSON.stringify(record, null, 2) + "\n");
+      };
+
+      let toState: string = "interrupted";
+      let nativeStatus: { status: string; detail?: string } = {
+        status: "host-lost",
+        detail: "run was not finished when the host stopped",
+      };
+
+      if (record.jobId && typeof record.jobId === "string") {
+        const statusOutcome = await callAdapter(
+          this.adapter,
+          {
+            schema: "seed.adapter-request/0.1",
+            verb: "status",
+            requestId: `status-${this.newId()}`,
+            actor: { kind: "system", name: "seed-recovery" },
+            jobId: record.jobId,
+          },
+          { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+        );
+
+        if (statusOutcome.ok && (statusOutcome.reply as Record<string, unknown>).ok) {
+          const reply = statusOutcome.reply as Record<string, unknown>;
+          const res = reply.result as {
+            jobId: string;
+            lifecycle: string;
+            native: { status: string; detail?: string };
+          };
+          const lc = res.lifecycle;
+          if (TERMINAL_STATES.includes(lc)) {
+            if (lc === "completed") {
+              const startReqForCollect: StartRequest = {
+                requestId: `recover-${this.newId()}`,
+                actor: { kind: "system", name: "seed-recovery" },
+                artifact: { path: "dummy", revision: { hash: "0".repeat(64), counter: 1 } },
+                inputs: (record.inputs as { path: string; sha256: string }[]) ?? [],
+                budget: record.budget as Budget,
+              };
+              const collectOutcome = await this.collectAndFinalize(
+                record,
+                runAbsDir,
+                `${this.runsFolder}/${runId}`,
+                startReqForCollect,
+                recTransition
+              );
+              toState = collectOutcome.ok ? collectOutcome.state : "failed";
+              results.push({ runId, from: fromState, to: toState });
+              continue;
+            } else {
+              toState = lc;
+              nativeStatus = res.native;
+            }
+          }
+        }
+      }
+
+      record.native = nativeStatus;
+      recTransition(toState, "recovery");
+      results.push({ runId, from: fromState, to: toState });
+    }
+
+    return results;
+  }
+}
+
