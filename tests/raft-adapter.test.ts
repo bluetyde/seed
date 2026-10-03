@@ -300,6 +300,7 @@ describe.skipIf(!haveRaft)("RAFT adapter against the real headless runner", () =
     it("collect does not trust a re-hashed results file or a manifest with a changed file list", async () => {
       const edits: [string, (m: Vec, res: Vec) => void, string][] = [
         ["a results file naming another case", (_m, res) => (res.caseSha256 = "0".repeat(64)), "snapshot's case"],
+        ["a results file claiming fewer steps", (_m, res) => (res.completion.stepsRun = 5), "every step"],
         ["a file list without session.json", (m) => (m.files = m.files.filter((f: { path: string }) => f.path !== "session.json")), "exactly its three files"],
       ];
       for (const [what, edit, message] of edits) {
@@ -332,7 +333,7 @@ describe.skipIf(!haveRaft)("RAFT adapter against the real headless runner", () =
       const jobId = JSON.parse(readFileSync(join(root, "runs", out.runId, "native", "job.json"), "utf8")).jobId;
       const r = okReply(await ask(root, { verb: "collect", jobId, runDir: `runs/${out.runId}` }));
       expect(r.ok).toBe(false);
-      expect(r.errors[0]?.message).toContain("snapshot's case");
+      expect(r.errors[0]?.message).toContain("snapshot changed");
     });
 
     it("cancel does not kill a process whose heartbeat does not carry the job's token (pid reuse guard)", async () => {
@@ -363,9 +364,10 @@ describe.skipIf(!haveRaft)("RAFT adapter against the real headless runner", () =
       const early = okReply(await ask(root, { verb: "collect", jobId: job.jobId, runDir: `runs/${runId}` }));
       expect(early.ok).toBe(false);
       expect(early.errors[0]).toMatchObject({ code: "E_OUTPUT_INCOMPLETE", message: "job is not completed" });
+      // a live process whose heartbeat carries another token is not this job: it is reported failed and left alone
       const r = okReply(await ask(root, { verb: "cancel", jobId: job.jobId }));
-      expect(r.ok).toBe(false);
-      expect(r.errors[0]?.code).toBe("E_NOT_OWNED");
+      expect(r.ok).toBe(true);
+      expect(r.result).toMatchObject({ lifecycle: "failed", cancelled: false });
       expect(isAlive(job.pid) && isAlive(child.pid)).toBe(true);
       writeFileSync(jobPath, JSON.stringify(job));
       await mgr.cancel(runId!);
