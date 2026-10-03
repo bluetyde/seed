@@ -21,6 +21,21 @@ afterEach(async () => {
 const answers = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(1000) })).status; } catch { return 0; } };
 
 describe("ProcessManager", () => {
+  it("cancels a warming child and can reopen without killing an unrelated server", async () => {
+    const m = manager();
+    const sibling = await m.ensure(app([], { id: "sibling" }));
+    const opening = m.ensure(app(["--delay", "60000"]));
+    const outcome = opening.catch((e: Error) => e.message);
+    await new Promise((r) => setTimeout(r, 300));
+    const oldPort = m.running("fake")?.port;
+    expect(oldPort).toBeDefined();
+    await m.stop("fake");
+    expect(await outcome).toContain("cancelled");
+    expect(await answers(`http://127.0.0.1:${oldPort}/health`)).toBe(0);
+    expect(await answers(`http://127.0.0.1:${sibling.port}/health`)).toBe(200);
+    const reopened = await m.ensure(app());
+    expect(await answers(`http://127.0.0.1:${reopened.port}/health`)).toBe(200);
+  });
   it("starts a server, waits for health, gives a url with a fresh token, and stops it (port freed)", async () => {
     const m = manager();
     const r = await m.ensure(app(["--delay", "400"]));
