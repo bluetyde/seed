@@ -1,0 +1,27 @@
+{
+  "schema": "seed.run-record/0.1",
+  "runId": "run-queued",
+  "attempt": 1,
+  "adapter": {
+    "id": "openmc-adapter",
+    "version": "1.0.0"
+  },
+  "state": "queued",
+  "inputs": [
+    {
+      "path": "models/core.inp",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "settings": {
+    "particles": 5000
+  },
+  "budget": {
+    "maxWallSeconds": 3600,
+    "maxCores": 8,
+    "maxMemoryMB": 16384,
+    "maxDiskMB": 32768
+  },
+  "createdAt": "2026-10-03T12:00:00Z",
+  "unknownTopLevelProp": 123
+}

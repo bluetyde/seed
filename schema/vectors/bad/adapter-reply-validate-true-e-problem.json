@@ -1,0 +1,19 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "validate",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "valid": true,
+    "problems": [
+      {
+        "code": "E_APP_FAILED",
+        "field": "",
+        "message": "failed",
+        "source": "seed"
+      }
+    ]
+  }
+}

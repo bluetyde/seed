@@ -1,0 +1,11 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "cancel",
+  "requestId": "req-6",
+  "actor": {
+    "kind": "human",
+    "name": "Alice",
+    "toolVersion": "1.0.0"
+  },
+  "jobId": "job-101"
+}

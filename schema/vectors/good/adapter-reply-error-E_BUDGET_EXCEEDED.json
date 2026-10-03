@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "run",
+  "requestId": "req-err",
+  "ok": false,
+  "errors": [
+    {
+      "code": "E_BUDGET_EXCEEDED",
+      "field": "/payload",
+      "message": "Failure with E_BUDGET_EXCEEDED",
+      "source": "seed"
+    }
+  ],
+  "warnings": []
+}

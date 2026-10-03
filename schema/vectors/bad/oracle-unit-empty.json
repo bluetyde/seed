@@ -1,0 +1,36 @@
+{
+  "schema": "seed.oracle/0.1",
+  "oracleId": "oracle-1",
+  "entryVersion": 1,
+  "adapter": "openmc",
+  "adapterVersions": [
+    "*"
+  ],
+  "tag": "good",
+  "inputs": [
+    {
+      "path": "in.xml",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "expected": {
+    "quantity": "q",
+    "value": 1,
+    "unit": ""
+  },
+  "source": {
+    "kind": "hand",
+    "text": "t"
+  },
+  "coverage": {
+    "quantities": [
+      "q"
+    ],
+    "domain": "d"
+  },
+  "tolerance": {
+    "abs": 0,
+    "rel": 0
+  },
+  "toleranceHash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+}

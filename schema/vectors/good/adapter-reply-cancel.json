@@ -1,0 +1,13 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "cancel",
+  "requestId": "req-6",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "jobId": "job-101",
+    "lifecycle": "cancelled",
+    "cancelled": true
+  }
+}
