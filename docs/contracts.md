@@ -1,6 +1,6 @@
 # Contracts v0.1
 
-Normative text for the E0 contracts: the documents SEED, adapters and agents exchange, and the path rules. Written 2026-10-03 (Claude) from [ARCHITECTURE](ARCHITECTURE.md), [DECISIONS](DECISIONS.md) and plans 02 to 07. Status: **proposed**, not yet reviewed by Codex or the user; everything is v0.1 and may change by migration. Implementation: `schema/*.schema.json`, `src/core/` (see TODO E0).
+Normative text for the E0 contracts: the documents SEED, adapters and agents exchange, and the path rules. Written 2026-10-03 (Claude) from [ARCHITECTURE](ARCHITECTURE.md), [DECISIONS](DECISIONS.md) and plans 02 to 07. Status: **proposed**, not yet reviewed by Codex or the user; everything is v0.1 and may change by migration. Implemented 2026-10-03 in `schema/*.schema.json` and `src/core/` (validator, semantic checks, canonical JSON, paths, adapter client, run manager, report builder) with fixtures and generated tests; see TODO E0.
 
 ## 0. Conventions (apply to every document)
 

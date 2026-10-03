@@ -20,11 +20,11 @@ Status: `ready` (brief can be written now) | `blocked` (needs something first) |
 
 | # | Task | Status | Oracle | Notes |
 |---|---|---|---|---|
-| A1 | JSON Schemas for adapter messages, results index, project manifest, material envelope, study record, oracle entry, with a good and a bad fixture per rule and a validator | blocked | Every error code has a failing bad fixture; targeted schema breaks are caught | Needs the contract decisions from E0 task 3 written down first; then it is a textbook step-0 win. Brief must state units, the escaping rule and the "unknown version is refused" rule (rules 9 and 10 of the brief template) |
-| A2 | Fake adapter with scripted behaviours (success, each validation error, crash, hang, partial output, trip, stale revision, instruction-like text) | blocked | Harness acceptance tests 1, 2, 4 run against it | Needs A1 and the transport decision |
-| A3 | Harness acceptance tests 1, 3, 4, 5, 6 as vitest cases | blocked | Each test fails against a deliberately broken gate | Needs the core's gate API |
-| A4 | Path conversion function (Windows, WSL, posix, spaces, UNC, traversal) with a table test | ready | Table of cases agreed in the brief; breaking the function breaks the tests | Small; may be cheaper for Claude to write directly. Run step 0 |
-| A5 | Report builder templates (HTML and Markdown) from a study record fixture | blocked | Golden output; a record with an injected string is escaped | Needs the study record schema |
+| A1 | JSON Schemas for adapter messages, results index, run record, project manifest, study record, oracle entry, plus validator, canonical hashing and semantic checks | done 2026-10-03 | 177 fixtures, 1344 generated per-property cases, mutation sweep | Two agy runs (schemas, then a contract-table test generator after a mutation sweep showed the first fixture set caught only 120 of 517 loosenings). Contract text: `docs/contracts.md` |
+| A2 | Fake adapter with scripted behaviours and the adapter client | done 2026-10-03 | 31 tests on Windows and Linux; targeted breaks (ownership check, finite check, timeout kill) each caught | agy run stalled after writing the files; the code was usable. Dispatcher fixed a Linux-only stdout truncation, a silent kill failure, unbounded stderr and a racy test |
+| A3 | Run lifecycle (RunManager) tests with the fake: crash, validation failure, hang, partial output, trip, cancel, idempotency, recovery | done 2026-10-03 (second dispatch) | 10 agy tests plus 8 dispatcher tests; targeted breaks caught after adding forged-collect cases | First dispatch produced nothing (agy waited on a background test run). Dispatcher fixed a silent reset of a corrupt request log. Harness acceptance tests needing the oracle runner, tiers or the project store are still open |
+| A4 | Path conversion function (Windows, WSL, posix, spaces, UNC, traversal) with a table test | done 2026-10-03 | 61 tests: every row of the case table, seeded round trip | Dispatcher added the code-point length rule and distro-name validation |
+| A5 | Report builder (HTML and Markdown) from a study record | done 2026-10-03 | 14 tests; every free-text field fuzzed with markup payloads | Dispatcher fixed an unescaped Markdown sentence and locale-dependent ordering |
 
 ### Claude-only (judgment, safety, contracts, small changes)
 
@@ -49,6 +49,17 @@ Every milestone ends with a `codex-review` of its diff (focus: silent failures, 
 | R3 | After the MCP server |
 | R4 | After the first real adapter and its oracle set |
 | R5 | After the transfer recipe and conservation checks (E4) |
+
+### Evidence from the E0 implementation round (2026-10-03)
+
+Five dispatches (schemas, paths, fake adapter, report builder, run lifecycle) plus one follow-up (schema contract tests) and one re-dispatch. What the dispatcher's own review found that the runner's checks and agy's tests did not:
+
+- **Example-based fixtures are not enough.** A mutation sweep over the schemas caught 23% of single-constraint loosenings; agy then transcribed the contract into a table and generated per-property tests (78%, the rest mostly redundant or unspecified bounds). For schema work, ask for the generated table up front.
+- **Silent failures the scanner did not flag:** a kill that reported success when it failed, a corrupt request log reset to empty, unbounded stderr buffering.
+- **A Linux-only bug in a test fixture** (stdout cut at the pipe buffer when the process exits right after writing) that passed on Windows. Run process-heavy tests on both OSes.
+- **Untrusted text left unescaped** in one Markdown sentence of the report; found only by fuzzing every free-text field.
+- **agy stalls on process-heavy tasks:** two runs ended with no or partial work after launching a test run as a background task. Briefs now say: write the files before running anything, wrap tests in `timeout 300`, and a reply that ends before the files exist counts as BLOCKED.
+- Cost: briefs were long (the contract text carried most of the design); the dispatcher fixes were small (about 10 edits). Net: worth it for the schemas, fixtures and report builder; marginal for the run manager.
 
 ### Done
 
