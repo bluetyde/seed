@@ -34,7 +34,7 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 
 ## Now
 
-- [x] 2026-10-03: Codex review (silent-failure-hunter and security-boundary-verifier) of the E0 branch: 15 distinct findings, all confirmed against the code and fixed with tests (docs/contracts.md section 10). Known limits left: path checks are not race-free (check then use); on Windows `killTree` cannot verify descendants that outlive their parent; reservation directories rely on `recover()` after a crash; recorded below as follow-ups.
+- [x] 2026-10-03: Codex review (silent-failure-hunter and security-boundary-verifier) of the E0 branch: 15 findings reported (13 distinct), all confirmed against the code and fixed with tests (docs/contracts.md section 10). Known limits left: path checks are not race-free (check then use); on Windows `killTree` cannot verify descendants that outlive their parent; reservation directories rely on `recover()` after a crash; recorded below as follow-ups.
 - [ ] Follow-ups from the review: a project-wide lock instead of per-request reservations; Windows job objects for tree kills; open files by handle after containment checks.
 
 - [x] 2026-10-03: Plan, ARCHITECTURE, WORKFLOWS, TOOLING, AGENT-TASKS and plans 01 to 10 written in this structure (documentation only; branch `claude/agentic-harness`).
