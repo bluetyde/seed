@@ -1,0 +1,36 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "validate",
+  "requestId": "req-full-val",
+  "ok": true,
+  "errors": [],
+  "warnings": [
+    {
+      "code": "W_UNITS_INFERRED",
+      "field": "/units",
+      "message": "inferred dimensionless unit",
+      "unit": "1",
+      "range": {
+        "min": 0,
+        "max": 10
+      },
+      "source": "seed"
+    }
+  ],
+  "result": {
+    "valid": true,
+    "problems": [
+      {
+        "code": "W_DEPRECATED_SYNTAX",
+        "field": "/syntax",
+        "message": "parameter syntax deprecated",
+        "unit": "1",
+        "range": {
+          "min": 0,
+          "max": 10
+        },
+        "source": "seed"
+      }
+    ]
+  }
+}

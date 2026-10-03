@@ -1,0 +1,25 @@
+{
+  "schema": "seed.study/0.1",
+  "type": "conclusion",
+  "seq": 2,
+  "time": "2026-10-03T12:30:00Z",
+  "actor": {
+    "kind": "human",
+    "name": "Dr. Alice Smith",
+    "model": "claude-3-5-sonnet",
+    "toolVersion": "1.0.0"
+  },
+  "claims": [
+    {
+      "text": "Reactivity decreased linearly with square root of fuel temperature.",
+      "runs": [
+        "run-001"
+      ],
+      "oracles": [
+        "pin-cell-keff"
+      ]
+    }
+  ],
+  "prev": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+}

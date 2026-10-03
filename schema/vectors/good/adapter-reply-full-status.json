@@ -1,0 +1,18 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "status",
+  "requestId": "req-full-status",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "jobId": "job-101",
+    "lifecycle": "completed",
+    "native": {
+      "status": "ok",
+      "detail": "everything normal"
+    },
+    "startedAt": "2026-10-03T12:00:00Z",
+    "finishedAt": "2026-10-03T12:05:00Z"
+  }
+}
