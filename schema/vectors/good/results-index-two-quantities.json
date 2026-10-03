@@ -1,0 +1,57 @@
+{
+  "schema": "seed.results-index/0.1",
+  "runId": "run-002",
+  "status": "completed",
+  "adapter": {
+    "id": "openmc-adapter",
+    "version": "1.0.0"
+  },
+  "engine": {
+    "name": "openmc",
+    "version": "0.14.0"
+  },
+  "inputHashes": [
+    {
+      "path": "models/core.inp",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "nativeStatus": {
+    "status": "ok",
+    "detail": "everything normal"
+  },
+  "quantities": [
+    {
+      "name": "keff",
+      "unit": "1",
+      "normalization": "none",
+      "provenance": {
+        "runId": "run-002",
+        "inputRevisions": [
+          "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        ]
+      },
+      "data": {
+        "path": "output/keff.txt",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      },
+      "verification": "verified"
+    },
+    {
+      "name": "flux",
+      "unit": "per-second",
+      "normalization": "per-second",
+      "provenance": {
+        "runId": "run-002",
+        "inputRevisions": [
+          "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        ]
+      },
+      "data": {
+        "path": "output/flux.txt",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      },
+      "verification": "unverified"
+    }
+  ]
+}

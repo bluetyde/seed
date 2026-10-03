@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "describe",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "formats": [],
+    "capabilities": [],
+    "parameters": [],
+    "quantities": [],
+    "oracleCoverage": []
+  }
+}
