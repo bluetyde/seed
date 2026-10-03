@@ -35,3 +35,7 @@ The host that opens the suite apps as tabs, and installs and updates them. **Imp
 ## Acceptance for "done"
 
 The plan is complete when the open items above are closed with evidence (a command and its result on each OS) and the shell is a client of the headless core with no behaviour change in the existing tests.
+
+## Planned extension: managed runtimes
+
+[Plan 11](11-runtime-and-shared-acceptance.md) owns runtime provisioning, offline cache and process cleanup beyond the existing repository installer. App recipes declare compatibility and native checks; SEED executes transactions. Existing catalog wording that dependencies are not installed describes current behavior and must change only when implementation is verified. R1-R10 define the shared acceptance gate.

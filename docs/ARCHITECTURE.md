@@ -162,3 +162,7 @@ experiment-studio/                (repo bluetyde/seed)
 - E1 (project, headless core) and the E0 harness tests can proceed in parallel once the schemas settle.
 - E2 depends on PRA's own P2 gate. If PRA is late, a NODAL or Virtual Reactor adapter can take its place.
 - E4 depends on Fuel Performance Studio F3 and an OpenMC result adapter, which are owned by those apps' plans.
+
+## Managed runtime boundary (planned)
+
+The core also owns a runtime registry, artifact transactions and launch/job ownership; apps supply recipes and native oracles. Editor servers and calculation jobs have separate identities and lifetimes. GUI, CLI and MCP clients share this core. Native solver/export logic stays in each app. See [plan 11](plans/11-runtime-and-shared-acceptance.md).
