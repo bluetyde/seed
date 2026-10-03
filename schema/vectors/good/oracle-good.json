@@ -1,0 +1,38 @@
+{
+  "schema": "seed.oracle/0.1",
+  "oracleId": "oracle-pin-p-top",
+  "entryVersion": 1,
+  "adapter": "openmc-adapter",
+  "adapterVersions": [
+    "0.14.0",
+    "0.14.1"
+  ],
+  "tag": "good",
+  "inputs": [
+    {
+      "path": "models/p-top.xml",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "expected": {
+    "quantity": "p_top",
+    "value": 0.02,
+    "unit": "1"
+  },
+  "source": {
+    "kind": "analytic",
+    "text": "Analytic benchmark problem 3.2",
+    "check": "Independent derivation using Mathematica"
+  },
+  "coverage": {
+    "quantities": [
+      "p_top"
+    ],
+    "domain": "single-phase flow"
+  },
+  "tolerance": {
+    "abs": 1e-12,
+    "rel": 0
+  },
+  "toleranceHash": "eebf0627cf9ff85dda4644691ae49fae4b64d38fe5d864d17a9a5df11222eb81"
+}

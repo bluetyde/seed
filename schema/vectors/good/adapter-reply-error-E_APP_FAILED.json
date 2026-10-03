@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "run",
+  "requestId": "req-err",
+  "ok": false,
+  "errors": [
+    {
+      "code": "E_APP_FAILED",
+      "field": "/payload",
+      "message": "Failure with E_APP_FAILED",
+      "source": "seed"
+    }
+  ],
+  "warnings": []
+}

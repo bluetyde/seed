@@ -1,0 +1,26 @@
+{
+  "schema": "seed.study/0.1",
+  "type": "step",
+  "seq": 1,
+  "time": "2026-10-03T12:05:00Z",
+  "actor": {
+    "kind": "agent",
+    "name": "AgentBob",
+    "model": "claude-3-5-sonnet",
+    "toolVersion": "1.0.0"
+  },
+  "action": "run",
+  "reason": "Execute baseline simulation at 300K",
+  "inputsChanged": [],
+  "runs": [
+    "run-001"
+  ],
+  "oracle": {
+    "set": "pin-cell-oracles",
+    "verdict": "pass"
+  },
+  "gateStop": {
+    "request": "r",
+    "rule": "rule1"
+  }
+}

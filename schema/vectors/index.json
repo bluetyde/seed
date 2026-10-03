@@ -1,0 +1,1374 @@
+[
+  {
+    "file": "good/adapter-request-describe.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-open.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-validate.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-run.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-status.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-cancel.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-collect.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-describe.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-open.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-validate.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-run.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-status.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-cancel.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-collect.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_SCHEMA_INVALID.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_SCHEMA_VERSION.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_VERB_UNKNOWN.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_NOT_PERMITTED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_BUDGET_EXCEEDED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_BOUNDS_EXCEEDED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_STALE_REVISION.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_REQUEST_CONFLICT.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_PROP_MISSING.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_UNITS.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_OUT_OF_DOMAIN.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_UNSUPPORTED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_PATH_INVALID.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_PATH_TRAVERSAL.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_PATH_UNMAPPABLE.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_OUTPUT_INCOMPLETE.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_APP_FAILED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_TIMEOUT.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_CANCELLED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_NOT_OWNED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_SETUP_REQUIRED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_INTERNAL.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/results-index-basic.json",
+    "family": "results-index",
+    "valid": true
+  },
+  {
+    "file": "good/results-index-two-quantities.json",
+    "family": "results-index",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-queued.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-running.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-completed.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-failed.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-cancelled.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-interrupted.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-terminated-by-trip.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/project-basic.json",
+    "family": "project",
+    "valid": true
+  },
+  {
+    "file": "good/project-unknown-set-extra.json",
+    "family": "project",
+    "valid": true
+  },
+  {
+    "file": "good/study-header.json",
+    "family": "study",
+    "valid": true
+  },
+  {
+    "file": "good/study-step.json",
+    "family": "study",
+    "valid": true
+  },
+  {
+    "file": "good/study-conclusion.json",
+    "family": "study",
+    "valid": true
+  },
+  {
+    "file": "good/oracle-good.json",
+    "family": "oracle",
+    "valid": true
+  },
+  {
+    "file": "good/oracle-bad-input.json",
+    "family": "oracle",
+    "valid": true
+  },
+  {
+    "file": "good/oracle-known-limit.json",
+    "family": "oracle",
+    "valid": true
+  },
+  {
+    "file": "bad/adapter-request-wrong-version.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-wrong-version.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/results-index-wrong-version.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/run-record-wrong-version.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/project-wrong-version.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/study-wrong-version.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/oracle-wrong-version.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/adapter-request-diff-family.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-diff-family.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/results-index-diff-family.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/run-record-diff-family.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/project-diff-family.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/study-diff-family.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/oracle-diff-family.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_VERSION",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/adapter-request-missing-schema.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-missing-schema.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/results-index-missing-schema.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/run-record-missing-schema.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/project-missing-schema.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/study-missing-schema.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/oracle-missing-schema.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/schema"
+    }
+  },
+  {
+    "file": "bad/adapter-request-unknown-prop.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-unknown-prop.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/results-index-unknown-prop.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/run-record-unknown-prop.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/project-unknown-prop.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/study-unknown-prop.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/oracle-unknown-prop.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/unknownTopLevelProp"
+    }
+  },
+  {
+    "file": "bad/adapter-request-bad-id.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/requestId"
+    }
+  },
+  {
+    "file": "bad/study-sha256-uppercase.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/hash"
+    }
+  },
+  {
+    "file": "bad/study-sha256-63-chars.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/hash"
+    }
+  },
+  {
+    "file": "bad/study-time-without-z.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/time"
+    }
+  },
+  {
+    "file": "bad/study-time-with-offset.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/time"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-leading-slash.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-backslash.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-colon.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-nul.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-empty-segment.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-trailing-slash.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-dot-segment.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-dot-dot-segment.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-relpath-513-chars.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/oracle-unit-empty.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/expected/unit"
+    }
+  },
+  {
+    "file": "bad/results-index-normalization-bad.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/normalization"
+    }
+  },
+  {
+    "file": "bad/adapter-request-budget-missing-field.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/budget/maxDiskMB"
+    }
+  },
+  {
+    "file": "bad/adapter-request-budget-with-zero.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/budget/maxWallSeconds"
+    }
+  },
+  {
+    "file": "bad/adapter-request-budget-extra-property.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/budget/extraProp"
+    }
+  },
+  {
+    "file": "bad/adapter-request-actor-kind-bad.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/actor/kind"
+    }
+  },
+  {
+    "file": "bad/adapter-request-actor-agent-no-model.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/actor/model"
+    }
+  },
+  {
+    "file": "bad/project-revision-counter-negative.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/artifacts/0/revision/counter"
+    }
+  },
+  {
+    "file": "bad/adapter-request-open-no-artifact.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/artifact"
+    }
+  },
+  {
+    "file": "bad/adapter-request-run-no-snapshot.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/snapshot"
+    }
+  },
+  {
+    "file": "bad/adapter-request-run-no-rundir.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/runDir"
+    }
+  },
+  {
+    "file": "bad/adapter-request-run-no-budget.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/budget"
+    }
+  },
+  {
+    "file": "bad/adapter-request-run-empty-inputs.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/snapshot/inputs"
+    }
+  },
+  {
+    "file": "bad/adapter-request-status-no-jobid.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/jobId"
+    }
+  },
+  {
+    "file": "bad/adapter-request-describe-extra-prop.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/extraProp"
+    }
+  },
+  {
+    "file": "bad/adapter-request-verb-unknown.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/verb"
+    }
+  },
+  {
+    "file": "bad/adapter-request-validate-bad-op.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/operation"
+    }
+  },
+  {
+    "file": "bad/adapter-request-run-seed-negative.json",
+    "family": "adapter-request",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/seed"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-ok-true-with-errors.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/errors"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-ok-true-no-result.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-ok-false-empty-errors.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/errors"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-ok-false-with-result.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-w-in-errors.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/errors/0/code"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-e-in-warnings.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/warnings/0/code"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-error-bad-pattern.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/errors/0/code"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-error-bad-source.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/errors/0/source"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-error-empty-range.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/errors/0/range"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-describe-missing-app.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/app"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-open-missing-editor.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/editor"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-validate-missing-valid.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/valid"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-run-missing-jobid.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/jobId"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-status-missing-lifecycle.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/lifecycle"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-cancel-missing-cancelled.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/cancelled"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-collect-missing-resultsindex.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/resultsIndex"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-validate-true-e-problem.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/problems/0/code"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-collect-lifecycle-running.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/lifecycle"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-run-lifecycle-completed.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/lifecycle"
+    }
+  },
+  {
+    "file": "bad/adapter-reply-describe-param-type-date.json",
+    "family": "adapter-reply",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/result/parameters/0/type"
+    }
+  },
+  {
+    "file": "bad/results-index-status-failed.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/status"
+    }
+  },
+  {
+    "file": "bad/results-index-empty-quantities.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities"
+    }
+  },
+  {
+    "file": "bad/results-index-quantity-no-provenance.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/provenance"
+    }
+  },
+  {
+    "file": "bad/results-index-quantity-no-data.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/data"
+    }
+  },
+  {
+    "file": "bad/results-index-quantity-no-verification.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/verification"
+    }
+  },
+  {
+    "file": "bad/results-index-verification-checked.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/verification"
+    }
+  },
+  {
+    "file": "bad/results-index-uncertainty-value-negative.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/uncertainty/value"
+    }
+  },
+  {
+    "file": "bad/results-index-uncertainty-kind-guess.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/uncertainty/kind"
+    }
+  },
+  {
+    "file": "bad/results-index-timegrid-count-zero.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/timeGrid/count"
+    }
+  },
+  {
+    "file": "bad/results-index-empty-inputhashes.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/inputHashes"
+    }
+  },
+  {
+    "file": "bad/run-record-attempt-zero.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/attempt"
+    }
+  },
+  {
+    "file": "bad/run-record-completed-no-finishedat.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/finishedAt"
+    }
+  },
+  {
+    "file": "bad/run-record-completed-empty-outputs.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/outputs"
+    }
+  },
+  {
+    "file": "bad/run-record-running-with-finishedat.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/finishedAt"
+    }
+  },
+  {
+    "file": "bad/run-record-failed-no-finishedat.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/finishedAt"
+    }
+  },
+  {
+    "file": "bad/run-record-state-paused.json",
+    "family": "run-record",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/state"
+    }
+  },
+  {
+    "file": "bad/project-folders-missing-runs.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/folders/runs"
+    }
+  },
+  {
+    "file": "bad/project-artifact-bad-id.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/artifacts/0/id"
+    }
+  },
+  {
+    "file": "bad/project-material-revision-zero.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/materials/0/revision"
+    }
+  },
+  {
+    "file": "bad/project-sets-bad-namespace.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/materials/0/sets"
+    }
+  },
+  {
+    "file": "bad/project-set-no-schema.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/materials/0/sets/openmc.composition/schema"
+    }
+  },
+  {
+    "file": "bad/project-sets-trailing-dot.json",
+    "family": "project",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/materials/0/sets"
+    }
+  },
+  {
+    "file": "bad/study-header-tier-a4.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/tier"
+    }
+  },
+  {
+    "file": "bad/study-header-setby-agent.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/setBy/kind"
+    }
+  },
+  {
+    "file": "bad/study-header-no-question.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/question"
+    }
+  },
+  {
+    "file": "bad/study-step-action-think.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/action"
+    }
+  },
+  {
+    "file": "bad/study-step-gate-stop-no-gatestop.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/gateStop"
+    }
+  },
+  {
+    "file": "bad/study-step-run-with-gatestop.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/gateStop"
+    }
+  },
+  {
+    "file": "bad/study-step-seq-zero.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/seq"
+    }
+  },
+  {
+    "file": "bad/study-step-prev-no-hash.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/hash"
+    }
+  },
+  {
+    "file": "bad/study-conclusion-claim-no-cite.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/claims/0"
+    }
+  },
+  {
+    "file": "bad/study-conclusion-actor-system.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/actor/kind"
+    }
+  },
+  {
+    "file": "bad/study-line-type-footnote.json",
+    "family": "study",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/type"
+    }
+  },
+  {
+    "file": "bad/oracle-good-with-refusal.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/expected/value"
+    }
+  },
+  {
+    "file": "bad/oracle-bad-input-with-value.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/expected/refusalCode"
+    }
+  },
+  {
+    "file": "bad/oracle-known-limit-with-value.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/expected"
+    }
+  },
+  {
+    "file": "bad/oracle-value-no-tolerance.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/tolerance"
+    }
+  },
+  {
+    "file": "bad/oracle-refusal-with-tolerance.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/tolerance"
+    }
+  },
+  {
+    "file": "bad/oracle-negative-tolerance-abs.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/tolerance/abs"
+    }
+  },
+  {
+    "file": "bad/oracle-empty-adapter-versions.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/adapterVersions"
+    }
+  },
+  {
+    "file": "bad/oracle-source-kind-rumor.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/source/kind"
+    }
+  },
+  {
+    "file": "bad/oracle-coverage-empty-quantities.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/coverage/quantities"
+    }
+  },
+  {
+    "file": "bad/oracle-missing-tolerance-hash.json",
+    "family": "oracle",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/toleranceHash"
+    }
+  }
+]

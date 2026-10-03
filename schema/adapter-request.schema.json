@@ -1,0 +1,256 @@
+{
+  "$id": "https://seed.invalid/schema/adapter-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "discriminator": {
+    "propertyName": "verb"
+  },
+  "properties": {
+    "schema": {
+      "const": "seed.adapter-request/0.1"
+    },
+    "verb": {
+      "type": "string",
+      "enum": [
+        "describe",
+        "open",
+        "validate",
+        "run",
+        "status",
+        "cancel",
+        "collect"
+      ]
+    },
+    "requestId": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+    },
+    "actor": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": ["schema", "verb", "requestId", "actor"],
+  "oneOf": [
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "describe"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        }
+      },
+      "required": ["verb"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "open"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        },
+        "artifact": {
+          "type": "object",
+          "required": ["path", "revision"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+            },
+            "revision": {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/revision"
+            }
+          }
+        }
+      },
+      "required": ["verb", "artifact"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "validate"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        },
+        "artifact": {
+          "type": "object",
+          "required": ["path", "revision"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+            },
+            "revision": {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/revision"
+            }
+          }
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["run", "open"]
+        }
+      },
+      "required": ["verb", "artifact"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "run"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        },
+        "snapshot": {
+          "type": "object",
+          "required": ["inputs"],
+          "additionalProperties": false,
+          "properties": {
+            "inputs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/inputRef"
+              }
+            }
+          }
+        },
+        "runDir": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        },
+        "budget": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/budget"
+        },
+        "settings": {
+          "type": "object"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheReuse": {
+          "type": "boolean"
+        }
+      },
+      "required": ["verb", "snapshot", "runDir", "budget"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "status"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        },
+        "jobId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["verb", "jobId"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "cancel"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        },
+        "jobId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        }
+      },
+      "required": ["verb", "jobId"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.adapter-request/0.1"
+        },
+        "verb": {
+          "const": "collect"
+        },
+        "requestId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "extensions": {
+          "type": "object"
+        },
+        "jobId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "runDir": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        }
+      },
+      "required": ["verb", "jobId", "runDir"],
+      "additionalProperties": false
+    }
+  ]
+}

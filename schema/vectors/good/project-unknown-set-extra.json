@@ -1,0 +1,36 @@
+{
+  "schema": "seed.project/0.1",
+  "projectId": "proj-2",
+  "name": "Advanced Thermal Benchmark",
+  "created": "2026-10-03T10:00:00Z",
+  "updated": "2026-10-03T12:00:00Z",
+  "seedVersion": "0.1.0",
+  "folders": {
+    "models": "models",
+    "runs": "runs",
+    "studies": "studies",
+    "oracles": "oracles"
+  },
+  "artifacts": [],
+  "materials": [
+    {
+      "id": "mat-cladding",
+      "revision": 1,
+      "name": "Zircaloy-4",
+      "sets": {
+        "vendor.proprietary-properties": {
+          "schema": "vendor.proprietary/1.0",
+          "customFieldA": "preserved",
+          "customFieldB": [
+            1,
+            2,
+            3
+          ],
+          "nestedData": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "$id": "https://seed.invalid/schema/project.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "seed.project/0.1"
+    },
+    "projectId": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "created": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time"
+    },
+    "updated": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time"
+    },
+    "seedVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "folders": {
+      "type": "object",
+      "required": ["models", "runs", "studies", "oracles"],
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        },
+        "runs": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        },
+        "studies": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        },
+        "oracles": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "app", "path", "format", "formatVersion", "revision"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+          },
+          "app": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+          },
+          "path": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+          },
+          "format": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "formatVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "revision": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/revision"
+          }
+        }
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "revision", "name", "sets"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "sets": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[a-z][a-z0-9-]*\\.[a-z][a-z0-9_.-]*$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "required": ["schema"],
+              "properties": {
+                "schema": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "projectId",
+    "name",
+    "created",
+    "updated",
+    "seedVersion",
+    "folders",
+    "artifacts",
+    "materials"
+  ],
+  "additionalProperties": false
+}

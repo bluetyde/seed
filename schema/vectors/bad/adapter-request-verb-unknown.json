@@ -1,0 +1,10 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "ZZ-INSTANCE-MARKER-ZZ",
+  "requestId": "req-1",
+  "actor": {
+    "kind": "human",
+    "name": "Alice",
+    "toolVersion": "1.0.0"
+  }
+}

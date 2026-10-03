@@ -1,0 +1,13 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "collect",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "jobId": "job-1",
+    "lifecycle": "completed",
+    "resultsSha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  }
+}
