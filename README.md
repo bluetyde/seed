@@ -8,4 +8,4 @@ Folders: `docs/` for design notes; `examples/` for future teaching cases; `tests
 
 Development coordination: [project log](../messages/experiment-studio.md) and [workspace rules](../messages/INSTRUCTIONS.md). Do not interpret an unchecked task or proposed contract as implemented support.
 
-Run `npm install`, then `npm start` with Node 24+ on PATH. Defaults select native launch commands on macOS/Linux and WSL for OpenMC on Windows. Adopt existing app clones from the Welcome page; see [shell setup](docs/shell.md).
+On Windows, double-click `Start SEED.cmd` with Node 24+ (including npm) on PATH. If dependencies are missing, it asks before running `npm ci --include=dev`; first setup may need Internet access. Later launches reuse installed dependencies. Errors stay visible until a key is pressed. After dependency changes in an update, run `npm ci --include=dev` again. On other platforms, run that setup command, then `npm start`. Defaults select native launch commands on macOS/Linux and WSL for OpenMC on Windows. Adopt existing app clones from the Welcome page; see [shell setup](docs/shell.md).
