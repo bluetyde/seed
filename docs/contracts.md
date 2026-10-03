@@ -129,6 +129,7 @@ Exported from `src/core/`, each returning a list of typed errors (empty = ok); n
 - `checkResultsIndex(index)`: every quantity `provenance.runId` equals `runId`; quantity names unique.
 - `checkOracleHash(entry)`: the tolerance pin above.
 - `verifyStudyLog(lines: string[])`: section 6; also validates each line against the schema first.
+- `checkResultsAgainstRecord(index, record)`: the index belongs to the run snapshot it is attached to: its `inputHashes` equal the record's `inputs` (as a set of path and sha256) and every quantity's `provenance.inputRevisions` names only hashes of those inputs.
 
 ## 9. Paths
 
@@ -145,3 +146,16 @@ Rules:
 8. **Portable relative path** (`isPortableRelative`): rules in section 0, pattern `relPath`. A Windows-style relative path with backslashes converts to forward slashes with `toPortableRelative`, but a string that already contains `:` or begins with `/` is not relative. `..` is never allowed in a portable relative path: `E_PATH_TRAVERSAL`; other violations `E_PATH_INVALID`.
 9. **Inside-root check** `resolveInside(root, rel, caseInsensitive)`: `root` must be absolute (any absolute kind), else `E_PATH_INVALID`. `rel` is any relative-looking string that may use `/` or `\` separators and may contain `.` and `..` segments. Join onto the root, normalize lexically (rule 7), and require the result to have the normalized root as a prefix at a segment boundary (`/a/b` is not a prefix of `/a/bc/x`). A result outside the root, an absolute `rel` (leading `/` or `\`), or a `rel` with a drive prefix is `E_PATH_TRAVERSAL`; a NUL character is `E_PATH_INVALID`. `caseInsensitive` defaults to true for Windows roots and false otherwise; the prefix comparison uses it, and the returned path keeps the casing of the joined text.
 10. **Round trip:** for every Windows drive path P without `..` or `.` segments or repeated separators, `toWindows(toWsl(P))` equals P normalized to backslashes with an uppercase drive letter; for every WSL path under a mount, the reverse holds.
+
+## 10. Run manager rules (from the Codex review, 2026-10-03)
+
+These bind `RunManager` (`src/core/runManager.ts`) and are covered by tests/review-fixes.test.ts.
+
+1. **Replies answer their request.** The adapter client refuses a reply whose `verb` or `requestId` differs from the request, whose `result.jobId` differs from the request's `jobId` (status, cancel, collect), or whose `result.runDir` differs from the request's (run): `E_APP_FAILED`.
+2. **Outputs belong to the run.** The results index and every quantity `data` file named by a collect must lie inside the run's own directory (`<runsFolder>/<runId>/`), lexically and after resolving symlinks and junctions; the results must satisfy `checkResultsAgainstRecord`. Otherwise the run ends `failed` with `E_OUTPUT_INCOMPLETE` and no outputs.
+3. **Physical containment.** An input source reached through a link that leaves the project is refused (`E_PATH_TRAVERSAL`, field `/inputs/<i>/path`); so is a runs folder that resolves outside the project (field `/runsFolder`). Containment is checked before use, not race-free: a path changed between the check and the read is not detected.
+4. **Run ids are plain ids.** `cancel(runId)` and `transition(runId, ...)` accept only the `id` pattern (no separators, no `..`); the record read must carry the same `runId`.
+5. **Cancellation is confirmed.** A run is recorded `cancelled` only when the adapter affirms the stop (`cancelled: true`) or reports a terminal lifecycle. An unconfirmed cancel leaves the run `running` and tracked, and `cancel()` returns `E_APP_FAILED`. A timeout or three failed status calls still end the run `failed`, but an unconfirmed stop is recorded in `log/errors.json` and the native detail says the job may still be running.
+6. **The request log is trusted only when valid.** `requests.json` must be an object whose entries have a sha256 `payloadHash` and an id `runId`; anything else, a replayed run record that fails `seed.run-record` or names another run, or an entry whose run record is missing, refuses the start (`E_INTERNAL`) and leaves the files untouched. Lookups use own properties only (a requestId such as `constructor` is an ordinary id).
+7. **One manager per request.** Before any asynchronous work a start reserves its requestId by creating `<runsFolder>/.reserve-<hash>`; a second manager (or an interrupted earlier start) is refused with `E_REQUEST_CONFLICT`. `recover()` removes reservations that no live start of this manager holds.
+8. **Process-tree kills are honest.** `killTree` returns true only when the root process (and on POSIX its whole process group) is gone and, on Windows, `taskkill` reported the tree killed (exit 0 or 128). Descendants that outlive their parent on Windows are not individually tracked; this is a known limit.
