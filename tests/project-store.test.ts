@@ -1102,12 +1102,12 @@ describe("Project Store", () => {
     if (!symlinkAllowed) {
       // Symlink creation not permitted on this platform/environment, skipping symlink traversal test
     } else {
-      const outsideFile = join(tmpdir(), `seed-outside-${Date.now()}.json`);
-      writeFileSync(outsideFile, '{"outside": true}\n', "utf8");
-      tempDirs.push(outsideFile);
+      // A directory link works as a symlink on POSIX and as a junction on Windows (a junction cannot point at a file).
+      const outsideDir = mkdtempSync(join(tmpdir(), "seed-outside-"));
+      writeFileSync(join(outsideDir, "f.json"), '{"outside": true}\n', "utf8");
+      tempDirs.push(outsideDir);
 
-      const symlinkPath = join(dir, "models", "traversal-link.json");
-      symlinkSync(outsideFile, symlinkPath, "junction");
+      symlinkSync(outsideDir, join(dir, "models", "outlink"), "junction");
 
       const saveLinkRes = saveProject(
         dir,
@@ -1117,7 +1117,7 @@ describe("Project Store", () => {
             {
               id: "art-symlink",
               app: "app",
-              path: "models/traversal-link.json",
+              path: "models/outlink/f.json",
               format: "json",
               formatVersion: "1.0",
               revision: { hash: "0".repeat(64), counter: 0 },
@@ -1203,5 +1203,43 @@ describe("Project Store", () => {
       const bytesAfter = readFileSync(manifestPath);
       expect(bytesAfter).toEqual(bytesBefore);
     }
+  });
+});
+
+describe("Project Store: stale takeover race (added by the dispatcher)", () => {
+  function writeOwner(dir: string, owner: Record<string, unknown>): void {
+    mkdirSync(join(dir, ".seed", "lock"), { recursive: true });
+    writeFileSync(join(dir, ".seed", "lock", "owner.json"), JSON.stringify(owner), "utf8");
+  }
+  const owner = (pid: number, token: string) => ({ ownerId: "o", pid, host: "h", acquiredAt: "2026-10-03T00:00:00Z", token });
+
+  it("a live lock that replaced the stale one before the rename is put back, not destroyed", () => {
+    const dir = makeTempDir();
+    createProject(dir, { name: "Race", seedVersion: "0.1.0" });
+    writeOwner(dir, owner(424242, "old-token"));
+    const res = withProjectLock(dir, () => "never", {
+      host: "h",
+      isAlive: (pid) => pid === 777,
+      beforeTakeover: () => {
+        rmSync(join(dir, ".seed", "lock"), { recursive: true, force: true });
+        writeOwner(dir, owner(777, "live-token"));
+      },
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors[0]?.code).toBe("E_PROJECT_LOCKED");
+    const kept = JSON.parse(readFileSync(join(dir, ".seed", "lock", "owner.json"), "utf8")) as { token: string };
+    expect(kept.token).toBe("live-token");
+    expect(readdirSync(join(dir, ".seed")).filter((n) => n.startsWith("lock.stale-"))).toEqual([]);
+  });
+
+  it("an unchanged stale lock is still taken over (the check does not refuse real takeovers)", () => {
+    const dir = makeTempDir();
+    createProject(dir, { name: "Race", seedVersion: "0.1.0" });
+    writeOwner(dir, owner(424242, "old-token"));
+    let hook = 0;
+    const res = withProjectLock(dir, () => "ran", { host: "h", isAlive: () => false, beforeTakeover: () => { hook++; } });
+    expect(res).toEqual({ ok: true, value: "ran" });
+    expect(hook).toBe(1);
+    expect(readdirSync(join(dir, ".seed"))).toEqual([]);
   });
 });
