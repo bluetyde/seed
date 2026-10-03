@@ -14,6 +14,10 @@
 | cancel | no verb; process exit only (not verified) | in-process stop only | `DELETE` endpoint (`do_DELETE`); child started with `start_new_session` |
 | collect | `runs/<runId>/{manifest,results,model,log}`; manifest written last with sha256 per file (`docs/run-manifest.md`, `results-format.md`) | session/checkpoint files (docs/c6-runtime-design.md); no results index | results under the project; `results.py`, `provenance.py` (not verified against contract) |
 
+## Update, 2026-10-03: RAFT now has a headless runner (branch, not merged)
+
+`claude/seed-headless` in the RAFT repo (570d2e1, [docs/headless.md](https://github.com/bluetyde/raft/blob/claude/seed-headless/docs/headless.md)) adds `node web/dist-headless/raft-headless.mjs describe | validate | run | replay`. A case is a golden-vector scenario plus a library path; the run folder has a hashed manifest written last, deterministic results and a session for replay. All six engine golden vectors agree through it; Windows and Linux give byte-identical output. Per verb: describe = `describe`, validate = `validate`, run = `run`, status = manifest (`running`), cancel = kill the process, collect = results.json plus manifest hashes. This settles the D5 inventory question: RAFT is usable as the first adapter once the runner is merged by its owner. The table above shows the state before this update.
+
 ## What this says about the first adapter (decision D5)
 
 D5 chose Virtual Reactor as the first real adapter, pending this inventory. The inventory does not support that as stated:
