@@ -65,7 +65,7 @@ const fill = (s: string, vars: Record<string, string>) => s.replace(/\{(port|tok
 
 export class ProcessManager {
   private entries = new Map<string, Entry>();
-  private pending = new Map<string, Promise<Running>>();
+  private pending = new Map<string, { promise: Promise<Running>; controller: AbortController }>();
   /** Called when a server the host started stops on its own (crash, closed from outside). */
   onExit: (appId: string, code: number | null) => void = () => {};
 
@@ -82,17 +82,34 @@ export class ProcessManager {
 
   /** The server for an app: the one already running, an attachable one, or a new one. Concurrent calls for one app share one start. */
   ensure(app: AppEntry): Promise<Running> {
+    const pending = this.pending.get(app.id);
+    if (pending) {
+      // A reopen waits for cancellation cleanup, never shares the cancelled launch.
+      if (pending.controller.signal.aborted) return pending.promise.then(
+        () => this.ensure(app), () => this.ensure(app),
+      );
+      return pending.promise;
+    }
     const have = this.running(app.id);
     if (have) return Promise.resolve(have);
-    let p = this.pending.get(app.id);
-    if (!p) {
-      p = this.startOrAttach(app).finally(() => this.pending.delete(app.id));
-      this.pending.set(app.id, p);
-    }
-    return p;
+    const controller = new AbortController();
+    const promise = this.startOrAttach(app, controller.signal).finally(() => this.pending.delete(app.id));
+    this.pending.set(app.id, { promise, controller });
+    return promise;
   }
 
   async stop(appId: string): Promise<void> {
+    const pending = this.pending.get(appId);
+    if (pending) {
+      pending.controller.abort();
+      // The opening caller receives its startup error; stop waits for its cleanup.
+      await pending.promise.then(() => undefined, () => undefined);
+      return;
+    }
+    await this.stopEntry(appId);
+  }
+
+  private async stopEntry(appId: string): Promise<void> {
     const e = this.entries.get(appId);
     this.entries.delete(appId);
     if (e?.child && e.running.owned && !e.exited) {
@@ -102,62 +119,75 @@ export class ProcessManager {
   }
 
   async stopAll(): Promise<void> {
-    await Promise.all([...this.entries.keys()].map((id) => this.stop(id)));
+    await Promise.all([...new Set([...this.entries.keys(), ...this.pending.keys()])].map((id) => this.stop(id)));
   }
 
   private async healthy(base: string, app: AppEntry): Promise<boolean> {
-    try { return (await this.deps.fetchStatus(base + app.healthPath)) < 500; } catch { return false; }
+    try { const status = await this.deps.fetchStatus(base + app.healthPath); return status >= 200 && status < 300; } catch { return false; }
   }
 
-  private async startOrAttach(app: AppEntry): Promise<Running> {
-    const token = randomBytes(16).toString("hex");
-    if (app.attachUrl) {
-      const base = app.attachUrl.replace(/\/$/, "");
-      if (await this.healthy(base, app)) {
-        const running: Running = { url: base + fill(app.urlPath, { token }), port: undefined, owned: false };
-        this.entries.set(app.id, { running, output: [], exited: false });
-        return running;
+  private async startOrAttach(app: AppEntry, signal: AbortSignal): Promise<Running> {
+    const checkCancelled = () => {
+      if (signal.aborted) throw new AppStartError(`${app.name} startup was cancelled.`, this.output(app.id));
+    };
+    try {
+      checkCancelled();
+      const token = randomBytes(16).toString("hex");
+      if (app.attachUrl) {
+        const base = app.attachUrl.replace(/\/$/, "");
+        if (await this.healthy(base, app)) {
+          checkCancelled();
+          const running: Running = { url: base + fill(app.urlPath, { token }), port: undefined, owned: false };
+          this.entries.set(app.id, { running, output: [], exited: false });
+          return running;
+        }
       }
-    }
-    if (!app.start) throw new AppStartError(`${app.name} is not running at ${app.attachUrl ?? "any address"} and has no start command in the registry.`, "");
-    const port = await this.deps.freePort();
-    const vars = { port: String(port), token };
-    const child = this.deps.spawn(fill(app.start.command, vars), app.start.args.map((a) => fill(a, vars)), {
-      cwd: app.start.cwd,
-      env: { ...process.env, ...Object.fromEntries(Object.entries(app.start.env ?? {}).map(([k, v]) => [k, fill(v, vars)])) },
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-    });
-    const entry: Entry = { child, running: { url: `http://127.0.0.1:${port}${fill(app.urlPath, vars)}`, port, owned: true }, output: [], exited: false };
-    this.entries.set(app.id, entry);
-    const keep = (b: Buffer) => { entry.output.push(b.toString()); if (entry.output.length > 400) entry.output.shift(); };
-    child.stdout?.on("data", keep);
-    child.stderr?.on("data", keep);
-    let spawnError: string | undefined;
-    child.once("error", (e) => { spawnError = e.message; });
-    child.once("exit", (code) => {
-      const wasRunning = !entry.exited && entry.ready;
-      entry.exited = true;
-      entry.code = code;
-      if (wasRunning) this.onExit(app.id, code);
-    });
+      checkCancelled();
+      if (!app.start) throw new AppStartError(`${app.name} is not running at ${app.attachUrl ?? "any address"} and has no start command in the registry.`, "");
+      const port = await this.deps.freePort();
+      checkCancelled();
+      const vars = { port: String(port), token };
+      const child = this.deps.spawn(fill(app.start.command, vars), app.start.args.map((a) => fill(a, vars)), {
+        cwd: app.start.cwd,
+        env: { ...process.env, ...Object.fromEntries(Object.entries(app.start.env ?? {}).map(([k, v]) => [k, fill(v, vars)])) },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      });
+      const entry: Entry = { child, running: { url: `http://127.0.0.1:${port}${fill(app.urlPath, vars)}`, port, owned: true }, output: [], exited: false };
+      this.entries.set(app.id, entry);
+      const keep = (b: Buffer) => { entry.output.push(b.toString()); if (entry.output.length > 400) entry.output.shift(); };
+      child.stdout?.on("data", keep);
+      child.stderr?.on("data", keep);
+      let spawnError: string | undefined;
+      child.once("error", (e) => { spawnError = e.message; });
+      child.once("exit", (code) => {
+        const wasRunning = !entry.exited && entry.ready;
+        entry.exited = true;
+        entry.code = code;
+        if (wasRunning) this.onExit(app.id, code);
+      });
 
-    const base = `http://127.0.0.1:${port}`;
-    const deadline = Date.now() + app.startTimeoutMs;
-    while (Date.now() < deadline) {
-      if (spawnError) { await this.stop(app.id); throw new AppStartError(`Could not start ${app.name}: ${spawnError}`, spawnError); }
-      if (entry.exited) {
-        const out = entry.output.join("");
-        this.entries.delete(app.id);
-        throw new AppStartError(`${app.name} stopped before it was ready (exit code ${entry.code ?? "unknown"}).`, out);
+      const base = `http://127.0.0.1:${port}`;
+      const deadline = Date.now() + app.startTimeoutMs;
+      while (Date.now() < deadline) {
+        checkCancelled();
+        if (spawnError) { throw new AppStartError(`Could not start ${app.name}: ${spawnError}`, spawnError); }
+        if (entry.exited) {
+          const out = entry.output.join("");
+          this.entries.delete(app.id);
+          throw new AppStartError(`${app.name} stopped before it was ready (exit code ${entry.code ?? "unknown"}).`, out);
+        }
+        const healthy = await this.healthy(base, app);
+        checkCancelled();
+        if (healthy && !entry.exited) { entry.ready = true; return entry.running; }
+        await this.deps.sleep(250);
       }
-      if (await this.healthy(base, app)) { entry.ready = true; return entry.running; }
-      await this.deps.sleep(250);
+      const out = entry.output.join("");
+      throw new AppStartError(`${app.name} did not answer on port ${port} within ${Math.round(app.startTimeoutMs / 1000)} s.`, out);
+    } catch (error) {
+      await this.stopEntry(app.id);
+      throw error;
     }
-    const out = entry.output.join("");
-    await this.stop(app.id);
-    throw new AppStartError(`${app.name} did not answer on port ${port} within ${Math.round(app.startTimeoutMs / 1000)} s.`, out);
   }
 }
-

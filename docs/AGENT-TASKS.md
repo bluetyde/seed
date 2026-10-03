@@ -64,3 +64,12 @@ Five dispatches (schemas, paths, fake adapter, report builder, run lifecycle) pl
 ### Done
 
 - Shell skeleton, same-origin windows, installer/updater, platform-aware defaults (Claude, 2026-10-01 to 2026-10-03; see the project log).
+
+## Current request: Codex-ready work (2026-10-03)
+
+The user's current request authorizes Codex planning and identifying implementation work; historical role labels above are not an exclusive ownership restriction. No delegation or implementation is dispatched here.
+
+- Ready: W1 read-only SEED/OpenMC runtime inventory and W2 contract drafting in [plan 11](plans/11-runtime-and-shared-acceptance.md).
+- After contracts: W3 fake-process lifecycle and W4 fake-artifact transaction tests/implementation; existing tests stay intact.
+- Parallel design: W5 E0 typed contracts and harness fixtures, then implementation once contract decisions are resolved.
+- Later: W6 isolated real OpenMC acceptance; W7 remains an OpenMC-repo task.
