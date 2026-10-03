@@ -3,6 +3,7 @@
 Start with [../PLAN.md](../PLAN.md). Then:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): components, the five contracts, run lifecycle, conventions, layout, dependencies
+- [DECISIONS.md](DECISIONS.md): design decisions with reasons and rejected options
 - [WORKFLOWS.md](WORKFLOWS.md): setup, schema changes, adapters, oracles, studies, releases, multi-agent rules
 - [TOOLING.md](TOOLING.md): toolchain and the unchecked survey list
 - [AGENT-TASKS.md](AGENT-TASKS.md): delegation board

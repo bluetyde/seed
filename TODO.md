@@ -11,9 +11,9 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 
 **Track 1: contracts (Claude; judgment, safety)**
 1. [ ] App inventory ([plan 03](docs/plans/03-adapters-and-transport.md)): for OpenMC Studio, NODAL Studio and Virtual Reactor, one table row per verb with the real entry point, headless or not, existing manifest and hashing rules; PRA and Fuel marked `not built`. Evidence: `docs/inventory.md`.
-2. [ ] Decide the transport against the fake (CLI, local service, or both) and the MCP surface; record rejected options. Evidence: decision record in `docs/plans/03`, and a fake-adapter test run over the chosen transport.
+2. [ ] Settle the transport details against the fake: CLI first, then MCP over the same command set (decision D1); decide whether apps are reached by CLI, local service or both. Evidence: decision record in `docs/plans/03`, and a fake-adapter test run over the chosen transport.
 3. [ ] Write the contract text for the five interfaces ([ARCHITECTURE](docs/ARCHITECTURE.md)): adapter messages with typed error codes, results index, project manifest and material envelope, study record, oracle entry. Include the migration policy.
-4. [ ] Tier policy and gate semantics ([plan 05](docs/plans/05-agent-harness.md)): the verb-to-tier table, what a gate stop records, where enforcement runs (decision).
+4. [ ] Tier policy and gate semantics ([plan 05](docs/plans/05-agent-harness.md)): the verb-to-tier table, what a gate stop records, grant scope (study, actor, operation, input revisions, expiry), pluggable approval (GUI dialog or human-run CLI command; no client surface can approve). Enforcement is in the core library (decision D4).
 
 **Track 2: tests that need no physics (after Track 1 item 3)**
 5. [ ] **[agy]** JSON Schemas with a good and a bad fixture per rule, plus a validator; every error code has a failing bad fixture. Needs item 3 written; brief must carry units, the escaping rule and the unknown-version rule.
@@ -36,7 +36,7 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 
 - [x] 2026-10-03: Plan, ARCHITECTURE, WORKFLOWS, TOOLING, AGENT-TASKS and plans 01 to 10 written in this structure (documentation only; branch `claude/agentic-harness`).
 - [x] 2026-10-03: Shared `experiment-studio` folder fast-forwarded to origin/main (clean tree, Windows git).
-- [ ] Decide the open questions in [PLAN.md](PLAN.md#open-questions) that block E0: transport, MCP-only vs plus CLI, record format, tier enforcement location.
+- [x] 2026-10-03: Decisions D1 to D6 recorded in [docs/DECISIONS.md](docs/DECISIONS.md) (MCP and CLI both; project files; app-owned oracles; enforcement in the core library; Virtual Reactor first adapter; UI framework deferred to E3).
 
 ## Contracts (before E0 code) · from the [workspace integration draft](../plans/nuclear-suite-integration.md) and [harness plan](../plans/agentic-harness.md)
 
@@ -73,14 +73,14 @@ Exit: open vs run, revisions, material preservation and status semantics documen
 
 ## E2: single-app runs ([plan 03](docs/plans/03-adapters-and-transport.md), [04](docs/plans/04-runs-and-scheduling.md), [05](docs/plans/05-agent-harness.md), [06](docs/plans/06-oracles-and-verification.md))
 
-Depends on PRA's own P2 gate. If PRA is late, a NODAL or Virtual Reactor adapter takes its place.
+Depends on the E0 inventory confirming that Virtual Reactor has a usable headless entry point (decision D5); if it does not, fall back to PRA (needs its P2 gate) or NODAL and record a new decision.
 
-- [ ] First real adapter (PRA) through all seven verbs; immutable snapshot, owned job ID, owned process tree.
-- [ ] Oracle registry v1 with the PRA entries (AND 0.02, OR 0.28, A AND A 0.1, A OR A 0.1, shared-event 0.044, bad probability, cycle, unsupported construct); PRA through SEED, MCP and the direct engine agree [A9].
+- [ ] First real adapter (Virtual Reactor) through all seven verbs; immutable snapshot, owned job ID, owned process tree. CLI and MCP front-ends over one core.
+- [ ] Oracle index and runner: entries live in the RAFT repo (D3); SEED records the oracle file hash and app commit on every run and flags a changed pin. First set: RAFT analytic cases (for example inhour, prompt jump, replay) chosen from its validation docs; the first real adapter through SEED, CLI/MCP and direct agree on every oracle [A9]. PRA's entries (AND 0.02, OR 0.28, A AND A 0.1, A OR A 0.1, shared-event 0.044) are added when PRA's P2 passes.
 - [ ] MCP server over the core; tool descriptions state limits and refusals; **[codex]** review (R3).
 - [ ] Tier enforcement in the core, tested: an agent cannot raise its own tier, loosen a tolerance or override a refusal [A3], [A5].
 - [ ] Cancellation, crash, partial output, edit conflict, relocation and stale-result handling on the real adapter [A2], [A6].
-- [ ] Standalone launch of PRA unchanged by its adapter.
+- [ ] Standalone launch of the app unchanged by its adapter.
 - [ ] Measure and record per-adapter resource limits (wall-clock, cores, memory) in `describe`.
 - [ ] E2 exit review: **[codex]** (R4).
 
@@ -130,13 +130,13 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 - A common mesh and coordinate convention across OpenMC, NODAL and the fuel case, if the per-recipe declarations prove repetitive.
 - One log convention shared by dev agents and engineering agents without mixing them.
 
-## Decisions waiting (the user's)
+## Decisions
 
-- [ ] MCP only, or MCP plus a plain CLI.
-- [ ] Study record as project files, or an embedded store with files as the export.
-- [ ] Oracle registry in this repo, or in each app's repo with SEED indexing it.
-- [ ] Where tier enforcement runs.
-- [ ] UI framework for project, study and report views; packaging; first real adapter if PRA is late.
+Decided 2026-10-03 (see [docs/DECISIONS.md](docs/DECISIONS.md)): D1 MCP and CLI both; D2 project files; D3 app-owned oracles; D4 enforcement in the core library; D5 Virtual Reactor first adapter; D6 UI framework deferred to E3.
+
+Still waiting (the user's):
+- [ ] UI framework for project, study and report views (decide at E3); packaging.
+- [ ] Policy file format and who may sign it.
 
 ## Done
 

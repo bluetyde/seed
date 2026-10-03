@@ -45,7 +45,7 @@ Two principles drive the shape:
 | Core (`src/core`, planned) | Everything in the diagram's box, with no Electron imports | planned (E1) |
 | Adapters (beside each app, or in `adapters/`) | Translate the verbs to one app's entry points | planned; fake adapter in E0 |
 | MCP server (planned) | Expose the verbs as agent tools, through the core only | planned (E2) |
-| Oracle registry (`oracles/`) | Cases with known answers | planned (E0 schema, E2 v1) |
+| Oracle runner and index | Runs each app's own oracle entries (kept in the app repo); pins file hash and app commit; keeps a small set for the fake adapter | planned (E0 schema, E2 v1) |
 
 ## Interfaces
 
@@ -56,7 +56,7 @@ Five contracts. Each is a JSON document with a `schema` identifier and a version
 - Project ID, name, created/updated, SEED version that wrote it.
 - References to native artifacts: relative path (portable), app ID, native format and version, **revision** (content hash under the app's own hashing rules, plus a monotonic counter), and where the app stores its own manifest.
 - Material records: stable material ID, immutable revision, display name, namespaced property sets ([plan 02](plans/02-project-and-materials.md)).
-- Reserved folders: `models/`, `runs/`, `studies/`, `oracles/` (empty is fine).
+- Reserved folders: `models/`, `runs/`, `studies/`, `oracles/` for verdicts and pinned oracle references (empty is fine).
 - Paths are relative and portable; installed app locations live in user configuration (`installs.json`, implemented), never in the project. Windows and WSL paths are distinguished by an explicit kind, not guessed.
 
 ### 2. Adapter messages (core to app and back)
@@ -117,7 +117,7 @@ The cache key is: input hashes, material revisions, mapping recipe, adapter and 
 
 ## Policy and gates
 
-The core holds the study's tier ([plans/05](plans/05-agent-harness.md)). Every verb call carries an actor and passes through the gate: tier allows the verb, the budget has room, parameters are within bounds, the revision is current. A stop is recorded in the study record and returned as a typed refusal. Nothing in an adapter reply or in app content can change tier, budget, bounds or tolerance.
+Enforcement lives in the core library, run in-process by the host and by a headless process otherwise (decision D4, [DECISIONS.md](DECISIONS.md)). The core holds the study's tier ([plans/05](plans/05-agent-harness.md)). Every verb call carries an actor and passes through the gate: tier allows the verb, the budget has room, parameters are within bounds, the revision is current. A stop is recorded in the study record and returned as a typed refusal. Nothing in an adapter reply or in app content can change tier, budget, bounds or tolerance.
 
 ## Conventions
 
@@ -141,7 +141,7 @@ experiment-studio/                (repo bluetyde/seed)
   src/core/        project store, policy, scheduler, run store, oracle runner, study record, report builder (planned)
   src/mcp/         MCP server (planned)
   adapters/        fake/ (E0); one folder per app only where the app repo cannot hold it
-  oracles/         registry: entries and results, per adapter
+  oracles/         fake adapter entries only; each app keeps its own entries in its repo (decision D3)
   examples/        teaching cases and demonstration studies
   tests/           unit, e2e (implemented), harness acceptance tests (planned)
 ```
@@ -151,7 +151,7 @@ experiment-studio/                (repo bluetyde/seed)
 ```
  Schemas + fixtures (E0) --------+
                                  |
- Fake adapter (E0) ---------+    +--> E1 project + headless core --> E2 PRA adapter + MCP + oracles v1
+ Fake adapter (E0) ---------+    +--> E1 project + headless core --> E2 first adapter (Virtual Reactor) + CLI/MCP + oracles v1
                             |                                              |
  Tier policy (E0) ----------+                                              +--> E3 sweeps, study record, reports, replay
                                                                            |
@@ -160,5 +160,5 @@ experiment-studio/                (repo bluetyde/seed)
 
 - **Schemas and the fake adapter come first**, because every later piece reads or writes them and the harness tests need no physics.
 - E1 (project, headless core) and the E0 harness tests can proceed in parallel once the schemas settle.
-- E2 depends on PRA's own P2 gate. If PRA is late, a NODAL or Virtual Reactor adapter can take its place.
+- E2 depends on the E0 inventory confirming a usable headless entry point in Virtual Reactor (decision D5). PRA follows when its own P2 gate passes; if RAFT has no usable entry point, fall back to PRA or NODAL and record a new decision.
 - E4 depends on Fuel Performance Studio F3 and an OpenMC result adapter, which are owned by those apps' plans.

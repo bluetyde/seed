@@ -75,12 +75,16 @@ Numbered as in the workspace plan. Tests 1, 3, 4, 5 and 6 need only the fake ada
 6. Two writers: the second save with a stale revision is rejected and recorded.
 7. Replay reproduces the stored study, or lists each difference.
 8. A report is generated only from the record; each figure traces to a run ID; the educational-use statement is present.
-9. PRA through MCP and PRA direct agree on every PRA oracle.
+9. The first real adapter (Virtual Reactor) through the CLI/MCP and directly agree on every oracle; PRA repeats this when built.
 10. The E4 transfer refuses wrong units, a stale revision and incomplete coverage, and conserves total mapped power within the tolerance fixed beforehand.
+
+## Decisions (2026-10-03, see [../DECISIONS.md](../DECISIONS.md))
+
+- D1: MCP and a plain CLI, both thin front-ends over one core.
+- D4: enforcement is in the core library, run in-process by the host and by a headless process otherwise. Approvals are pluggable (GUI dialog, or a human-run CLI command when no window exists). No MCP or CLI surface has an approve action for an agent. Grants are scoped to study, actor, operation, input revisions and expiry.
+- The threat model is an agent making mistakes through MCP or CLI, not an agent with shell access to the account; the study record's hash chain detects edits but cannot prevent them.
 
 ## Open
 
-- MCP only, or MCP plus a plain CLI.
-- Where enforcement runs: core inside the host's main process, or a separate small service the host also talks to.
 - Policy file format and who may sign it.
 - Whether agents get per-agent tokens and per-agent budgets.
