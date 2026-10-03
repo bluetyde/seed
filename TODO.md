@@ -157,3 +157,11 @@ See [plan 11](docs/plans/11-runtime-and-shared-acceptance.md). SEED owns managed
 - [ ] W6: integrate the reviewed OpenMC runtime recipe and run R7-R9 on the final artifact, plus material preservation R10.
 - [ ] Coordinate W7 (large-import MCNP export) in OpenMC's own repo; SEED only records relevant integration/version effects.
 - [ ] Keep implementation and verification states separate; sign off each platform/app combination actually tested.
+
+## Runtime foundation progress (2026-10-03, Codex)
+
+- [x] SEED-only entry-point inventory: docs/runtime-inventory.md. App-package inspection remains outside this claim.
+- [x] Startup cancellation generation: pending attach/port/readiness work cannot revive a closed app; concurrent reopen waits for cleanup; HTTP 2xx required for readiness.
+- [x] Regression evidence: 72 full-suite tests passed before the last added real-child test; targeted final lifecycle suite 16/16; build passed; Electron e2e 10 passed/3 existing skips. Four new race/readiness checks fail on the previous source.
+- [ ] Runtime manifest/activation transaction implementation and fake-artifact R1-R3/R6.
+- [ ] Forced host-death cleanup, WSL-side leases, process-start identity and authenticated health remain unimplemented; do not mark all W3 done.
