@@ -1,0 +1,9 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "describe",
+  "requestId": "req-1",
+  "actor": {
+    "kind": "ZZ-INSTANCE-MARKER-ZZ",
+    "name": "Alice"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "status",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "jobId": "job-1",
+    "native": {
+      "status": "ok",
+      "detail": "everything normal"
+    }
+  }
+}

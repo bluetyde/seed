@@ -1,0 +1,17 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "run",
+  "requestId": "req-1",
+  "actor": {
+    "kind": "human",
+    "name": "Alice",
+    "toolVersion": "1.0.0"
+  },
+  "runDir": "runs/run-1",
+  "budget": {
+    "maxWallSeconds": 3600,
+    "maxCores": 8,
+    "maxMemoryMB": 16384,
+    "maxDiskMB": 32768
+  }
+}

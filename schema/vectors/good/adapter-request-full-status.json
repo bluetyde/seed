@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "status",
+  "requestId": "req-full-status",
+  "actor": {
+    "kind": "human",
+    "name": "StatusHuman",
+    "model": "model-optional",
+    "toolVersion": "1.0.0"
+  },
+  "jobId": "job-status-1",
+  "extensions": {
+    "pollInterval": 5
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "open",
+  "requestId": "req-1",
+  "ok": false,
+  "errors": [
+    {
+      "code": "W_SOMETHING",
+      "field": "",
+      "message": "warn",
+      "source": "seed"
+    }
+  ],
+  "warnings": []
+}

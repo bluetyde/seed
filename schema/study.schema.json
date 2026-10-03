@@ -1,0 +1,399 @@
+{
+  "$id": "https://seed.invalid/schema/study.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "discriminator": {
+    "propertyName": "type"
+  },
+  "properties": {
+    "schema": {
+      "const": "seed.study/0.1"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["header", "step", "conclusion"]
+    },
+    "prev": {
+      "anyOf": [
+        {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hash": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+    }
+  },
+  "required": ["schema", "type"],
+  "dependentRequired": {
+    "hash": ["prev"],
+    "prev": ["hash"]
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.study/0.1"
+        },
+        "prev": {
+          "anyOf": [
+            {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hash": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+        },
+        "type": {
+          "const": "header"
+        },
+        "seq": {
+          "const": 0
+        },
+        "studyId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "created": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time"
+        },
+        "projectId": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "hypothesis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "min", "max"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+              },
+              "artifact": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "unit": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit"
+              }
+            }
+          }
+        },
+        "budget": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/budget"
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["A0", "A1", "A2", "A3"]
+        },
+        "startRevisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["artifact", "revision"],
+            "additionalProperties": false,
+            "properties": {
+              "artifact": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+              },
+              "revision": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+              }
+            }
+          }
+        },
+        "setBy": {
+          "allOf": [
+            {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "human"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "studyId",
+        "created",
+        "projectId",
+        "question",
+        "assumptions",
+        "parameters",
+        "budget",
+        "tier",
+        "startRevisions",
+        "setBy"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.study/0.1"
+        },
+        "prev": {
+          "anyOf": [
+            {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hash": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+        },
+        "type": {
+          "const": "step"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "time": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time"
+        },
+        "actor": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "validate",
+            "run",
+            "oracle",
+            "edit",
+            "compare",
+            "collect",
+            "cancel",
+            "note",
+            "gate-stop"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "inputsChanged": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["artifact", "before", "after"],
+            "additionalProperties": false,
+            "properties": {
+              "artifact": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+              },
+              "before": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+              },
+              "after": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+              }
+            }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+          }
+        },
+        "oracle": {
+          "type": "object",
+          "required": ["set", "verdict"],
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "verdict": {
+              "type": "string",
+              "enum": ["pass", "fail", "not-run"]
+            }
+          }
+        },
+        "gateStop": {
+          "type": "object",
+          "required": ["request", "rule"],
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "rule": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "time",
+        "actor",
+        "action",
+        "reason",
+        "inputsChanged",
+        "runs"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "action": {
+            "const": "gate-stop"
+          }
+        }
+      },
+      "then": {
+        "required": ["gateStop"],
+        "properties": {
+          "gateStop": {
+            "type": "object"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "gateStop": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "schema": {
+          "const": "seed.study/0.1"
+        },
+        "prev": {
+          "anyOf": [
+            {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hash": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+        },
+        "type": {
+          "const": "conclusion"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "time": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time"
+        },
+        "actor": {
+          "allOf": [
+            {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "enum": ["human", "agent"]
+                }
+              }
+            }
+          ]
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "runs", "oracles"],
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+                }
+              },
+              "oracles": {
+                "type": "array",
+                "items": {
+                  "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+                }
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "runs": {
+                    "type": "array",
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "oracles": {
+                    "type": "array",
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "required": ["type", "seq", "time", "actor", "claims"],
+      "additionalProperties": false
+    }
+  ]
+}

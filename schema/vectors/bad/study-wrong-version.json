@@ -1,0 +1,39 @@
+{
+  "schema": "seed.study/0.2",
+  "type": "header",
+  "seq": 0,
+  "studyId": "study-01",
+  "created": "2026-10-03T12:00:00Z",
+  "projectId": "proj-1",
+  "question": "How does temperature affect Doppler feedback in UO2 pin?",
+  "hypothesis": "Higher fuel temperature reduces reactivity via resonance broadening.",
+  "assumptions": [
+    "uniform temperature",
+    "fixed geometry"
+  ],
+  "parameters": [
+    {
+      "id": "fuel_temp",
+      "min": 300,
+      "max": 1200,
+      "unit": "1"
+    }
+  ],
+  "budget": {
+    "maxWallSeconds": 3600,
+    "maxCores": 8,
+    "maxMemoryMB": 16384,
+    "maxDiskMB": 32768
+  },
+  "tier": "A1",
+  "startRevisions": [
+    {
+      "artifact": "art-core",
+      "revision": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "setBy": {
+    "kind": "human",
+    "name": "Dr. Alice Smith"
+  }
+}

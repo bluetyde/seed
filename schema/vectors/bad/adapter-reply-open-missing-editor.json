@@ -1,0 +1,9 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "open",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {}
+}

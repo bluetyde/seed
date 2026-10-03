@@ -1,0 +1,14 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "describe",
+  "requestId": "req-full-desc",
+  "actor": {
+    "kind": "agent",
+    "name": "DescribeAgent",
+    "model": "gpt-4",
+    "toolVersion": "1.0.0"
+  },
+  "extensions": {
+    "client": "seed-studio"
+  }
+}

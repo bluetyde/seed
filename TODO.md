@@ -11,19 +11,19 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 
 **Track 1: contracts (Claude; judgment, safety)**
 1. [ ] App inventory ([plan 03](docs/plans/03-adapters-and-transport.md)): for OpenMC Studio, NODAL Studio and Virtual Reactor, one table row per verb with the real entry point, headless or not, existing manifest and hashing rules; PRA and Fuel marked `not built`. Evidence: `docs/inventory.md`.
-2. [ ] Settle the transport details against the fake: CLI first, then MCP over the same command set (decision D1); decide whether apps are reached by CLI, local service or both. Evidence: decision record in `docs/plans/03`, and a fake-adapter test run over the chosen transport.
-3. [ ] Write the contract text for the five interfaces ([ARCHITECTURE](docs/ARCHITECTURE.md)): adapter messages with typed error codes, results index, project manifest and material envelope, study record, oracle entry. Include the migration policy.
+2. [ ] Settle the transport details: CLI-per-verb (request on stdin, one reply on stdout, exit 0 = reply produced) now works end to end against the fake adapter on Windows and Linux (`src/core/adapterClient.ts`, tests/fake-adapter.test.ts) and is provisional. Still open: MCP over the same command set (decision D1); how real apps are reached (CLI, local service or both) once the inventory (item 1) is done. Evidence so far: 31 fake-adapter tests, 2026-10-03.
+3. [x] 2026-10-03: Contract text v0.1 written: [docs/contracts.md](docs/contracts.md) (adapter request and reply, results index, run record, project manifest, study record, oracle entry, typed errors, semantic checks, paths). Status: proposed; not yet reviewed by Codex or the user.
 4. [ ] Tier policy and gate semantics ([plan 05](docs/plans/05-agent-harness.md)): the verb-to-tier table, what a gate stop records, grant scope (study, actor, operation, input revisions, expiry), pluggable approval (GUI dialog or human-run CLI command; no client surface can approve). Enforcement is in the core library (decision D4).
 
 **Track 2: tests that need no physics (after Track 1 item 3)**
-5. [ ] **[agy]** JSON Schemas with a good and a bad fixture per rule, plus a validator; every error code has a failing bad fixture. Needs item 3 written; brief must carry units, the escaping rule and the unknown-version rule.
-6. [ ] **[agy]** **[fake]** Fake adapter (success, each validation error, crash, hang, partial output, trip, stale revision, instruction-like text). Needs items 2 and 5.
-7. [ ] **[agy]** **[fake]** Harness tests [A1], [A3], [A4], [A5], [A6] as vitest cases; each must fail against a deliberately broken gate.
+5. [x] 2026-10-03 **[agy]** JSON Schemas (8 families + error codes), validator with typed errors (`src/core/validate.ts`), canonical JSON and hashing, semantic checks and study-log chain verification (`src/core/semantic.ts`). 177 example fixtures plus 1344 generated per-property cases transcribed independently from the contract (tests/schema-contract.test.ts). Mutation sweep of the schemas (517 single-constraint loosenings): 403 caught, up from 120 before the generated tests; the remaining 114 are mostly redundant duplicate constraints, enum-extension mutants and string-length bounds the contract does not specify. Open: decide those length bounds in the contract.
+6. [x] 2026-10-03 **[agy]** **[fake]** Fake adapter (`tests/fixtures/fake-adapter/cli.cjs`, `job.cjs`: all seven verbs; scenarios success, slow, crash, hang, partial and NaN output, trip, silent exit; adapter-level modes crash, hang, garbage, wrong id or verb, schema-invalid, huge reply, injection text) and the adapter client (`src/core/adapterClient.ts`, `src/core/procTree.ts`). 31 tests; pass on Windows 11 and Ubuntu (WSL), no orphan processes left.
+7. [~] 2026-10-03 Harness tests, partly done: [A1] typed error with field and unit reaches the caller; [A2] crash, hang, partial output and trip end failed or terminated-by-trip with no accepted results (tests/run-lifecycle.test.ts); [A4] instruction-like text is stored and shown as data and starts nothing (fake adapter and report tests); [A5] over-budget request stops at the gate and is logged (`gate-stops.jsonl`); [A6] stale input revision refused. Not yet: [A3] (needs the oracle runner), A2-tier approval stop, [A6] second-writer save (needs the project store).
 8. [ ] **[codex]** Review of schemas, validator, fake adapter and gate (R1).
 
 **Track 3: project core (parallel after item 3)**
-9. [ ] Headless core skeleton (no Electron imports) with the project store; the shell becomes a client of it with no behaviour change in the existing tests ([plan 01](docs/plans/01-shell-and-installer.md), [02](docs/plans/02-project-and-materials.md)).
-10. [ ] **[agy]** Path conversion function (Windows, WSL, posix, spaces, UNC, traversal) with a table test. Run step 0 first; may be cheaper to write directly.
+9. [~] 2026-10-03 Headless core started: `src/core/` (validate, semantic, canonical, paths, adapterClient, procTree, runManager, atomicFile, report) has no Electron imports. Not yet: project store, policy/tier gate, scheduler beyond one run, and making the shell a client of it.
+10. [x] 2026-10-03 **[agy]** Path conversion (`src/core/paths.ts`): Windows, WSL, POSIX and UNC mapping, portable relative paths, inside-root check; 61 table and property tests plus 2 dispatcher edge cases. Verified on Windows and Linux only lexically (no real WSL mount or share).
 
 **Housekeeping**
 11. [ ] Run the real-app integration check on Windows and Linux hosts; configuration coverage is not runtime verification.
@@ -33,6 +33,9 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 15. [ ] Align with the PRA and Fuel plans written 2026-10-03 (`pra-studio/`, `fuel-performance-studio/`): their oracle entries use this repo's oracle-entry format and their adapters follow plan 03; reconcile the schemas when E0 task 3 lands.
 
 ## Now
+
+- [x] 2026-10-03: Codex review (silent-failure-hunter and security-boundary-verifier) of the E0 branch: 15 distinct findings, all confirmed against the code and fixed with tests (docs/contracts.md section 10). Known limits left: path checks are not race-free (check then use); on Windows `killTree` cannot verify descendants that outlive their parent; reservation directories rely on `recover()` after a crash; recorded below as follow-ups.
+- [ ] Follow-ups from the review: a project-wide lock instead of per-request reservations; Windows job objects for tree kills; open files by handle after containment checks.
 
 - [x] 2026-10-03: Plan, ARCHITECTURE, WORKFLOWS, TOOLING, AGENT-TASKS and plans 01 to 10 written in this structure (documentation only; branch `claude/agentic-harness`).
 - [x] 2026-10-03: Shared `experiment-studio` folder fast-forwarded to origin/main (clean tree, Windows git).
@@ -89,7 +92,7 @@ Depends on the E0 inventory confirming that Virtual Reactor has a usable headles
 - [ ] Typed parameter catalog from each adapter; bounded sweeps; explicit budgets (cases, wall-clock, cores, memory, disk); one active case per engine until limits are measured.
 - [ ] Study record in use: every step with actor, reason, runs and oracle verdict; append-only.
 - [ ] Comparison of compatible quantities only, with normalization and uncertainty; failed, cancelled, trip and stale runs visible.
-- [ ] **[agy]** Report builder (HTML and Markdown) from a study record fixture; every figure links to a run ID; educational-use statement; injected text escaped [A8].
+- [~] 2026-10-03 **[agy]** Report builder done (`src/core/report.ts`, 14 tests: deterministic HTML and Markdown, escaping fuzzed over every free-text field, failed attempts listed, UNVERIFIED and STALE badges, educational-use statement); still to do: wire it to real study and run files, and view it in a browser. Original item: Report builder (HTML and Markdown) from a study record fixture; every figure links to a run ID; educational-use statement; injected text escaped [A8].
 - [ ] Replay: reproduces within tolerance or lists each difference (version, seed, library, input hash) [A7].
 - [ ] Cache key includes inputs, material revisions, mapping recipe, versions, settings, seeds; one test per component.
 - [ ] E3 exit review: **[codex]**.

@@ -1,0 +1,22 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "validate",
+  "requestId": "req-full-val",
+  "actor": {
+    "kind": "agent",
+    "name": "ValidateAgent",
+    "model": "gpt-4",
+    "toolVersion": "1.0.0"
+  },
+  "artifact": {
+    "path": "models/core.inp",
+    "revision": {
+      "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "counter": 1
+    }
+  },
+  "operation": "run",
+  "extensions": {
+    "dryRun": true
+  }
+}

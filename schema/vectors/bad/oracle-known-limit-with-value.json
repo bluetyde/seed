@@ -1,0 +1,36 @@
+{
+  "schema": "seed.oracle/0.1",
+  "oracleId": "oracle-relativistic-limit",
+  "entryVersion": 1,
+  "adapter": "openmc-adapter",
+  "adapterVersions": [
+    "*"
+  ],
+  "tag": "known-limit",
+  "inputs": [
+    {
+      "path": "models/extreme-energy.xml",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "expected": {
+    "quantity": "q",
+    "value": 1,
+    "unit": "1"
+  },
+  "source": {
+    "kind": "published",
+    "text": "Published limitation in user manual section 4"
+  },
+  "coverage": {
+    "quantities": [
+      "cross_section"
+    ],
+    "domain": "high-energy-physics"
+  },
+  "toleranceHash": "0b6566436a4d5a5598e0806e5b5a98b9671255dd1581915f7a15e0a335826833",
+  "tolerance": {
+    "abs": 0,
+    "rel": 0
+  }
+}

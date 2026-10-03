@@ -1,0 +1,298 @@
+{
+  "$id": "https://seed.invalid/schema/oracle.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "seed.oracle/0.1"
+    },
+    "oracleId": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+    },
+    "entryVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "adapter": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+    },
+    "adapterVersions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "tag": {
+      "type": "string",
+      "enum": ["good", "bad-input", "known-limit"]
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/inputRef"
+      }
+    },
+    "expected": {
+      "type": "object",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["quantity", "value", "unit"],
+          "additionalProperties": false,
+          "properties": {
+            "quantity": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "value": {
+              "type": "number"
+            },
+            "unit": {
+              "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["refusalCode"],
+          "additionalProperties": false,
+          "properties": {
+            "refusalCode": {
+              "type": "string",
+              "pattern": "^[EW]_[A-Z0-9_]{2,40}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["verdict"],
+          "additionalProperties": false,
+          "properties": {
+            "verdict": {
+              "type": "string",
+              "enum": ["out-of-domain", "truncated", "unsupported"]
+            }
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["hand", "analytic", "published", "direct-engine"]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "check": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["quantities", "domain"],
+      "additionalProperties": false,
+      "properties": {
+        "quantities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "tolerance": {
+      "type": "object",
+      "required": ["abs", "rel"],
+      "additionalProperties": false,
+      "properties": {
+        "abs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rel": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "toleranceHash": {
+      "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+    }
+  },
+  "required": [
+    "schema",
+    "oracleId",
+    "entryVersion",
+    "adapter",
+    "adapterVersions",
+    "tag",
+    "inputs",
+    "expected",
+    "source",
+    "coverage",
+    "toleranceHash"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "expected": {
+            "type": "object",
+            "required": ["value"],
+            "properties": {
+              "value": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "tolerance": {
+            "type": "object",
+            "required": ["abs", "rel"],
+            "additionalProperties": false,
+            "properties": {
+              "abs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "rel": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "required": ["tolerance"]
+      },
+      "else": {
+        "properties": {
+          "tolerance": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "tag": {
+            "const": "good"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expected": {
+            "type": "object",
+            "required": ["value", "quantity", "unit"],
+            "additionalProperties": false,
+            "properties": {
+              "quantity": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "tag": {
+            "const": "bad-input"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expected": {
+            "type": "object",
+            "required": ["refusalCode"],
+            "additionalProperties": false,
+            "properties": {
+              "refusalCode": {
+                "type": "string",
+                "pattern": "^[EW]_[A-Z0-9_]{2,40}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "tag": {
+            "const": "known-limit"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expected": {
+            "type": "object",
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["verdict"],
+                "additionalProperties": false,
+                "properties": {
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "out-of-domain",
+                      "truncated",
+                      "unsupported"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["refusalCode"],
+                "additionalProperties": false,
+                "properties": {
+                  "refusalCode": {
+                    "type": "string",
+                    "pattern": "^[EW]_[A-Z0-9_]{2,40}$"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

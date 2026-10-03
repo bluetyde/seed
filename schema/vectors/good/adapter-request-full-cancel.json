@@ -1,0 +1,15 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "cancel",
+  "requestId": "req-full-cancel",
+  "actor": {
+    "kind": "human",
+    "name": "CancelHuman",
+    "model": "model-optional",
+    "toolVersion": "1.0.0"
+  },
+  "jobId": "job-cancel-1",
+  "extensions": {
+    "reason": "user requested abort"
+  }
+}

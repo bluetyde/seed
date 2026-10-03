@@ -1,0 +1,13 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "run",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "jobId": "job-1",
+    "runDir": "runs/1",
+    "lifecycle": "completed"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "open",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [
+    {
+      "code": "E_APP_FAILED",
+      "field": "",
+      "message": "failed",
+      "source": "seed"
+    }
+  ],
+  "warnings": [],
+  "result": {
+    "editor": "opened"
+  }
+}
