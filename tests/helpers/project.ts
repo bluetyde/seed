@@ -1,7 +1,20 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { isAlive, killTree } from "../../src/core/procTree";
+
+export function isProcessAlive(pid: number): boolean {
+  if (!isAlive(pid)) return false;
+  try {
+    const status = readFileSync(`/proc/${pid}/status`, "utf8");
+    if (/State:\s+Z\s+\(zombie\)/i.test(status)) {
+      return false;
+    }
+  } catch {
+    // If /proc/<pid>/status is not readable, fall back to isAlive
+  }
+  return true;
+}
 
 export interface TempProject {
   root: string;
@@ -35,7 +48,7 @@ export function createTempProject(prefix = "seed-test-proj-"): TempProject {
   const cleanup = async (): Promise<void> => {
     for (const pid of pids) {
       try {
-        if (isAlive(pid)) {
+        if (isProcessAlive(pid)) {
           await killTree(pid);
         }
       } catch {
