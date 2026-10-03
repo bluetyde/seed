@@ -5,6 +5,7 @@
 // It wraps RAFT's headless runner (raft-headless.mjs, built by `npm run build:headless` in RAFT's web folder).
 // The runner's location comes from the environment of the host, never from a project file or a request:
 //   SEED_RAFT_HEADLESS   absolute path of raft-headless.mjs
+//   SEED_RAFT_ORACLES    optional, absolute path of RAFT's oracles/seed/entries folder: describe reports the coverage of its good entries
 // The project root comes from SEED_PROJECT_ROOT (set by the adapter client).
 
 const fs = require("node:fs");
@@ -263,6 +264,32 @@ async function main() {
   }
 }
 
+/** Quantities and domains the oracle entries claim (good entries only), or [] when no entries folder is configured. */
+function oracleCoverage() {
+  const dir = process.env.SEED_RAFT_ORACLES;
+  if (!dir || !path.isAbsolute(dir)) return [];
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".json")).sort();
+  } catch {
+    return [];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const n of names) {
+    const e = readJson(path.join(dir, n));
+    if (!e || e.schema !== "seed.oracle/0.1" || e.tag !== "good" || e.adapter !== ADAPTER.id || !e.coverage) continue;
+    for (const q of Array.isArray(e.coverage.quantities) ? e.coverage.quantities : []) {
+      const key = q + "|" + e.coverage.domain;
+      if (typeof q === "string" && typeof e.coverage.domain === "string" && !seen.has(key)) {
+        seen.add(key);
+        out.push({ quantity: q, domain: e.coverage.domain.slice(0, 500) });
+      }
+    }
+  }
+  return out;
+}
+
 async function describe(reply, fail) {
   const bundle = bundlePath();
   if (!bundle) return fail(setupError());
@@ -278,7 +305,7 @@ async function describe(reply, fail) {
       capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "replay"],
       parameters: [{ id: "seed", type: "integer", min: 0 }],
       quantities: QUANTITIES.map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
-      oracleCoverage: [],
+      oracleCoverage: oracleCoverage(),
     },
   });
 }
