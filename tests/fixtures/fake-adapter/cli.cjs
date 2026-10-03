@@ -783,7 +783,9 @@ process.stdin.on("end", async () => {
       return;
     }
 
-    const runId = path.basename(request.runDir);
+    // Test hook: extensions.fake.collect forges the collect output so the host's verification can be exercised.
+    const collectMode = request.extensions && request.extensions.fake ? request.extensions.fake.collect : undefined;
+    const runId = collectMode === "wrong-run-id" ? "r-someone-else" : path.basename(request.runDir);
     const outSha256 = crypto.createHash("sha256").update(outContent).digest("hex");
     const inputHashes = job.inputs;
     const inputRevisions = inputHashes.map((i) => i.sha256);
@@ -814,8 +816,8 @@ process.stdin.on("end", async () => {
             inputRevisions,
           },
           data: {
-            path: `${request.runDir}/native/out.json`,
-            sha256: outSha256,
+            path: collectMode === "missing-data-file" ? `${request.runDir}/native/nope.json` : `${request.runDir}/native/out.json`,
+            sha256: collectMode === "bad-data-hash" ? "1".repeat(64) : outSha256,
           },
           verification: "unverified",
         },
@@ -835,7 +837,7 @@ process.stdin.on("end", async () => {
         jobId: request.jobId,
         lifecycle: "completed",
         resultsIndex: `${request.runDir}/results.json`,
-        resultsSha256,
+        resultsSha256: collectMode === "bad-index-hash" ? "0".repeat(64) : resultsSha256,
       },
     });
     return;

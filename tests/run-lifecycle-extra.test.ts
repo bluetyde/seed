@@ -48,3 +48,43 @@ describe("RunManager: unreadable requests.json", () => {
     expect(existsSync(join(runsDir, "gate-stops.jsonl"))).toBe(false);
   });
 });
+
+// The host must refuse forged or inconsistent collect output instead of recording a completed run.
+describe("RunManager: collect verification", () => {
+  for (const [mode, field] of [
+    ["bad-index-hash", "/resultsIndex"],
+    ["wrong-run-id", "/runId"],
+    ["bad-data-hash", ""],
+    ["missing-data-file", ""],
+  ] as const) {
+    it("a forged collect (" + mode + ") ends failed with E_OUTPUT_INCOMPLETE and records no outputs", async () => {
+      const proj = createTempProject("seed-collect-");
+      projects.push(proj);
+      const model = JSON.stringify({ name: "pin", counter: 1, fake: { validate: "ok" } }) + "\n";
+      proj.createFile("models/pin.json", model);
+      const hash = sha256Hex(model);
+      const mgr = new RunManager({
+        projectRoot: proj.root,
+        runsFolder: "runs",
+        adapter: { command: process.execPath, args: [cliPath], id: "fake", version: "0.1.0" },
+        pollMs: 50,
+      });
+      const out = await mgr.start({
+        requestId: "req-forged-" + mode,
+        actor: { kind: "human", name: "tester" },
+        artifact: { path: "models/pin.json", revision: { hash, counter: 1 } },
+        inputs: [{ path: "models/pin.json", sha256: hash }],
+        settings: { scenario: "success", delayMs: 100 },
+        budget: { maxWallSeconds: 30, maxCores: 1, maxMemoryMB: 512, maxDiskMB: 512 },
+        extensions: { fake: { collect: mode } },
+      });
+      expect(out.ok).toBe(true);
+      if (!out.ok) return;
+      expect(out.state).toBe("failed");
+      expect(out.record.outputs).toBeUndefined();
+      const errors = JSON.parse(readFileSync(join(proj.root, "runs", out.runId, "log", "errors.json"), "utf8")) as { code: string; field: string }[];
+      expect(errors[0]?.code).toBe("E_OUTPUT_INCOMPLETE");
+      if (field) expect(errors[0]?.field).toBe(field);
+    });
+  }
+});
