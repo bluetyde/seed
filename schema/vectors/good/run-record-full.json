@@ -1,0 +1,58 @@
+{
+  "schema": "seed.run-record/0.1",
+  "runId": "run-completed",
+  "attempt": 1,
+  "adapter": {
+    "id": "openmc-adapter",
+    "version": "1.0.0"
+  },
+  "engine": {
+    "name": "openmc",
+    "version": "0.14.0"
+  },
+  "dataLibrary": {
+    "id": "endfb-7.1",
+    "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  },
+  "jobId": "job-101",
+  "native": {
+    "status": "ok",
+    "detail": "normal"
+  },
+  "state": "completed",
+  "inputs": [
+    {
+      "path": "models/core.inp",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "settings": {
+    "particles": 5000
+  },
+  "budget": {
+    "maxWallSeconds": 3600,
+    "maxCores": 8,
+    "maxMemoryMB": 16384,
+    "maxDiskMB": 32768
+  },
+  "budgetUsed": {
+    "wallSeconds": 300,
+    "cores": 8,
+    "memoryMB": 1024,
+    "diskMB": 2048
+  },
+  "createdAt": "2026-10-03T12:00:00Z",
+  "startedAt": "2026-10-03T12:00:05Z",
+  "finishedAt": "2026-10-03T12:05:00Z",
+  "seed": 42,
+  "cacheKey": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  "outputs": [
+    {
+      "path": "output/statepoint.h5",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "extensions": {
+    "runTag": "test"
+  }
+}

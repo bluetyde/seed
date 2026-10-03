@@ -1370,5 +1370,90 @@
       "code": "E_SCHEMA_INVALID",
       "field": "/toleranceHash"
     }
+  },
+  {
+    "file": "good/adapter-request-full-describe.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-full-open.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-full-validate.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-full-run.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-full-status.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-full-cancel.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-request-full-collect.json",
+    "family": "adapter-request",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-full-describe.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-full-status.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-full-validate.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-full-error.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/results-index-full.json",
+    "family": "results-index",
+    "valid": true
+  },
+  {
+    "file": "good/run-record-full.json",
+    "family": "run-record",
+    "valid": true
+  },
+  {
+    "file": "good/project-full.json",
+    "family": "project",
+    "valid": true
+  },
+  {
+    "file": "good/study-full-header.json",
+    "family": "study",
+    "valid": true
+  },
+  {
+    "file": "good/study-full-step.json",
+    "family": "study",
+    "valid": true
+  },
+  {
+    "file": "good/study-full-conclusion.json",
+    "family": "study",
+    "valid": true
   }
 ]

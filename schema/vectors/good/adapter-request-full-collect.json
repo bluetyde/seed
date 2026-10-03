@@ -1,0 +1,16 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "collect",
+  "requestId": "req-full-collect",
+  "actor": {
+    "kind": "human",
+    "name": "CollectHuman",
+    "model": "model-optional",
+    "toolVersion": "1.0.0"
+  },
+  "jobId": "job-collect-1",
+  "runDir": "runs/run-001",
+  "extensions": {
+    "archive": true
+  }
+}
