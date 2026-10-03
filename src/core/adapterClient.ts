@@ -219,6 +219,23 @@ export function callAdapter(
         return;
       }
 
+      // A reply must answer THIS request: the job and run directory it names must be the ones asked about.
+      const sentRequest = request as Record<string, unknown>;
+      const replyResult = replyRecord.result as Record<string, unknown> | undefined;
+      if (replyRecord.ok === true && replyResult !== undefined) {
+        if (
+          (verb === "status" || verb === "cancel" || verb === "collect") &&
+          replyResult.jobId !== sentRequest.jobId
+        ) {
+          resolve({ ok: false, errors: [makeAppFailed("reply jobId does not match", tail)] });
+          return;
+        }
+        if (verb === "run" && replyResult.runDir !== sentRequest.runDir) {
+          resolve({ ok: false, errors: [makeAppFailed("reply runDir does not match", tail)] });
+          return;
+        }
+      }
+
       resolve({
         ok: true,
         reply: replyObj,

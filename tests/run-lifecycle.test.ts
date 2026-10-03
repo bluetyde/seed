@@ -477,13 +477,25 @@ describe("RunManager lifecycle", () => {
       settings: { scenario: "hang" },
     });
 
-    await new Promise((r) => setTimeout(r, 400));
-
+    // Wait until both jobs really exist (process start-up time varies by machine); a fixed sleep was flaky.
     const reqsPath = join(proj.root, "runs", "requests.json");
-    expect(existsSync(reqsPath)).toBe(true);
-    const reqs = JSON.parse(readFileSync(reqsPath, "utf8"));
-    const runId1 = reqs["req-cancel-1"].runId;
-    const runId2 = reqs["req-cancel-2"].runId;
+    const jobFile = (runId: string): string => join(proj.root, "runs", runId, "native", "job.json");
+    const readIds = (): string[] | null => {
+      try {
+        const r = JSON.parse(readFileSync(reqsPath, "utf8"));
+        return r["req-cancel-1"] && r["req-cancel-2"] ? [r["req-cancel-1"].runId, r["req-cancel-2"].runId] : null;
+      } catch {
+        return null;
+      }
+    };
+    const deadline = Date.now() + 10000;
+    let ids = readIds();
+    while (Date.now() < deadline && !(ids && existsSync(jobFile(ids[0]!)) && existsSync(jobFile(ids[1]!)))) {
+      await new Promise((r) => setTimeout(r, 50));
+      ids = readIds();
+    }
+    expect(ids).not.toBeNull();
+    const [runId1, runId2] = ids as [string, string];
 
     const job1 = JSON.parse(readFileSync(join(proj.root, "runs", runId1, "native", "job.json"), "utf8"));
     const job2 = JSON.parse(readFileSync(join(proj.root, "runs", runId2, "native", "job.json"), "utf8"));

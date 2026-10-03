@@ -158,6 +158,22 @@ process.stdin.on("end", async () => {
       setInterval(() => {}, 1000);
       return;
     }
+    if (fakeMode === "wrong-job-id") {
+      // A schema-valid reply that is about a different job (or run directory) than the one asked about.
+      const results = {
+        status: { jobId: "job-other", lifecycle: "running", native: { status: "running" } },
+        cancel: { jobId: "job-other", lifecycle: "cancelled", cancelled: true },
+        collect: { jobId: "job-other", lifecycle: "completed", resultsIndex: "runs/other/results.json", resultsSha256: "0".repeat(64) },
+        run: { jobId: "job-other", runDir: "runs/other", lifecycle: "running" },
+      };
+      sendReply({ ok: true, errors: [], warnings: [], result: results[verb] });
+      return;
+    }
+    if (fakeMode === "cancel-not-confirmed") {
+      // The adapter answers but does not stop the job.
+      sendReply({ ok: true, errors: [], warnings: [], result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
+      return;
+    }
     if (fakeMode === "garbage") {
       process.stdout.write("not json\n", () => process.exit(0));
       return;
@@ -802,7 +818,7 @@ process.stdin.on("end", async () => {
         name: "fake-engine",
         version: "0.0.1",
       },
-      inputHashes,
+      inputHashes: collectMode === "bad-input-hashes" ? [{ path: inputHashes[0].path, sha256: "2".repeat(64) }] : inputHashes,
       nativeStatus: {
         status: "finished",
       },
@@ -813,11 +829,17 @@ process.stdin.on("end", async () => {
           normalization: "none",
           provenance: {
             runId,
-            inputRevisions,
+            inputRevisions: collectMode === "bad-provenance" ? ["3".repeat(64)] : inputRevisions,
           },
           data: {
-            path: collectMode === "missing-data-file" ? `${request.runDir}/native/nope.json` : `${request.runDir}/native/out.json`,
-            sha256: collectMode === "bad-data-hash" ? "1".repeat(64) : outSha256,
+            path:
+              collectMode === "missing-data-file"
+                ? `${request.runDir}/native/nope.json`
+                : collectMode === "outside-run-data"
+                  ? inputHashes[0].path
+                  : `${request.runDir}/native/out.json`,
+            sha256:
+              collectMode === "bad-data-hash" ? "1".repeat(64) : collectMode === "outside-run-data" ? inputHashes[0].sha256 : outSha256,
           },
           verification: "unverified",
         },

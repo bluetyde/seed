@@ -1,6 +1,6 @@
 import type { TypedError } from "./validate";
 import { validate } from "./validate";
-import { checkResultsIndex, verifyStudyLog } from "./semantic";
+import { checkResultsAgainstRecord, checkResultsIndex, verifyStudyLog } from "./semantic";
 
 export const EDUCATIONAL_USE_STATEMENT =
   "This report was produced for education. It is not a licensing-grade analysis, a safety assessment or a prediction of the behavior of any real plant. Results hold only under the stated assumptions and within the verified coverage.";
@@ -229,7 +229,32 @@ function prefixField(field: string, runId: string): string {
   return `/runs/${runId}/${field}`;
 }
 
+/**
+ * Run keys and series keys come from untrusted documents and may be names such as "constructor" or "__proto__":
+ * copy them into objects without a prototype so lookups only ever see data the caller supplied.
+ */
 export function buildReport(
+  input: ReportInput
+): { ok: true; value: ReportOutput } | { ok: false; errors: TypedError[] } {
+  const runs: Record<string, ReportRun> = Object.create(null);
+  for (const [key, value] of Object.entries(input.runs ?? {})) {
+    const series = value.series ? Object.assign(Object.create(null), value.series) : undefined;
+    runs[key] = { ...value, ...(series ? { series } : {}) };
+  }
+  return buildReportChecked({ ...input, runs });
+}
+
+function extent(values: number[]): [number, number] {
+  let lo = values[0] as number;
+  let hi = values[0] as number;
+  for (const v of values) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return [lo, hi];
+}
+
+function buildReportChecked(
   input: ReportInput
 ): { ok: true; value: ReportOutput } | { ok: false; errors: TypedError[] } {
   // 1. verifyStudyLog(studyLines) returns errors -> return them
@@ -405,6 +430,18 @@ export function buildReport(
         };
       }
 
+      const provenanceErrors = checkResultsAgainstRecord(reportRun.results, reportRun.record);
+      if (provenanceErrors.length > 0) {
+        return {
+          ok: false,
+          errors: provenanceErrors.map((e) => ({
+            ...e,
+            code: "E_OUTPUT_INCOMPLETE",
+            field: prefixField(e.field, runId)
+          }))
+        };
+      }
+
       const resSemErrors = checkResultsIndex(reportRun.results);
       if (resSemErrors.length > 0) {
         return {
@@ -574,10 +611,8 @@ export function buildReport(
     captionText: string,
     series: Series
   ): { svgHtml: string; tableHtml: string; tableMd: string } {
-    const minX = Math.min(...series.x);
-    const maxX = Math.max(...series.x);
-    const minY = Math.min(...series.y);
-    const maxY = Math.max(...series.y);
+    const [minX, maxX] = extent(series.x);
+    const [minY, maxY] = extent(series.y);
 
     const left = 60;
     const right = 450;
