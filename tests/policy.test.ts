@@ -301,3 +301,21 @@ describe("two actors", () => {
     expect(evaluateGate(req("enable_transfer", other, { inputRevisions: REV }), ctx("A3", { grants: [g] })).allow).toBe(false);
   });
 });
+
+describe("review fixes (Codex, 2026-10-03)", () => {
+  it("a grant dated in the future does not authorize anything yet", () => {
+    const g = grantFor("enable_transfer", { issuedAt: "2026-10-04T00:00:00Z", expires: "2026-10-05T00:00:00Z" });
+    const d = evaluateGate(req("enable_transfer", agent, { inputRevisions: REV }), ctx("A3", { grants: [g] }));
+    expect(d.allow).toBe(false);
+    if (!d.allow) expect(d.errors[0]?.message).toContain("not valid yet");
+    const bad = grantFor("enable_transfer", { issuedAt: "tomorrow" });
+    expect(evaluateGate(req("enable_transfer", agent, { inputRevisions: REV }), ctx("A3", { grants: [bad] })).allow).toBe(false);
+  });
+
+  it("running oracles on a busy engine is refused like running a case", () => {
+    expect(evaluateGate(req("run_oracles", agent, { engine: "nodal", activeOnEngine: 1 }), ctx("A1")).allow).toBe(false);
+    expect(evaluateGate(req("run_oracles", agent, { engine: "nodal", activeOnEngine: 0 }), ctx("A1")).allow).toBe(true);
+    // a failed oracle set must still be re-runnable on an idle engine
+    expect(evaluateGate(req("run_oracles", agent, { engine: "nodal", activeOnEngine: 0 }), ctx("A1", { oracleBlocked: true })).allow).toBe(true);
+  });
+});

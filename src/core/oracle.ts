@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { resolveInside } from "./paths";
 import type { Actor } from "./policy";
@@ -48,6 +48,7 @@ export function evaluateOracle(entry: OracleEntry, observed: unknown): { verdict
     if (typeof want !== "number" || !Number.isFinite(want) || entry.tolerance === undefined) return fail("entry has no usable value or tolerance");
     const limit = entry.tolerance.abs + entry.tolerance.rel * Math.abs(want);
     const diff = Math.abs(got - want);
+    if (!Number.isFinite(limit) || !Number.isFinite(diff)) return fail("comparison overflowed; refusing to judge it");
     return diff <= limit ? { verdict: "pass" } : fail(`|${got} - ${want}| = ${diff} exceeds ${limit}`);
   }
   if ("refusalCode" in exp) {
@@ -75,8 +76,15 @@ export function loadOracleEntries(dir: string): { entries: IndexedOracle[]; erro
   const seen = new Set<string>();
   for (const name of names) {
     const path = join(dir, name);
-    if (!statSync(path).isFile()) continue;
-    const bytes = readFileSync(path);
+    let bytes: Buffer;
+    try {
+      if (!statSync(path).isFile()) continue;
+      bytes = readFileSync(path);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      errors.push(err(code === "ENOENT" ? "E_NOT_FOUND" : "E_INTERNAL", name, `cannot read oracle file: ${code ?? String(e)}`));
+      continue;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(bytes.toString("utf8"));
@@ -117,7 +125,14 @@ export function checkOracleInputs(entry: OracleEntry, baseDir: string): TypedErr
     }
     let bytes: Buffer;
     try {
-      bytes = readFileSync(at.value);
+      const realBase = realpathSync(baseDir);
+      const realFile = realpathSync(at.value);
+      const norm = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+      if (!norm(realFile).startsWith(norm(realBase.endsWith(sep) ? realBase : realBase + sep))) {
+        errors.push(err("E_PATH_TRAVERSAL", `/inputs/${i}/path`, `${input.path} resolves outside the oracle folder`));
+        return;
+      }
+      bytes = readFileSync(realFile);
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       errors.push(err(code === "ENOENT" ? "E_NOT_FOUND" : "E_INTERNAL", `/inputs/${i}/path`, `cannot read ${input.path}: ${code ?? String(e)}`));
@@ -134,7 +149,9 @@ export type SetResult = {
   adapter: string;
   adapterVersion: string;
   verdict: "pass" | "fail" | "not-run";
-  /** True unless every run level 1-4 entry passed and at least one good entry ran. */
+  /** False when no `baseDir` was given: entry inputs were not hash-checked, so the set can never clear the gate. */
+  inputsVerified: boolean;
+  /** True unless every run level 1-4 entry passed, at least one good entry ran and the inputs were verified. */
   blocked: boolean;
   /** Quantities whose known-limit entry failed: recorded, and those quantities are unverified. */
   blockedQuantities: string[];
@@ -146,7 +163,7 @@ export type RunOracleSetOptions = {
   entries: IndexedOracle[];
   adapter: { id: string; version: string };
   appCommit: string;
-  /** Where entry inputs live; when given, their hashes are checked before the case runs. */
+  /** Where entry inputs live; their hashes are checked before each case runs. Without it the set cannot clear the gate. */
   baseDir?: string;
   run: (entry: OracleEntry) => Promise<Observed>;
 };
@@ -169,7 +186,8 @@ export async function runOracleSet(opts: RunOracleSetOptions): Promise<SetResult
   let anyFail = false;
   let goodPassed = 0;
   for (const item of chosen) {
-    const e = item.entry;
+    // Work on a private copy: the callback gets its own copy, so it cannot change what the result is judged against.
+    const e = JSON.parse(JSON.stringify(item.entry)) as OracleEntry;
     const base = { oracleId: e.oracleId, entryVersion: e.entryVersion, tag: e.tag };
     if (!e.adapterVersions.includes("*") && !e.adapterVersions.includes(opts.adapter.version)) {
       results.push({ ...base, verdict: "not-run", reason: `adapter version ${opts.adapter.version} is not covered` });
@@ -186,7 +204,7 @@ export async function runOracleSet(opts: RunOracleSetOptions): Promise<SetResult
     let verdict: "pass" | "fail";
     let reason: string | undefined;
     try {
-      const out = evaluateOracle(e, await opts.run(e));
+      const out = evaluateOracle(e, await opts.run(JSON.parse(JSON.stringify(e)) as OracleEntry));
       verdict = out.verdict;
       reason = out.reason;
     } catch (caught) {
@@ -207,7 +225,8 @@ export async function runOracleSet(opts: RunOracleSetOptions): Promise<SetResult
     adapter: opts.adapter.id,
     adapterVersion: opts.adapter.version,
     verdict,
-    blocked: verdict !== "pass" || goodPassed === 0,
+    inputsVerified: opts.baseDir !== undefined,
+    blocked: verdict !== "pass" || goodPassed === 0 || opts.baseDir === undefined,
     blockedQuantities: [...blockedQuantities].sort(),
     results,
     pins: pinsOf(chosen, opts.appCommit)

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -11,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { writeFileAtomic } from "./atomicFile";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { isPortableRelative, resolveInside } from "./paths";
@@ -30,6 +31,8 @@ export type LockOptions = {
   now?: () => Date;
   /** Test hook: runs after a lock was judged stale and before it is renamed away (to force the takeover race). */
   beforeTakeover?: () => void;
+  /** Test hook: replaces the recursive delete used for lock folders (to force a failed release). */
+  removeTree?: (path: string) => void;
 };
 
 export const MANIFEST_FILE = "seed.project.json";
@@ -226,12 +229,93 @@ export function openProject(dir: string): StoreResult<Project> {
 }
 
 type LockAcquireResult =
-  | { ok: true; release: () => void }
+  | { ok: true; release: () => TypedError | null }
   | { ok: false; errors: TypedError[] };
+
+type LockJudgement =
+  | { state: "missing" }
+  | { state: "held" }
+  | { state: "stale" }
+  | { state: "error"; error: TypedError };
+
+function sameDir(a: string, b: string): boolean {
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+/** `.seed` must be a real directory directly inside the project: a link would send lock files and deletes elsewhere. */
+function checkSeedDir(dir: string, seedDir: string): TypedError | null {
+  try {
+    if (lstatSync(seedDir).isSymbolicLink()) {
+      return {
+        code: "E_PATH_TRAVERSAL",
+        field: "/.seed",
+        message: ".seed is a link; the project's metadata folder must be a real folder inside the project",
+        source: "seed",
+      };
+    }
+    const real = realpathSync(seedDir);
+    if (!sameDir(dirname(real), realpathSync(dir))) {
+      return {
+        code: "E_PATH_TRAVERSAL",
+        field: "/.seed",
+        message: ".seed resolves outside the project",
+        source: "seed",
+      };
+    }
+    return null;
+  } catch (err: unknown) {
+    return toInternalError(err);
+  }
+}
+
+function judgeLock(lockDir: string, ownerPath: string, o: Required<Pick<LockOptions, "staleMs" | "graceMs" | "isAlive" | "host" | "now">>): LockJudgement {
+  let owner: { pid: number; host: string; acquiredAt: string } | null = null;
+  try {
+    const parsed = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown> | null;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      typeof parsed.pid === "number" &&
+      typeof parsed.host === "string" &&
+      typeof parsed.acquiredAt === "string"
+    ) {
+      owner = { pid: parsed.pid, host: parsed.host, acquiredAt: parsed.acquiredAt };
+    }
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // A missing or half-written owner file is judged below by the age of the lock directory.
+    if (code !== "ENOENT" && !(err instanceof SyntaxError)) {
+      return { state: "error", error: toInternalError(err) };
+    }
+  }
+  const nowMs = o.now().getTime();
+  if (owner !== null) {
+    if (owner.host === o.host) {
+      let alive = true;
+      try {
+        alive = o.isAlive(owner.pid);
+      } catch {
+        alive = true; // cannot tell: treat the owner as alive
+      }
+      return alive ? { state: "held" } : { state: "stale" };
+    }
+    const acquired = new Date(owner.acquiredAt).getTime();
+    return !Number.isNaN(acquired) && nowMs - acquired > o.staleMs ? { state: "stale" } : { state: "held" };
+  }
+  try {
+    return nowMs - statSync(lockDir).mtimeMs > o.graceMs ? { state: "stale" } : { state: "held" };
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { state: "missing" };
+    return { state: "error", error: toInternalError(err) };
+  }
+}
+
+const RELEASE_RETRY_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY", "EACCES"]);
 
 function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
   const seedDir = join(dir, ".seed");
   const lockDir = join(seedDir, "lock");
+  const guardDir = join(seedDir, "takeover");
   const ownerPath = join(lockDir, "owner.json");
 
   try {
@@ -239,169 +323,136 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
   } catch (err: unknown) {
     return { ok: false, errors: [toInternalError(err)] };
   }
+  const seedProblem = checkSeedDir(dir, seedDir);
+  if (seedProblem !== null) {
+    return { ok: false, errors: [seedProblem] };
+  }
 
   const waitMs = opts?.waitMs ?? 0;
-  const staleMs = opts?.staleMs ?? 600000;
-  const graceMs = opts?.graceMs ?? 5000;
-  const checkAlive = opts?.isAlive ?? defaultIsAlive;
-  const currentHost = opts?.host ?? os.hostname();
-  const getNow = opts?.now ?? (() => new Date());
+  const judging = {
+    staleMs: opts?.staleMs ?? 600000,
+    graceMs: opts?.graceMs ?? 5000,
+    isAlive: opts?.isAlive ?? defaultIsAlive,
+    host: opts?.host ?? os.hostname(),
+    now: opts?.now ?? (() => new Date()),
+  };
+  const removeTree = opts?.removeTree ?? ((p: string) => rmSync(p, { recursive: true, force: true }));
+  const deadline = Date.now() + waitMs;
 
-  const startTime = Date.now();
-  const deadline = startTime + waitMs;
-
-  while (true) {
+  for (;;) {
     let acquired = false;
     try {
       mkdirSync(lockDir);
       acquired = true;
     } catch (err: unknown) {
-      const nodeErr = err as NodeJS.ErrnoException;
-      if (nodeErr && nodeErr.code === "EEXIST") {
-        acquired = false;
-      } else {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
         return { ok: false, errors: [toInternalError(err)] };
       }
     }
 
     if (acquired) {
       const token = randomBytes(16).toString("hex");
-      const ownerId = randomBytes(8).toString("hex");
       const ownerInfo = {
-        ownerId,
+        ownerId: randomBytes(8).toString("hex"),
         pid: process.pid,
-        host: currentHost,
-        acquiredAt: getNow().toISOString(),
+        host: judging.host,
+        acquiredAt: judging.now().toISOString(),
         token,
       };
       try {
         writeFileSync(ownerPath, JSON.stringify(ownerInfo, null, 2) + "\n", "utf8");
       } catch (err: unknown) {
         try {
-          rmSync(lockDir, { recursive: true, force: true });
-        } catch {
-          // ignore
+          removeTree(lockDir);
+        } catch (cleanup: unknown) {
+          return {
+            ok: false,
+            errors: [toInternalError(err), { ...toInternalError(cleanup), message: `lock folder could not be removed after a failed write: ${toInternalError(cleanup).message}` }],
+          };
         }
         return { ok: false, errors: [toInternalError(err)] };
       }
 
-      const release = () => {
-        try {
-          if (existsSync(ownerPath)) {
-            const content = readFileSync(ownerPath, "utf8");
-            const readOwner = JSON.parse(content);
-            if (readOwner?.token === token) {
-              rmSync(lockDir, { recursive: true, force: true });
+      const release = (): TypedError | null => {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const current = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown } | null;
+            if (current === null || current.token !== token) return null; // not ours any more: leave it alone
+            removeTree(lockDir);
+            return null;
+          } catch (err: unknown) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === "ENOENT" || err instanceof SyntaxError) return null; // already gone, or replaced by another owner
+            if (RELEASE_RETRY_CODES.has(code ?? "") && attempt < 3) {
+              sleepSync(25);
+              continue;
             }
+            const e = toInternalError(err);
+            return { ...e, message: `the project lock could not be released (run recoverProject once the cause is fixed): ${e.message}` };
           }
-        } catch {
-          // If owner.json is not readable or token doesn't match, leave it alone
         }
+        return null;
       };
-
       return { ok: true, release };
     }
 
-    // Lock directory already exists. Check if stale.
-    let isStale = false;
-    let ownerReadOk = false;
-    let judgedToken: string | undefined;
-    let ownerData: { pid?: number; host?: string; acquiredAt?: string; [key: string]: unknown } | null = null;
-
-    try {
-      const ownerContent = readFileSync(ownerPath, "utf8");
-      const parsed = JSON.parse(ownerContent);
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        typeof parsed.pid === "number" &&
-        typeof parsed.host === "string" &&
-        typeof parsed.acquiredAt === "string"
-      ) {
-        ownerData = parsed;
-        ownerReadOk = true;
-        judgedToken = typeof parsed.token === "string" ? parsed.token : undefined;
-      }
-    } catch {
-      ownerReadOk = false;
+    // The lock exists. Judge it; a stale lock is taken over under the takeover guard.
+    const first = judgeLock(lockDir, ownerPath, judging);
+    if (first.state === "error") {
+      return { ok: false, errors: [first.error] };
     }
+    if (first.state === "missing") continue;
 
-    const nowMs = getNow().getTime();
-
-    if (ownerReadOk && ownerData) {
-      if (ownerData.host === currentHost) {
-        let alive = true;
-        try {
-          alive = checkAlive(ownerData.pid!);
-        } catch {
-          alive = true;
-        }
-        if (!alive) {
-          isStale = true;
-        }
-      } else {
-        const acqTime = new Date(ownerData.acquiredAt!).getTime();
-        if (!isNaN(acqTime) && nowMs - acqTime > staleMs) {
-          isStale = true;
-        }
-      }
-    } else {
-      try {
-        const st = statSync(lockDir);
-        const dirAge = nowMs - st.mtimeMs;
-        if (dirAge > graceMs) {
-          isStale = true;
-        }
-      } catch (err: unknown) {
-        const nodeErr = err as NodeJS.ErrnoException;
-        if (nodeErr && nodeErr.code === "ENOENT") {
-          continue;
-        }
-        return { ok: false, errors: [toInternalError(err)] };
-      }
-    }
-
-    if (isStale) {
-      const staleDir = join(seedDir, `lock.stale-${randomBytes(8).toString("hex")}`);
-      let renamed = false;
+    if (first.state === "stale") {
       opts?.beforeTakeover?.();
+      let guarded = false;
       try {
-        renameSync(lockDir, staleDir);
-        renamed = true;
+        mkdirSync(guardDir);
+        guarded = true;
       } catch (err: unknown) {
-        const nodeErr = err as NodeJS.ErrnoException;
-        if (nodeErr && nodeErr.code === "ENOENT") {
-          continue;
-        } else {
-          renamed = false;
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+          return { ok: false, errors: [toInternalError(err)] };
         }
-      }
-
-      if (renamed) {
-        // Another process may have replaced the stale lock between our judgement and the rename: then we moved
-        // a live lock. Compare the token we judged with the one in the directory we now hold; put a live lock back.
-        let movedToken: string | undefined;
+        // Another contender holds the guard. A guard that old was abandoned by a crashed contender.
         try {
-          const moved = JSON.parse(readFileSync(join(staleDir, "owner.json"), "utf8")) as { token?: unknown };
-          movedToken = typeof moved.token === "string" ? moved.token : undefined;
-        } catch {
-          movedToken = undefined; // no readable owner: nothing live to protect beyond what we judged
-        }
-        if (movedToken !== undefined && movedToken !== judgedToken) {
-          try {
-            renameSync(staleDir, lockDir);
-          } catch (err: unknown) {
-            return { ok: false, errors: [toInternalError(err)] };
+          if (judging.now().getTime() - statSync(guardDir).mtimeMs > judging.graceMs) removeTree(guardDir);
+        } catch (guardErr: unknown) {
+          if ((guardErr as NodeJS.ErrnoException).code !== "ENOENT") {
+            return { ok: false, errors: [toInternalError(guardErr)] };
           }
-          renamed = false;
         }
       }
-
-      if (renamed) {
+      if (guarded) {
         try {
-          rmSync(staleDir, { recursive: true, force: true });
-        } catch {
-          // ignore
+          // Judge again under the guard: only a guard holder removes a lock that is not its own, so a lock
+          // that is stale now cannot be replaced before the rename below.
+          const second = judgeLock(lockDir, ownerPath, judging);
+          if (second.state === "error") {
+            return { ok: false, errors: [second.error] };
+          }
+          if (second.state === "stale") {
+            const staleDir = join(seedDir, `lock.stale-${randomBytes(8).toString("hex")}`);
+            try {
+              renameSync(lockDir, staleDir);
+            } catch (err: unknown) {
+              if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+                return { ok: false, errors: [toInternalError(err)] };
+              }
+              continue;
+            }
+            try {
+              removeTree(staleDir);
+            } catch (err: unknown) {
+              const e = toInternalError(err);
+              return { ok: false, errors: [{ ...e, message: `a stale lock was moved aside but not deleted (${staleDir}): ${e.message}` }] };
+            }
+          }
+        } finally {
+          try {
+            removeTree(guardDir);
+          } catch {
+            // an abandoned guard is removed by the next contender once it is older than graceMs
+          }
         }
         continue;
       }
@@ -410,34 +461,63 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
     if (Date.now() >= deadline) {
       return {
         ok: false,
-        errors: [
-          {
-            code: "E_PROJECT_LOCKED",
-            field: "",
-            message: `Project is locked: ${dir}`,
-            source: "seed",
-          },
-        ],
+        errors: [{ code: "E_PROJECT_LOCKED", field: "", message: `Project is locked: ${dir}`, source: "seed" }],
       };
     }
-
-    const remaining = deadline - Date.now();
-    const sleepTime = Math.min(25, Math.max(1, remaining));
-    sleepSync(sleepTime);
+    sleepSync(Math.min(25, Math.max(1, deadline - Date.now())));
   }
 }
 
+function isThenable(v: unknown): boolean {
+  return v !== null && (typeof v === "object" || typeof v === "function") && typeof (v as { then?: unknown }).then === "function";
+}
+
+/** Runs a synchronous `fn` under the writer lock. A promise-returning `fn` is refused: use `withProjectLockAsync`. */
 export function withProjectLock<T>(dir: string, fn: () => T, opts?: LockOptions): StoreResult<T> {
   const acq = acquireLock(dir, opts);
   if (!acq.ok) {
     return acq;
   }
+  let val: T;
   try {
-    const val = fn();
-    return { ok: true, value: val };
-  } finally {
+    val = fn();
+  } catch (err: unknown) {
     acq.release();
+    throw err;
   }
+  const releaseError = acq.release();
+  if (isThenable(val)) {
+    // The callback's work is not covered by the lock. Keep a rejection from becoming an unhandled one.
+    (val as unknown as Promise<unknown>).then(undefined, () => undefined);
+    return {
+      ok: false,
+      errors: [{ code: "E_INTERNAL", field: "", message: "withProjectLock needs a synchronous callback; use withProjectLockAsync for async work", source: "seed" }],
+    };
+  }
+  if (releaseError !== null) {
+    return { ok: false, errors: [releaseError] };
+  }
+  return { ok: true, value: val };
+}
+
+/** Holds the writer lock until the promise returned by `fn` settles. */
+export async function withProjectLockAsync<T>(dir: string, fn: () => Promise<T>, opts?: LockOptions): Promise<StoreResult<T>> {
+  const acq = acquireLock(dir, opts);
+  if (!acq.ok) {
+    return acq;
+  }
+  let val: T;
+  try {
+    val = await fn();
+  } catch (err: unknown) {
+    acq.release();
+    throw err;
+  }
+  const releaseError = acq.release();
+  if (releaseError !== null) {
+    return { ok: false, errors: [releaseError] };
+  }
+  return { ok: true, value: val };
 }
 
 export function saveProject(
@@ -450,7 +530,27 @@ export function saveProject(
   if (!acq.ok) {
     return acq;
   }
+  let result: StoreResult<Project>;
   try {
+    result = saveLocked(dir, manifest, expectedRevision, opts);
+  } catch (err: unknown) {
+    acq.release();
+    throw err;
+  }
+  const releaseError = acq.release();
+  if (releaseError !== null) {
+    return { ok: false, errors: [{ ...releaseError, message: (result.ok ? "the project was saved, but " : "") + releaseError.message }] };
+  }
+  return result;
+}
+
+function saveLocked(
+  dir: string,
+  manifest: Record<string, unknown>,
+  expectedRevision: string,
+  opts?: LockOptions & { now?: () => Date }
+): StoreResult<Project> {
+  {
     const manifestPath = join(dir, MANIFEST_FILE);
     if (!existsSync(manifestPath)) {
       return {
@@ -621,8 +721,6 @@ export function saveProject(
 
     const newRev = projectRevision(newManifest);
     return { ok: true, value: { manifest: newManifest, revision: newRev } };
-  } finally {
-    acq.release();
   }
 }
 
@@ -631,8 +729,20 @@ export function recoverProject(dir: string, opts?: LockOptions): StoreResult<str
   if (!acq.ok) {
     return acq;
   }
-  const removed: string[] = [];
+  let result: StoreResult<string[]>;
   try {
+    result = recoverLocked(dir);
+  } catch (err: unknown) {
+    acq.release();
+    throw err;
+  }
+  const releaseError = acq.release();
+  return releaseError !== null ? { ok: false, errors: [releaseError] } : result;
+}
+
+function recoverLocked(dir: string): StoreResult<string[]> {
+  const removed: string[] = [];
+  {
     if (existsSync(dir)) {
       const rootEntries = readdirSync(dir);
       for (const entry of rootEntries) {
@@ -663,8 +773,6 @@ export function recoverProject(dir: string, opts?: LockOptions): StoreResult<str
         }
       }
     }
-  } finally {
-    acq.release();
   }
 
   return { ok: true, value: removed };

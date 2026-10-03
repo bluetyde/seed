@@ -30,6 +30,7 @@ import {
   resolveArtifact,
   saveProject,
   withProjectLock,
+  withProjectLockAsync,
 } from "../src/core/projectStore";
 import { checkProject } from "../src/core/semantic";
 import { validate } from "../src/core/validate";
@@ -1241,5 +1242,142 @@ describe("Project Store: stale takeover race (added by the dispatcher)", () => {
     expect(res).toEqual({ ok: true, value: "ran" });
     expect(hook).toBe(1);
     expect(readdirSync(join(dir, ".seed"))).toEqual([]);
+  });
+});
+
+describe("Project Store: review fixes (Codex, 2026-10-03)", () => {
+  function fresh(): string {
+    const dir = makeTempDir();
+    createProject(dir, { name: "Fix", seedVersion: "0.1.0" });
+    return dir;
+  }
+  const lockDirOf = (dir: string) => join(dir, ".seed", "lock");
+
+  it("a linked .seed folder is refused before anything is written or deleted outside the project", () => {
+    const dir = fresh();
+    const outside = makeTempDir("seed-outside-");
+    mkdirSync(join(outside, "lock.stale-fixture"));
+    writeFileSync(join(outside, "lock.stale-fixture", "sentinel.txt"), "keep", "utf8");
+    try {
+      symlinkSync(outside, join(dir, ".seed"), "junction");
+    } catch {
+      return; // links not permitted in this environment
+    }
+    const opened = openProject(dir);
+    if (!opened.ok) throw new Error("open failed");
+    for (const res of [
+      withProjectLock(dir, () => 1),
+      saveProject(dir, { ...opened.value.manifest, name: "X" }, opened.value.revision),
+      recoverProject(dir),
+    ]) {
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.errors[0]?.code).toBe("E_PATH_TRAVERSAL");
+    }
+    expect(readdirSync(outside)).toEqual(["lock.stale-fixture"]);
+    expect(readFileSync(join(outside, "lock.stale-fixture", "sentinel.txt"), "utf8")).toBe("keep");
+  });
+
+  it("the synchronous lock refuses a promise-returning callback; the async one holds the lock until it settles", async () => {
+    const dir = fresh();
+    const syncRes = withProjectLock(dir, (() => Promise.resolve(1)) as () => unknown);
+    expect(syncRes.ok).toBe(false);
+    if (!syncRes.ok) expect(syncRes.errors[0]?.message).toContain("withProjectLockAsync");
+    expect(existsSync(lockDirOf(dir))).toBe(false);
+
+    let resume!: () => void;
+    const gate = new Promise<void>((r) => {
+      resume = r;
+    });
+    const first = withProjectLockAsync(dir, async () => {
+      await gate;
+      return "done";
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    const second = withProjectLock(dir, () => "entered");
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.errors[0]?.code).toBe("E_PROJECT_LOCKED");
+    resume();
+    expect(await first).toEqual({ ok: true, value: "done" });
+    expect(existsSync(lockDirOf(dir))).toBe(false);
+    await expect(withProjectLockAsync(dir, async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+    expect(existsSync(lockDirOf(dir))).toBe(false);
+  });
+
+  it("a release that fails is reported, and a save that committed says so", () => {
+    const dir = fresh();
+    const opened = openProject(dir);
+    if (!opened.ok) throw new Error("open failed");
+    const failing = { removeTree: () => { throw Object.assign(new Error("busy"), { code: "EIO" }); } };
+    const res = withProjectLock(dir, () => 1, failing);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.errors[0]?.code).toBe("E_INTERNAL");
+      expect(res.errors[0]?.message).toContain("could not be released");
+    }
+    rmSync(lockDirOf(dir), { recursive: true, force: true });
+    const saved = saveProject(dir, { ...opened.value.manifest, name: "Committed" }, opened.value.revision, failing);
+    expect(saved.ok).toBe(false);
+    if (!saved.ok) expect(saved.errors[0]?.message).toContain("the project was saved, but");
+    const after = openProject(dir);
+    expect(after.ok && after.value.manifest.name).toBe("Committed");
+  });
+
+  it("a transient release error (EBUSY) is retried", () => {
+    const dir = fresh();
+    let calls = 0;
+    const flaky = {
+      removeTree: (p: string) => {
+        calls++;
+        if (calls === 1) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+        rmSync(p, { recursive: true, force: true });
+      },
+    };
+    expect(withProjectLock(dir, () => 1, flaky)).toEqual({ ok: true, value: 1 });
+    expect(existsSync(lockDirOf(dir))).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it("only one contender takes over a stale lock: a fresh takeover guard held by another means held", () => {
+    const dir = fresh();
+    mkdirSync(lockDirOf(dir), { recursive: true });
+    writeFileSync(join(lockDirOf(dir), "owner.json"), JSON.stringify({ ownerId: "o", pid: 424242, host: "h", acquiredAt: "2026-10-03T00:00:00Z", token: "t" }), "utf8");
+    mkdirSync(join(dir, ".seed", "takeover"));
+    const res = withProjectLock(dir, () => "ran", { host: "h", isAlive: () => false });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors[0]?.code).toBe("E_PROJECT_LOCKED");
+    expect(existsSync(lockDirOf(dir))).toBe(true);
+  });
+
+  it("a takeover guard abandoned by a crashed contender is removed once it is old", () => {
+    const dir = fresh();
+    mkdirSync(lockDirOf(dir), { recursive: true });
+    writeFileSync(join(lockDirOf(dir), "owner.json"), JSON.stringify({ ownerId: "o", pid: 424242, host: "h", acquiredAt: "2026-10-03T00:00:00Z", token: "t" }), "utf8");
+    const guard = join(dir, ".seed", "takeover");
+    mkdirSync(guard);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(guard, old, old);
+    const res = withProjectLock(dir, () => "ran", { host: "h", isAlive: () => false, waitMs: 500 });
+    expect(res).toEqual({ ok: true, value: "ran" });
+    expect(readdirSync(join(dir, ".seed"))).toEqual([]);
+  });
+
+  it("a lock replaced by a live owner after the first judgement is never moved aside (re-judged under the guard)", () => {
+    const dir = fresh();
+    const write = (pid: number, token: string) => {
+      mkdirSync(lockDirOf(dir), { recursive: true });
+      writeFileSync(join(lockDirOf(dir), "owner.json"), JSON.stringify({ ownerId: "o", pid, host: "h", acquiredAt: "2026-10-03T00:00:00Z", token }), "utf8");
+    };
+    write(424242, "old");
+    const res = withProjectLock(dir, () => "never", {
+      host: "h",
+      isAlive: (pid) => pid === 777,
+      beforeTakeover: () => {
+        rmSync(lockDirOf(dir), { recursive: true, force: true });
+        write(777, "live");
+      },
+    });
+    expect(res.ok).toBe(false);
+    expect(JSON.parse(readFileSync(join(lockDirOf(dir), "owner.json"), "utf8")).token).toBe("live");
+    expect(readdirSync(join(dir, ".seed")).sort()).toEqual(["lock"]);
   });
 });
