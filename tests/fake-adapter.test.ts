@@ -1206,8 +1206,12 @@ describe("5. procTree", () => {
   it("killTree kills a parent and its child", async () => {
     const parentScript = `
       const { spawn } = require("node:child_process");
-      const child = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)"], { stdio: "ignore" });
-      console.log(process.pid + "," + child.pid);
+      // Report the pids only after the child is really running: killing the tree while the child is still being
+      // created races with process start-up (Windows reports error 0x800700e8 when the pipe closes mid-launch).
+      const child = spawn(process.execPath, ["-e", "console.log('ready'); setInterval(()=>{}, 1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+      child.stdout.once("data", () => {
+        console.log(process.pid + "," + child.pid);
+      });
       setInterval(() => {}, 1000);
     `;
     const parent = spawn(process.execPath, ["-e", parentScript], {

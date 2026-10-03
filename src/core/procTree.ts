@@ -16,37 +16,36 @@ export function isAlive(pid: number): boolean {
   }
 }
 
-export async function killTree(pid: number): Promise<void> {
+/**
+ * Stops a process and everything it started. Returns true when the pid is observed dead within 5 s, false when it is
+ * still alive (the caller must say so; the process is not reported as stopped). Only an invalid pid throws.
+ * Errors from the kill attempt itself (taskkill missing, EPERM) are not thrown: the liveness check after the attempt is the
+ * single source of truth for the result.
+ */
+export async function killTree(pid: number): Promise<boolean> {
   if (pid === 0 || pid === 1 || pid === process.pid || pid < 0 || !Number.isInteger(pid)) {
     throw new RangeError(`Refusing to kill pid ${pid}`);
   }
 
   if (process.platform === "win32") {
-    try {
+    await new Promise<void>((resolve) => {
       const cp = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
         windowsHide: true,
         stdio: "ignore",
       });
-      cp.on("error", () => {});
-    } catch {
-      // Ignore spawn errors
-    }
+      cp.once("error", () => resolve());
+      cp.once("close", () => resolve());
+    });
   } else {
     try {
       process.kill(-pid, "SIGKILL");
     } catch (err: unknown) {
-      const nodeErr = err as NodeJS.ErrnoException;
-      if (nodeErr && nodeErr.code === "ESRCH") {
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") {
         try {
           process.kill(pid, "SIGKILL");
-        } catch (err2: unknown) {
-          const nodeErr2 = err2 as NodeJS.ErrnoException;
-          if (!nodeErr2 || nodeErr2.code !== "ESRCH") {
-            throw err2;
-          }
+        } catch {
+          // ESRCH or EPERM: the check below decides.
         }
-      } else {
-        throw err;
       }
     }
   }
@@ -55,4 +54,5 @@ export async function killTree(pid: number): Promise<void> {
   while (isAlive(pid) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+  return !isAlive(pid);
 }

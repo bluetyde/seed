@@ -80,16 +80,14 @@ export function callAdapter(
         if (finished) return;
         finished = true;
         cleanup();
-        if (child.pid !== undefined) {
-          await killTree(child.pid);
-        }
+        const stopped = child.pid === undefined ? true : await killTree(child.pid);
         resolve({
           ok: false,
           errors: [
             {
               code: "E_TIMEOUT",
               field: "",
-              message: "adapter timed out",
+              message: stopped ? "adapter timed out" : "adapter timed out and its process could not be stopped",
               source: "seed",
             },
           ],
@@ -102,16 +100,14 @@ export function callAdapter(
         if (finished) return;
         finished = true;
         cleanup();
-        if (child.pid !== undefined) {
-          await killTree(child.pid);
-        }
+        const stopped = child.pid === undefined ? true : await killTree(child.pid);
         resolve({
           ok: false,
           errors: [
             {
               code: "E_CANCELLED",
               field: "",
-              message: "operation cancelled",
+              message: stopped ? "operation cancelled" : "operation cancelled but the adapter process could not be stopped",
               source: "seed",
             },
           ],
@@ -132,13 +128,11 @@ export function callAdapter(
         cleanup();
         child.stdout.destroy();
         child.stderr.destroy();
-        if (child.pid !== undefined) {
-          await killTree(child.pid);
-        }
+        const stopped = child.pid === undefined ? true : await killTree(child.pid);
         const tail = cleanStderrTail(stderrRaw);
         resolve({
           ok: false,
-          errors: [makeAppFailed("reply too large", tail)],
+          errors: [makeAppFailed(stopped ? "reply too large" : "reply too large and the adapter process could not be stopped", tail)],
         });
       } else {
         stdoutChunks.push(chunk);
@@ -146,7 +140,7 @@ export function callAdapter(
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      stderrRaw += chunk.toString("utf8");
+      stderrRaw = (stderrRaw + chunk.toString("utf8")).slice(-2000);
     });
 
     child.stdin.on("error", () => {});
