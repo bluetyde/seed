@@ -1,0 +1,54 @@
+{
+  "schema": "seed.project/0.1",
+  "verb": "describe",
+  "requestId": "req-1",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "app": {
+      "id": "openmc",
+      "name": "OpenMC Monte Carlo Code",
+      "version": "0.14.0"
+    },
+    "engine": {
+      "name": "openmc-core",
+      "version": "0.14.0"
+    },
+    "formats": [
+      {
+        "id": "openmc-xml",
+        "version": "1.0"
+      }
+    ],
+    "capabilities": [
+      "keff",
+      "flux-tallies"
+    ],
+    "parameters": [
+      {
+        "id": "particles",
+        "type": "integer",
+        "min": 100,
+        "max": 100000000
+      }
+    ],
+    "quantities": [
+      {
+        "name": "keff",
+        "unit": "1",
+        "normalization": "none"
+      }
+    ],
+    "oracleCoverage": [
+      {
+        "quantity": "keff",
+        "domain": "pwr-pin-cell"
+      }
+    ],
+    "oraclePin": {
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "commit": "commit-hash-123"
+    }
+  }
+}

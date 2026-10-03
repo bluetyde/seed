@@ -1,0 +1,11 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "open",
+  "requestId": "req-2",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "result": {
+    "editor": "opened"
+  }
+}

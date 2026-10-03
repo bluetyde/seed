@@ -1,0 +1,12 @@
+{
+  "schema": "seed.adapter-request/0.1",
+  "verb": "collect",
+  "requestId": "req-7",
+  "actor": {
+    "kind": "human",
+    "name": "Alice",
+    "toolVersion": "1.0.0"
+  },
+  "jobId": "job-101",
+  "runDir": "runs/run-001"
+}

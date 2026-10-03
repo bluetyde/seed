@@ -1,0 +1,53 @@
+{
+  "schema": "seed.results-index/0.1",
+  "runId": "run-001",
+  "status": "completed",
+  "adapter": {
+    "id": "openmc-adapter",
+    "version": "1.0.0"
+  },
+  "engine": {
+    "name": "openmc",
+    "version": "0.14.0"
+  },
+  "inputHashes": [
+    {
+      "path": "models/core.inp",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "nativeStatus": {
+    "status": "ok",
+    "detail": "everything normal"
+  },
+  "quantities": [
+    {
+      "name": "keff",
+      "unit": "1",
+      "normalization": "ZZ-INSTANCE-MARKER-ZZ",
+      "provenance": {
+        "runId": "run-001",
+        "inputRevisions": [
+          "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        ]
+      },
+      "data": {
+        "path": "output/tallies.h5",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      },
+      "verification": "verified",
+      "uncertainty": {
+        "kind": "statistical",
+        "value": 0.00015,
+        "unit": "1"
+      }
+    }
+  ],
+  "seed": 42,
+  "oracle": {
+    "entries": [
+      "pin-cell-keff"
+    ],
+    "verdict": "pass"
+  }
+}

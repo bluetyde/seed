@@ -1,0 +1,17 @@
+{
+  "schema": "seed.study/0.1",
+  "type": "conclusion",
+  "seq": 2,
+  "time": "2026-10-03T12:30:00Z",
+  "actor": {
+    "kind": "human",
+    "name": "Dr. Alice Smith"
+  },
+  "claims": [
+    {
+      "text": "done",
+      "runs": [],
+      "oracles": []
+    }
+  ]
+}
