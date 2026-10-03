@@ -173,7 +173,8 @@ describe("buildReport", () => {
 
     // Agent sentence names agent, model, and step number
     expect(html).toContain("AI agents took part in steps: 2; agents: AgentSim (model-fast).");
-    expect(markdown).toContain("AI agents took part in steps: 2; agents: AgentSim (model-fast).");
+    // Markdown escapes untrusted text everywhere, including this sentence (dispatcher fix: it was printed raw).
+    expect(markdown).toContain("AI agents took part in steps: 2; agents: AgentSim \\(model\\-fast\\)\\.");
 
     // Check human-only study
     const humanStep2 = makeStep(2, {
@@ -186,7 +187,7 @@ describe("buildReport", () => {
     expect(humanRes.ok).toBe(true);
     if (humanRes.ok) {
       expect(humanRes.value.html).toContain("No AI agent took part.");
-      expect(humanRes.value.markdown).toContain("No AI agent took part.");
+      expect(humanRes.value.markdown).toContain("No AI agent took part\\.");
     }
   });
 

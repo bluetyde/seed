@@ -419,7 +419,7 @@ export function buildReport(
       if (reportRun.series) {
         const qtyNames = new Set(results.quantities.map((q) => q.name));
         const seriesEntries = Object.entries(reportRun.series).sort(([a], [b]) =>
-          a.localeCompare(b)
+          a < b ? -1 : a > b ? 1 : 0
         );
 
         for (const [name, s] of seriesEntries) {
@@ -545,24 +545,24 @@ export function buildReport(
 
   // Agent sentence
   const agentSteps: number[] = [];
-  const agentsMap = new Map<string, string>(); // name -> model
+  const agentsMap = new Map<string, [string, string]>(); // JSON key of [name, model] -> [name, model], one entry per distinct pair
 
   for (const s of steps) {
     if (s.actor.kind === "agent") {
       agentSteps.push(s.seq);
-      agentsMap.set(s.actor.name, s.actor.model ?? "unknown");
+      agentsMap.set(JSON.stringify([s.actor.name, s.actor.model ?? "unknown"]), [s.actor.name, s.actor.model ?? "unknown"]);
     }
   }
   if (conclusion && conclusion.actor.kind === "agent") {
     agentSteps.push(conclusion.seq);
-    agentsMap.set(conclusion.actor.name, conclusion.actor.model ?? "unknown");
+    agentsMap.set(JSON.stringify([conclusion.actor.name, conclusion.actor.model ?? "unknown"]), [conclusion.actor.name, conclusion.actor.model ?? "unknown"]);
   }
 
   let agentSentence: string;
   if (agentSteps.length > 0 || agentsMap.size > 0) {
     const agentList = Array.from(agentsMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, model]) => `${name} (${model})`);
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([, [name, model]]) => `${name} (${model})`);
     agentSentence = `AI agents took part in steps: ${agentSteps.join(", ")}; agents: ${agentList.join(", ")}.`;
   } else {
     agentSentence = "No AI agent took part.";
@@ -1288,7 +1288,7 @@ ${gateStopRowsMd}`);
 | --- | --- | --- | --- | --- | --- |
 ${stepRowsMd}
 
-${agentSentence}`);
+${escapeMarkdown(agentSentence)}`);
 
   // 10. Conclusion
   let conclMd = `## Conclusion\n\n`;
