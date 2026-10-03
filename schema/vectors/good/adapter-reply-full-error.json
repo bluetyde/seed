@@ -1,0 +1,20 @@
+{
+  "schema": "seed.adapter-reply/0.1",
+  "verb": "run",
+  "requestId": "req-err-full",
+  "ok": false,
+  "errors": [
+    {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/payload",
+      "message": "Failure with E_SCHEMA_INVALID",
+      "unit": "1",
+      "range": {
+        "min": 0,
+        "max": 10
+      },
+      "source": "seed"
+    }
+  ],
+  "warnings": []
+}
