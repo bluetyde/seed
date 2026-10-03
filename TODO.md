@@ -5,21 +5,35 @@ Design lives in [PLAN.md](PLAN.md). Details per area in [docs/plans/](docs/plans
 
 Flags: **[agy]** = a delegation candidate for Antigravity: large, mechanical, contract fixed, strong oracle ([antigravity-task step 0](docs/AGENT-TASKS.md); run step 0 again before dispatching). Unflagged items are Claude's: judgment, safety, contracts, small or precision-critical work. **[codex]** = a Codex review checkpoint; every milestone ends with one. **[fake]** = needs only the fake adapter, no real physics engine. **[A#]** = harness acceptance test number from [plan 05](docs/plans/05-agent-harness.md).
 
-## Next (planned 2026-10-03, after the shell and installer)
+## Next priorities (updated 2026-10-03 after E0 merge)
+
+Current baseline: main `ccab92f` includes the E0 schemas, fake adapter/client, run lifecycle, report builder and review fixes. The previous verification recorded 1,593 unit tests passing on Windows; the launcher repair reran the desktop suite (10 passed, 3 existing skips). These are scoped results, not proof that E0 exit criteria or real-app integration are complete.
+
+1. [ ] **Make first launch reliable.** `Start SEED.cmd` currently assumes dependencies exist and closes on failure. Add Node/npm checks, a clear first-run setup path using the lockfile, and visible errors. Detect changed dependency requirements after updates; avoid reinstalling on every launch. Accept when a clean folder, missing prerequisite, failed install, path containing spaces and subsequent offline launch all behave predictably. The local dependency installation below repairs this machine only.
+2. [ ] **Integrate the pending runtime foundation.** Review/reconcile `codex/runtime-foundation` (`4ee09c9`, including plan commit `6c3bb85`) with current main and decisions D1-D6 before merging. It contains the runtime inventory, runtime/shared-acceptance plan and pending-start cancellation fixes; it is not in main. Preserve current E0 review fixes. Rerun startup race/process tests and desktop tests after integration; verify closing during startup leaves no owned process and keeps attached servers alive. Do not merge the older duplicate planning branch as well.
+3. [ ] **Build the project store (E1).** Create/open/save/reopen/relocate projects using the existing schema and atomic-write helper. Add a project-wide writer lock with crash recovery and expected-revision conflicts. Preserve custom material sets under their app namespaces, including unknown sets; material compatibility remains app-owned, with no separate materials app. Accept with save/reopen, second-writer conflict, interrupted write and relocation tests.
+4. [ ] **Finish the fake-only E0 gates.** Implement the core tier/approval policy and oracle runner/index; prove A3, approval stops and the remaining A6 conflict case. Budget request checks already exist but do not prove resource containment or tier enforcement. Pin oracle hash and app commit; changed tolerances require a new human-approved version. Complete the E0 exit review and contract sign-off after these gaps close.
+5. [ ] **Confirm the first real adapter, then implement E2.** Complete the per-verb inventory, using the pending runtime inventory as a starting point rather than a substitute. Confirm Virtual Reactor's headless entry point, then implement SEED-side CLI and MCP access over the same core, with direct-versus-SEED oracle agreement. Companion app changes require their own coordinated work; this task claims SEED only. PRA follows its P2 gate.
+6. [ ] **Finish runtime installation and shared acceptance.** Add a versioned runtime manifest, checksums, staged install, cached offline reuse and rollback, first with fake artifacts. Then verify launch/cleanup, offline operation, save/reopen and interruption with actual installed apps on a recorded build. SEED owns integration/runtime lifecycle; each app owns its native correctness and performance, including large-model MCNP export in OpenMC Studio.
+
+Keep the report browser check and review hardening below in scope before release. Do not start advanced coupling or replace the UI framework before these foundations are verified.
+
+## E0 implementation checklist
+
 
 Order matters: the contracts (E0) come before anything that reads or writes them, and the harness tests need no physics, so they can run as soon as the fake adapter exists. Owner per antigravity-task step 0 ([board](docs/AGENT-TASKS.md)).
 
 **Track 1: contracts (Claude; judgment, safety)**
 1. [ ] App inventory ([plan 03](docs/plans/03-adapters-and-transport.md)): for OpenMC Studio, NODAL Studio and Virtual Reactor, one table row per verb with the real entry point, headless or not, existing manifest and hashing rules; PRA and Fuel marked `not built`. Evidence: `docs/inventory.md`.
 2. [ ] Settle the transport details: CLI-per-verb (request on stdin, one reply on stdout, exit 0 = reply produced) now works end to end against the fake adapter on Windows and Linux (`src/core/adapterClient.ts`, tests/fake-adapter.test.ts) and is provisional. Still open: MCP over the same command set (decision D1); how real apps are reached (CLI, local service or both) once the inventory (item 1) is done. Evidence so far: 31 fake-adapter tests, 2026-10-03.
-3. [x] 2026-10-03: Contract text v0.1 written: [docs/contracts.md](docs/contracts.md) (adapter request and reply, results index, run record, project manifest, study record, oracle entry, typed errors, semantic checks, paths). Status: proposed; not yet reviewed by Codex or the user.
+3. [x] 2026-10-03: Contract text v0.1 written: [docs/contracts.md](docs/contracts.md) (adapter request and reply, results index, run record, project manifest, study record, oracle entry, typed errors, semantic checks, paths). Status: v0.1 proposed; implementation reviewed by Codex and fixes merged (72867a8). User contract sign-off and remaining E0 acceptance are still pending.
 4. [ ] Tier policy and gate semantics ([plan 05](docs/plans/05-agent-harness.md)): the verb-to-tier table, what a gate stop records, grant scope (study, actor, operation, input revisions, expiry), pluggable approval (GUI dialog or human-run CLI command; no client surface can approve). Enforcement is in the core library (decision D4).
 
 **Track 2: tests that need no physics (after Track 1 item 3)**
 5. [x] 2026-10-03 **[agy]** JSON Schemas (8 families + error codes), validator with typed errors (`src/core/validate.ts`), canonical JSON and hashing, semantic checks and study-log chain verification (`src/core/semantic.ts`). 177 example fixtures plus 1344 generated per-property cases transcribed independently from the contract (tests/schema-contract.test.ts). Mutation sweep of the schemas (517 single-constraint loosenings): 403 caught, up from 120 before the generated tests; the remaining 114 are mostly redundant duplicate constraints, enum-extension mutants and string-length bounds the contract does not specify. Open: decide those length bounds in the contract.
 6. [x] 2026-10-03 **[agy]** **[fake]** Fake adapter (`tests/fixtures/fake-adapter/cli.cjs`, `job.cjs`: all seven verbs; scenarios success, slow, crash, hang, partial and NaN output, trip, silent exit; adapter-level modes crash, hang, garbage, wrong id or verb, schema-invalid, huge reply, injection text) and the adapter client (`src/core/adapterClient.ts`, `src/core/procTree.ts`). 31 tests; pass on Windows 11 and Ubuntu (WSL), no orphan processes left.
 7. [~] 2026-10-03 Harness tests, partly done: [A1] typed error with field and unit reaches the caller; [A2] crash, hang, partial output and trip end failed or terminated-by-trip with no accepted results (tests/run-lifecycle.test.ts); [A4] instruction-like text is stored and shown as data and starts nothing (fake adapter and report tests); [A5] over-budget request stops at the gate and is logged (`gate-stops.jsonl`); [A6] stale input revision refused. Not yet: [A3] (needs the oracle runner), A2-tier approval stop, [A6] second-writer save (needs the project store).
-8. [ ] **[codex]** Review of schemas, validator, fake adapter and gate (R1).
+8. [x] 2026-10-03 **[codex]** Review of implemented E0 schemas, validator, fake adapter and budget/revision gates (R1): 13 distinct findings fixed and merged (72867a8); see Now. Future tier/approval and oracle code still needs review.
 
 **Track 3: project core (parallel after item 3)**
 9. [~] 2026-10-03 Headless core started: `src/core/` (validate, semantic, canonical, paths, adapterClient, procTree, runManager, atomicFile, report) has no Electron imports. Not yet: project store, policy/tier gate, scheduler beyond one run, and making the shell a client of it.
@@ -30,7 +44,7 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 12. [ ] Verify the default start command of each app by a real launch on Windows, macOS and Linux.
 13. [ ] Section 4 of [docs/TOOLING.md](docs/TOOLING.md): survey the candidates and date each verdict before any claim leaves the repo.
 14. [x] 2026-10-03: Harness docs branch `claude/agentic-harness` merged to main (4c1e6f7) and the shared folder fast-forwarded (clean tree first).
-15. [ ] Align with the PRA and Fuel plans written 2026-10-03 (`pra-studio/`, `fuel-performance-studio/`): their oracle entries use this repo's oracle-entry format and their adapters follow plan 03; reconcile the schemas when E0 task 3 lands.
+15. [ ] Align with the PRA and Fuel plans written 2026-10-03 (`pra-studio/`, `fuel-performance-studio/`): their oracle entries use this repo's oracle-entry format and their adapters follow plan 03; reconcile against the now-implemented v0.1 schemas; coordinate changes through each app owner.
 
 ## Now
 
@@ -43,35 +57,35 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 
 ## Contracts (before E0 code) · from the [workspace integration draft](../plans/nuclear-suite-integration.md) and [harness plan](../plans/agentic-harness.md)
 
-Everything below is **proposed**, none implemented. Status moves proposed, accepted, documented, implemented, verified.
+The v0.1 contract is documented and partly implemented. Checkboxes below track the full behavior, not schema presence alone. Implementation review is complete for the merged E0 slice; user contract acceptance and the remaining integration checks are pending.
 
 - [ ] Open vs run: opening an editor never starts a calculation, and each has its own gate. Evidence: schema plus a fake-adapter test.
 - [ ] Revision semantics: native hash plus counter; expected-revision check on save; stale dependents marked. Evidence: conflict test [A6].
 - [ ] Material envelope: IDs, immutable revisions, namespaced sets; unknown sets preserved; no expression evaluated; no name matching ([plan 02](docs/plans/02-project-and-materials.md)). Evidence: the cross-app acceptance case on the fake.
-- [ ] Typed errors: `{code, field, message, unit?, range?, source}` with escaped app content. Evidence: [A1], [A4].
-- [ ] Results index: quantity, units, normalization, coordinates, time, uncertainty, provenance, hash; a result without a complete index is refused.
-- [ ] Run lifecycle states and the rule "completed means all declared outputs present and hashed"; trip kept as native status ([plan 04](docs/plans/04-runs-and-scheduling.md)). Evidence: state-machine tests, [A2].
+- [x] 2026-10-03: Typed errors (validator, fake-adapter and report tests): `{code, field, message, unit?, range?, source}` with escaped app content. Evidence: [A1], [A4].
+- [x] 2026-10-03: Results index (run-lifecycle and review-fixes tests): quantity, units, normalization, coordinates, time, uncertainty, provenance, hash; a result without a complete index is refused.
+- [x] 2026-10-03: Run lifecycle states (fake-adapter lifecycle tests) and the rule "completed means all declared outputs present and hashed"; trip kept as native status ([plan 04](docs/plans/04-runs-and-scheduling.md)). Evidence: state-machine tests, [A2].
 - [ ] Oracle entry: tolerance hashed before the run; changing it makes a new version by a human ([plan 06](docs/plans/06-oracles-and-verification.md)). Evidence: [A3].
 - [ ] Study record: append-only; actor on every step; report only from the record ([plan 07](docs/plans/07-studies-and-reports.md)). Evidence: append-only and report tests.
 - [ ] Tier model A0 to A4 and budgets; nothing in an adapter reply or app content can change them. Evidence: [A4], [A5].
-- [ ] Schema identifiers, version policy and unknown-version refusal.
+- [x] 2026-10-03: Schema identifiers, version policy and unknown-version refusal implemented in validate.ts and covered by schema-contract tests.
 - [ ] Reserved project folders (`models/`, `runs/`, `studies/`, `oracles/`) so later work does not move files.
 
 ## E0: contracts ([plan 03](docs/plans/03-adapters-and-transport.md), [05](docs/plans/05-agent-harness.md))
 
 Exit: open vs run, revisions, material preservation and status semantics documented; [A1], [A3], [A4], [A5], [A6] pass against the fake adapter. Tasks are Next items 1 to 8.
 
-- [ ] E0 exit review: **[codex]** (R1) and the user's sign-off on the contracts.
+- [ ] E0 exit review: implementation R1 is complete; close the missing oracle, tier-approval and second-writer acceptance cases, review that new code, and obtain the user's contract sign-off.
 
 ## E1: project launcher ([plan 01](docs/plans/01-shell-and-installer.md), [02](docs/plans/02-project-and-materials.md), [04](docs/plans/04-runs-and-scheduling.md))
 
 - [x] 2026-10-01 to 2026-10-03: Configurable launcher shell (app registry, start/stop/attach, tabs, error pages) and installer/updater (clone, adopt, check, fast-forward, dependency steps, prerequisite checks); platform-aware default launch commands. Evidence: docs/shell.md, vitest, e2e, macOS run.
 - [ ] Project create, open, reopen; relocate and reopen resolves every reference.
 - [ ] Attach a native model; open or focus its editor without starting a calculation; a missing app gives an actionable message.
-- [ ] Windows and WSL path mapping stated explicitly; table test (Next 10).
+- [~] Windows and WSL path mapping implemented with lexical tests (E0 item 10); actual WSL mount/share and relocated-project verification remain.
 - [ ] Import an existing completed run; show its native status and provenance; partial output never shown as a result; label `imported`.
 - [ ] Headless mode: the core serves the adapter verbs with no window; the GUI is a client.
-- [ ] Atomic manifest writes (temp file and rename); crash mid-write detected and the previous manifest kept.
+- [~] Atomic-write helper exists (src/core/atomicFile.ts); wire it into project manifest saves and verify interrupted-write recovery keeps the previous manifest.
 - [ ] E1 exit review: **[codex]** (R2, core gate and policy).
 
 ## E2: single-app runs ([plan 03](docs/plans/03-adapters-and-transport.md), [04](docs/plans/04-runs-and-scheduling.md), [05](docs/plans/05-agent-harness.md), [06](docs/plans/06-oracles-and-verification.md))
@@ -85,6 +99,7 @@ Depends on the E0 inventory confirming that Virtual Reactor has a usable headles
 - [ ] Cancellation, crash, partial output, edit conflict, relocation and stale-result handling on the real adapter [A2], [A6].
 - [ ] Standalone launch of the app unchanged by its adapter.
 - [ ] Measure and record per-adapter resource limits (wall-clock, cores, memory) in `describe`.
+- [ ] First single-app agent demonstration: bounded request, policy gate, pinned oracle verdict, complete study record and report; repeat through CLI and MCP.
 - [ ] E2 exit review: **[codex]** (R4).
 
 ## E3: experiments ([plan 04](docs/plans/04-runs-and-scheduling.md), [07](docs/plans/07-studies-and-reports.md))
@@ -104,7 +119,7 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 - [ ] Transfer recipe format and approval record (tier A3).
 - [ ] OpenMC heating to Fuel Performance Studio, one way, offline: refusals for wrong units, missing normalization, incomplete coverage, stale revision; conservation within a tolerance declared beforehand [A10].
 - [ ] Pipeline DAG: cycles refused at definition; downstream invalidated after an input change.
-- [ ] First end-to-end agent demonstration with the full study record and generated report.
+- [ ] Cross-app agent demonstration with the full study record and generated report (the first single-app demonstration belongs to E2).
 - [ ] E4 exit review: **[codex]** (R5).
 
 ## E5: advanced studies ([plan 09](docs/plans/09-advanced-studies.md))
@@ -117,7 +132,7 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 - [ ] Install the conda environment and nuclear data for OpenMC Studio.
 - [ ] Update SEED itself.
 - [ ] Sign-in help beyond the message; offline use of a cached copy; a schedule or notice for available updates.
-- [ ] Servers the host started can outlive a killed host (no job object): fix and test.
+- [ ] Servers the host started can outlive a killed host (no job object): fix and test, including WSL-side ownership/cleanup. Graceful cancellation fixes on the pending branch do not prove forced-host-death cleanup.
 
 ## Release ([plan 10](docs/plans/10-release-and-packaging.md))
 
@@ -142,6 +157,8 @@ Still waiting (the user's):
 - [ ] Policy file format and who may sign it.
 
 ## Done
+
+- [x] 2026-10-03: Repaired this Windows checkout's startup by installing locked dependencies with `npm ci --no-audit --no-fund`. `npm run e2e`: 10 passed, 3 existing skips (real companion apps and two unsaved-dialog cases). Exact `Start SEED.cmd` opened a window titled SEED. No launcher source fix yet.
 
 - [x] 2026-10-01: Shell skeleton (Electron host, tabs, registry, process manager, e2e with fake apps); same-origin windows for the Virtual Reactor operator window; repo `bluetyde/seed` (private, MIT).
 - [x] 2026-10-01: Installer/updater (first version, docs/shell.md): clone, adopt, check, fast-forward update, dependency steps, prerequisite checks, per-app card with output and cancel.
