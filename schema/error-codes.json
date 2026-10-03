@@ -86,5 +86,17 @@
   "E_INTERNAL": {
     "severity": "error",
     "meaning": "unexpected failure inside SEED"
+  },
+  "E_PROJECT_LOCKED": {
+    "severity": "error",
+    "meaning": "another writer holds the project lock"
+  },
+  "E_NOT_FOUND": {
+    "severity": "error",
+    "meaning": "project, file or artifact does not exist"
+  },
+  "E_EXISTS": {
+    "severity": "error",
+    "meaning": "target already exists"
   }
 }

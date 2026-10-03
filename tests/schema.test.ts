@@ -36,7 +36,7 @@ describe("Schema vectors and validation", () => {
 
   it("covers every core error code in errors of some good fixture", () => {
     const coreCodes = coreErrorCodes();
-    expect(coreCodes.length).toBe(22);
+    expect(coreCodes.length).toBe(25);
 
     const seenCodes = new Set<string>();
     for (const entry of indexEntries) {
