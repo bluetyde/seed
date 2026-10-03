@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +29,14 @@ function tmp(): string {
 }
 
 const INPUT_SHA = sha256Hex("model");
+
+/** A folder holding the model file every test entry names, so input hashes verify. */
+function inputsDir(): string {
+  const d = tmp();
+  mkdirSync(join(d, "models"));
+  writeFileSync(join(d, "models", "and.json"), "model");
+  return d;
+}
 
 function entry(over: Record<string, unknown> = {}): OracleEntry {
   const base: Record<string, unknown> = {
@@ -175,6 +183,7 @@ describe("runOracleSet", () => {
     entries,
     adapter: { id: "pra", version: "1.0.0" },
     appCommit: "abc1234",
+    baseDir: inputsDir(),
     run
   });
 
@@ -301,5 +310,79 @@ describe("pins", () => {
       expect(comparePins(accepted.pins, changed)).toEqual([]);
       expect(evaluateGate(run, { study, pinsChanged: comparePins(accepted.pins, changed).length > 0 }).allow).toBe(true);
     }
+  });
+});
+
+describe("review fixes (Codex, 2026-10-03)", () => {
+  const set = (e: OracleEntry, extra: Record<string, unknown> = {}) => ({
+    entries: [indexed(e)],
+    adapter: { id: "pra", version: "1.0.0" },
+    appCommit: "c",
+    baseDir: inputsDir(),
+    run: correct,
+    ...extra
+  });
+
+  it("a comparison that overflows to infinity fails closed", () => {
+    const e = entry({ expected: { quantity: "q", value: 1e308, unit: "1" }, tolerance: { abs: 0, rel: 1.8 }, coverage: { quantities: ["q"], domain: "d" } });
+    const r = evaluateOracle(e, { kind: "value", quantity: "q", value: -1e308, unit: "1" });
+    expect(r.verdict).toBe("fail");
+    expect(r.reason).toContain("overflow");
+  });
+
+  it("the callback cannot loosen the tolerance it is judged against, and gets only a copy", async () => {
+    const e = entry({ expected: { quantity: "q", value: 1, unit: "1" }, tolerance: { abs: 0, rel: 0 }, coverage: { quantities: ["q"], domain: "d" } });
+    const item = indexed(e);
+    const r = await runOracleSet(
+      set(e, {
+        entries: [item],
+        run: async (given: OracleEntry) => {
+          (given.tolerance as { abs: number }).abs = 1000;
+          (given.expected as { value: number }).value = 999;
+          return { kind: "value", quantity: "q", value: 999, unit: "1" };
+        }
+      })
+    );
+    expect(r.results[0]?.verdict).toBe("fail");
+    expect(r.verdict).toBe("fail");
+    expect(item.entry.tolerance).toEqual({ abs: 0, rel: 0 });
+    expect(item.entry.expected).toMatchObject({ value: 1 });
+  });
+
+  it("without baseDir the inputs are unchecked: the set is marked so and cannot clear the gate", async () => {
+    const missing = entry({ inputs: [{ path: "models/missing.json", sha256: "0".repeat(64) }] });
+    const r = await runOracleSet({ ...set(missing), baseDir: undefined });
+    expect(r.inputsVerified).toBe(false);
+    expect(r.blocked).toBe(true);
+    const checked = await runOracleSet(set(entry()));
+    expect(checked.inputsVerified).toBe(true);
+    expect(checked.blocked).toBe(false);
+  });
+
+  it("an input reached through a link that leaves the oracle folder is refused", async () => {
+    const base = tmp();
+    const outside = tmp();
+    writeFileSync(join(outside, "and.json"), "model");
+    try {
+      symlinkSync(outside, join(base, "models"), "junction");
+    } catch {
+      return; // links not permitted here; the POSIX run covers this case
+    }
+    const r = await runOracleSet(set(entry(), { baseDir: base }));
+    expect(r.results[0]?.verdict).toBe("invalid");
+    expect(r.results[0]?.reason).toContain("outside");
+  });
+
+  it("an entry file that cannot be read is a typed error with its name, not a throw", () => {
+    const d = tmp();
+    writeFileSync(join(d, "ok.json"), JSON.stringify(entry()));
+    try {
+      symlinkSync(join(d, "nowhere.json"), join(d, "dangling.json"), "file");
+    } catch {
+      return;
+    }
+    const r = loadOracleEntries(d);
+    expect(r.entries).toHaveLength(1);
+    expect(r.errors.map((e) => [e.code, e.field])).toEqual([["E_NOT_FOUND", "dangling.json"]]);
   });
 });

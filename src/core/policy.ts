@@ -44,6 +44,8 @@ export type Operation = keyof typeof OPERATION_RULES;
 
 const TIER_ORDER: Record<Tier, number> = { A0: 0, A1: 1, A2: 2, A3: 3 };
 const RUN_OPERATIONS: ReadonlySet<string> = new Set(["run_case", "run_sweep", "new_revision", "propose_transfer"]);
+/** Operations that occupy the engine: they obey the one-active-case-per-engine limit. Oracle runs do too. */
+const ENGINE_OPERATIONS: ReadonlySet<string> = new Set([...RUN_OPERATIONS, "run_oracles"]);
 const BUDGET_KEYS: (keyof Budget)[] = ["maxWallSeconds", "maxCores", "maxMemoryMB", "maxDiskMB"];
 
 export type GateRequest = {
@@ -141,6 +143,11 @@ export function findGrant(
       reason = "grant expired";
       continue;
     }
+    const issued = Date.parse(g.issuedAt);
+    if (!Number.isFinite(issued) || issued > now.getTime()) {
+      reason = "grant is not valid yet";
+      continue;
+    }
     if (!sameRevisions(req.inputRevisions ?? [], g.inputRevisions)) {
       reason = "grant does not cover these input revisions";
       continue;
@@ -236,7 +243,7 @@ export function evaluateGate(req: GateRequest, ctx: GateContext): Decision {
     const resource = errors.some((e) => e.code === "E_BOUNDS_EXCEEDED") ? "bounds" : "budget";
     return stop(req, resource, errors);
   }
-  if (req.engine !== undefined && (req.activeOnEngine ?? 0) >= 1 && RUN_OPERATIONS.has(req.operation)) {
+  if (req.engine !== undefined && (req.activeOnEngine ?? 0) >= 1 && ENGINE_OPERATIONS.has(req.operation)) {
     return stop(req, "per-engine-limit", [
       err("E_BUDGET_EXCEEDED", "/engine", `one active case per engine; ${req.engine} is busy`)
     ]);
