@@ -29,3 +29,11 @@
 - Not covered by oracles: reactivityTotal and coolantTemp, any library other than the synthetic core, burnup, xenon and iodine.
 - Windows has no job object: if the wrapper is killed from outside, the runner is stopped by `cancel` (tree kill) but not by the wrapper itself.
 - A process cannot be proven to be this job's wrapper beyond its command line and the heartbeat token; the project files that name it are not trusted.
+
+## E2 direct agreement acceptance
+
+Run `npm run test:e2:raft` with `SEED_RAFT_REPO` pointing to a RAFT checkout containing its built headless runner and `oracles/seed`. This acceptance command fails if those prerequisites are missing; the ordinary unit suite can still skip the integration tests.
+
+`tests/raft-direct-agreement.test.ts` copies hash-checked oracle inputs into temporary projects. It compares all samples and times of power, fuelTemp, coolantTemp, energy and reactivityTotal for the six good cases, directly versus the SEED adapter/RunManager. It checks units, direct-run replay, and the four bad-input refusal mappings. It records the RAFT commit, actual runner bundle hash and oracle file hashes. The existing oracle suite separately checks expected values and fixed tolerances for all 22 entries.
+
+Exact agreement is scoped to the same runtime, runner bundle and synthetic library. Agreement for coolantTemp or reactivityTotal does not supply an independent physics oracle for either quantity. A checkout commit alone does not prove a prebuilt bundle matches its source; the bundle hash records the actual executable used. This is adapter/core acceptance, not the unfinished public SEED CLI/MCP path or policy-to-RunManager wiring.

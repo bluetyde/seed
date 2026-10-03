@@ -90,9 +90,9 @@ Exit: open vs run, revisions, material preservation and status semantics documen
 
 ## E2: single-app runs ([plan 03](docs/plans/03-adapters-and-transport.md), [04](docs/plans/04-runs-and-scheduling.md), [05](docs/plans/05-agent-harness.md), [06](docs/plans/06-oracles-and-verification.md))
 
-Depends on the E0 inventory confirming that Virtual Reactor has a usable headless entry point (decision D5); if it does not, fall back to PRA (needs its P2 gate) or NODAL and record a new decision.
+Virtual Reactor now has a merged headless entry point and app-owned oracle entries (decision D5). E2 uses the synthetic library only; transport, policy wiring and host-death cleanup remain unfinished.
 
-- [ ] First real adapter (Virtual Reactor) through all seven verbs; immutable snapshot, owned job ID, owned process tree. CLI and MCP front-ends over one core.
+- [~] First real adapter (Virtual Reactor) implemented; headless `open` explicitly unsupported. Immutable snapshots, job ownership and adapter tests exist. E2 direct-agreement acceptance added (`npm run test:e2:raft`); CLI and MCP front-ends over the policy-enforced core remain open.
 - [ ] Oracle index and runner: entries live in the RAFT repo (D3); SEED records the oracle file hash and app commit on every run and flags a changed pin. First set: RAFT analytic cases (for example inhour, prompt jump, replay) chosen from its validation docs; the first real adapter through SEED, CLI/MCP and direct agree on every oracle [A9]. PRA's entries (AND 0.02, OR 0.28, A AND A 0.1, A OR A 0.1, shared-event 0.044) are added when PRA's P2 passes.
 - [ ] MCP server over the core; tool descriptions state limits and refusals; **[codex]** review (R3).
 - [ ] Tier enforcement in the core, tested: an agent cannot raise its own tier, loosen a tolerance or override a refusal [A3], [A5].
