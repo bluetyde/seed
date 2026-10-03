@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { callAdapter, type AdapterSpec } from "./adapterClient";
 import { appendLine, writeFileAtomic } from "./atomicFile";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { isPortableRelative, resolveInside } from "./paths";
-import { checkResultsIndex } from "./semantic";
+import { checkResultsAgainstRecord, checkResultsIndex } from "./semantic";
 import { validate, type TypedError } from "./validate";
 
 export type Budget = {
@@ -74,6 +74,68 @@ function assertResolved(res: { ok: true; value: string } | { ok: false; error: u
   return res.value;
 }
 
+const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+/** True when targetAbs exists and, after resolving symlinks and junctions, lies inside rootAbs. Fails closed. */
+function physicallyInside(rootAbs: string, targetAbs: string): boolean {
+  let realRoot: string;
+  let realTarget: string;
+  try {
+    realRoot = realpathSync.native(rootAbs);
+    realTarget = realpathSync.native(targetAbs);
+  } catch {
+    return false; // cannot prove containment: refuse
+  }
+  const rel = relative(realRoot, realTarget);
+  return rel === "" || (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel));
+}
+
+/** True when child is the directory parent or lies inside it (lexical, segment boundary, after normalization). */
+function lexicallyInside(parentAbs: string, childAbs: string): boolean {
+  const rel = relative(parentAbs, childAbs);
+  return rel !== "" && rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel);
+}
+
+type RequestEntry = { payloadHash: string; runId: string };
+
+function readRequestsMap(
+  path: string
+): { ok: true; map: Record<string, RequestEntry> } | { ok: false; message: string } {
+  if (!existsSync(path)) return { ok: true, map: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return { ok: false, message: "the request log requests.json is unreadable" };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, message: "the request log requests.json is not an object" };
+  }
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const e = value as Record<string, unknown> | null;
+    if (
+      e === null ||
+      typeof e !== "object" ||
+      typeof e.payloadHash !== "string" ||
+      !SHA256_PATTERN.test(e.payloadHash) ||
+      typeof e.runId !== "string" ||
+      !RUN_ID_PATTERN.test(e.runId)
+    ) {
+      return { ok: false, message: "the request log requests.json has a malformed entry for " + JSON.stringify(key) };
+    }
+  }
+  return { ok: true, map: parsed as Record<string, RequestEntry> };
+}
+
+function internalRefusal(field: string, message: string): RunOutcome {
+  return { ok: false, errors: [{ code: "E_INTERNAL", field, message, source: "seed" }] };
+}
+
+interface CancelWaiter {
+  (result: { ok: true } | { ok: false; errors: TypedError[] }): void;
+}
+
 interface InFlightRequest {
   requestId: string;
   payloadHash: string;
@@ -83,6 +145,7 @@ interface InFlightRequest {
 interface InFlightRun {
   runId: string;
   cancelRequested: boolean;
+  cancelWaiters: CancelWaiter[];
   promise: Promise<RunOutcome>;
 }
 
@@ -102,16 +165,14 @@ function updateRequestsFile(
   requestId: string,
   entry: { payloadHash: string; runId: string }
 ): void {
-  let map: Record<string, { payloadHash: string; runId: string }> = {};
-  if (existsSync(requestsJsonPath)) {
-    try {
-      map = JSON.parse(readFileSync(requestsJsonPath, "utf8"));
-    } catch (err) {
-      // start() refuses before reaching this point; never overwrite a file we cannot read.
-      throw new Error("requests.json is unreadable: " + (err instanceof Error ? err.message : String(err)));
-    }
+  const read = readRequestsMap(requestsJsonPath);
+  if (!read.ok) {
+    // start() refuses before reaching this point; never overwrite a file we cannot trust.
+    throw new Error(read.message);
   }
-  map[requestId] = entry;
+  const map = read.map;
+  // defineProperty: a plain assignment to the key "__proto__" would change the prototype instead of storing the entry
+  Object.defineProperty(map, requestId, { value: entry, enumerable: true, writable: true, configurable: true });
   writeFileAtomic(requestsJsonPath, JSON.stringify(map, null, 2) + "\n");
 }
 
@@ -138,6 +199,9 @@ export class RunManager {
   }
 
   public transition(runId: string, to: string, reason: string): void {
+    if (!RUN_ID_PATTERN.test(runId)) {
+      throw new Error("Invalid run id");
+    }
     const runRelDir = `${this.runsFolder}/${runId}`;
     const runAbsDir = assertResolved(resolveInside(this.projectRoot, runRelDir));
     const recPath = join(runAbsDir, "run-record.json");
@@ -292,28 +356,29 @@ export class RunManager {
     // Check requests.json on disk
     const runsDir = join(this.projectRoot, this.runsFolder);
     mkdirSync(runsDir, { recursive: true });
-    const requestsJsonPath = join(runsDir, "requests.json");
-    let requestsMap: Record<string, { payloadHash: string; runId: string }> = {};
-    if (existsSync(requestsJsonPath)) {
-      try {
-        requestsMap = JSON.parse(readFileSync(requestsJsonPath, "utf8"));
-      } catch {
-        // Idempotency memory is unreadable: starting anyway could duplicate a run and would overwrite the evidence.
-        return {
-          ok: false,
-          errors: [
-            {
-              code: "E_INTERNAL",
-              field: "/requests",
-              message: "the request log requests.json is unreadable; refusing to start a run",
-              source: "seed",
-            },
-          ],
-        };
-      }
+    if (!physicallyInside(this.projectRoot, runsDir)) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_PATH_TRAVERSAL",
+            field: "/runsFolder",
+            message: "the runs folder resolves outside the project (symlink or junction)",
+            source: "seed",
+          },
+        ],
+      };
     }
+    const requestsJsonPath = join(runsDir, "requests.json");
+    // Idempotency memory that cannot be trusted must stop the run: starting anyway could duplicate it and would
+    // overwrite the evidence.
+    const requestsRead = readRequestsMap(requestsJsonPath);
+    if (!requestsRead.ok) {
+      return internalRefusal("/requests", requestsRead.message + "; refusing to start a run");
+    }
+    const requestsMap = requestsRead.map;
 
-    const existingEntry = requestsMap[req.requestId];
+    const existingEntry = Object.hasOwn(requestsMap, req.requestId) ? requestsMap[req.requestId] : undefined;
     if (existingEntry) {
       if (existingEntry.payloadHash !== payloadHash) {
         return {
@@ -337,16 +402,50 @@ export class RunManager {
         return outcome;
       }
       const recPath = join(runsDir, existingEntry.runId, "run-record.json");
-      if (existsSync(recPath)) {
-        const record = JSON.parse(readFileSync(recPath, "utf8")) as Record<string, unknown>;
+      if (!existsSync(recPath)) {
+        return internalRefusal(
+          "/requests",
+          "the request log refers to run " + existingEntry.runId + " whose record is missing; use a new requestId or recover the run"
+        );
+      }
+      let replayed: Record<string, unknown>;
+      try {
+        replayed = JSON.parse(readFileSync(recPath, "utf8")) as Record<string, unknown>;
+      } catch {
+        return internalRefusal("/requests", "the record of run " + existingEntry.runId + " is unreadable");
+      }
+      const replayCheck = validate("run-record", replayed);
+      if (!replayCheck.ok || replayed.runId !== existingEntry.runId) {
+        return internalRefusal("/requests", "the record of run " + existingEntry.runId + " is invalid");
+      }
+      return {
+        ok: true,
+        runId: existingEntry.runId,
+        state: replayed.state as string,
+        record: replayed,
+        replayed: true,
+      };
+    }
+
+    // Reserve the request id on disk before any asynchronous work, so two managers on one project cannot both start it.
+    const reservation = join(runsDir, ".reserve-" + sha256Hex(req.requestId).slice(0, 24));
+    try {
+      mkdirSync(reservation);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
         return {
-          ok: true,
-          runId: existingEntry.runId,
-          state: record.state as string,
-          record,
-          replayed: true,
+          ok: false,
+          errors: [
+            {
+              code: "E_REQUEST_CONFLICT",
+              field: "/requestId",
+              message: "this requestId is being processed by another manager or a previous start was interrupted; use a new requestId or run recover()",
+              source: "seed",
+            },
+          ],
         };
       }
+      throw err;
     }
 
     // Register in flight promise for this requestId
@@ -381,6 +480,7 @@ export class RunManager {
       return errOutcome;
     } finally {
       this.inFlightByRequestId.delete(req.requestId);
+      rmSync(reservation, { recursive: true, force: true });
     }
   }
 
@@ -409,6 +509,19 @@ export class RunManager {
         };
       }
       const inputAbs = resInside.value;
+      if (existsSync(inputAbs) && !physicallyInside(this.projectRoot, inputAbs)) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_PATH_TRAVERSAL",
+              field: `/inputs/${i}/path`,
+              message: "input resolves outside the project (symlink or junction)",
+              source: "seed",
+            },
+          ],
+        };
+      }
       if (!existsSync(inputAbs)) {
         return {
           ok: false,
@@ -577,6 +690,7 @@ export class RunManager {
     const inFlightRun: InFlightRun = {
       runId,
       cancelRequested: false,
+      cancelWaiters: [],
       promise: runPromise,
     };
     this.inFlightRuns.set(runId, inFlightRun);
@@ -611,6 +725,7 @@ export class RunManager {
       if (inFlightRun.cancelRequested) {
         record.native = { status: "cancelled" };
         transition("cancelled", "cancelled before job started");
+        this.settleCancel(inFlightRun, { ok: true });
         return { ok: true, runId, state: "cancelled", record };
       }
 
@@ -664,18 +779,7 @@ export class RunManager {
         // Timeout check
         const elapsed = performance.now() - startTime;
         if (elapsed >= wallLimitMs) {
-          await callAdapter(
-            this.adapter,
-            {
-              schema: "seed.adapter-request/0.1",
-              verb: "cancel",
-              requestId: `cancel-${this.newId()}`,
-              actor: req.actor,
-              jobId: record.jobId,
-              ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
-            },
-            { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
-          );
+          const stop = await this.requestCancel(req, record.jobId as string);
           const timeoutErrors: TypedError[] = [
             {
               code: "E_TIMEOUT",
@@ -684,42 +788,37 @@ export class RunManager {
               source: "seed",
             },
           ];
+          if (!stop.confirmed) {
+            timeoutErrors.push(...stop.errors);
+          }
           writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(timeoutErrors, null, 2) + "\n");
-          record.native = { status: "timeout" };
+          record.native = stop.confirmed ? { status: "timeout" } : { status: "timeout", detail: "the job could not be confirmed stopped and may still be running" };
+          this.settleCancel(inFlightRun, { ok: false, errors: [{ code: "E_TIMEOUT", field: "", message: "run ended by the wall-clock limit", source: "seed" }] });
           transition("failed", "timeout");
           return { ok: true, runId, state: "failed", record };
         }
 
         // Cancel requested check
         if (inFlightRun.cancelRequested) {
-          const cancelOutcome = await callAdapter(
-            this.adapter,
-            {
-              schema: "seed.adapter-request/0.1",
-              verb: "cancel",
-              requestId: `cancel-${this.newId()}`,
-              actor: req.actor,
-              jobId: record.jobId,
-              ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
-            },
-            { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
-          );
-          if (cancelOutcome.ok && (cancelOutcome.reply as Record<string, unknown>).ok) {
-            const cancelReply = cancelOutcome.reply as Record<string, unknown>;
-            const cancelResult = cancelReply.result as { jobId: string; lifecycle: string; cancelled: boolean };
-            if (!cancelResult.cancelled) {
-              if (cancelResult.lifecycle === "completed") {
-                return await this.collectAndFinalize(record, runAbsDir, runRelDir, req, transition);
-              }
-              if (TERMINAL_STATES.includes(cancelResult.lifecycle)) {
-                transition(cancelResult.lifecycle, `job finished with ${cancelResult.lifecycle}`);
-                return { ok: true, runId, state: cancelResult.lifecycle, record };
-              }
-            }
+          const stop = await this.requestCancel(req, record.jobId as string);
+          if (stop.confirmed) {
+            record.native = { status: "cancelled" };
+            transition("cancelled", "cancelled by user");
+            this.settleCancel(inFlightRun, { ok: true });
+            return { ok: true, runId, state: "cancelled", record };
           }
-          record.native = { status: "cancelled" };
-          transition("cancelled", "cancelled by user");
-          return { ok: true, runId, state: "cancelled", record };
+          if (stop.terminal === "completed") {
+            this.settleCancel(inFlightRun, { ok: true });
+            return await this.collectAndFinalize(record, runAbsDir, runRelDir, req, transition);
+          }
+          if (stop.terminal !== undefined) {
+            transition(stop.terminal, `job finished with ${stop.terminal}`);
+            this.settleCancel(inFlightRun, { ok: true });
+            return { ok: true, runId, state: stop.terminal, record };
+          }
+          // Not confirmed: the job may still be running. Keep watching it and tell the caller.
+          inFlightRun.cancelRequested = false;
+          this.settleCancel(inFlightRun, { ok: false, errors: stop.errors });
         }
 
         // Status call
@@ -739,18 +838,7 @@ export class RunManager {
         if (!statusOutcome.ok || !(statusOutcome.reply as Record<string, unknown>).ok) {
           consecutiveStatusFailures++;
           if (consecutiveStatusFailures >= 3) {
-            await callAdapter(
-              this.adapter,
-              {
-                schema: "seed.adapter-request/0.1",
-                verb: "cancel",
-                requestId: `cancel-${this.newId()}`,
-                actor: req.actor,
-                jobId: record.jobId,
-                ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
-              },
-              { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
-            );
+            const stop = await this.requestCancel(req, record.jobId as string);
             const appFailedErrors: TypedError[] = [
               {
                 code: "E_APP_FAILED",
@@ -759,6 +847,9 @@ export class RunManager {
                 source: "seed",
               },
             ];
+            if (!stop.confirmed) {
+              appFailedErrors.push(...stop.errors);
+            }
             writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(appFailedErrors, null, 2) + "\n");
             record.native = { status: "status-unavailable" };
             transition("failed", "status unavailable");
@@ -828,8 +919,62 @@ export class RunManager {
         }
       }
     } finally {
+      this.settleCancel(inFlightRun, { ok: true });
       this.inFlightRuns.delete(runId);
     }
+  }
+
+  /** Resolves every pending cancel() call with the outcome of the cancel attempt. */
+  private settleCancel(run: InFlightRun, result: { ok: true } | { ok: false; errors: TypedError[] }): void {
+    const waiters = run.cancelWaiters.splice(0);
+    for (const w of waiters) w(result);
+  }
+
+  /**
+   * Asks the adapter to stop a job. `confirmed` is true only when the adapter affirms it; `terminal` is set when the job
+   * had already reached a final lifecycle; otherwise the stop is NOT confirmed and `errors` says why.
+   */
+  private async requestCancel(
+    req: StartRequest,
+    jobId: string
+  ): Promise<{ confirmed: true } | { confirmed: false; terminal?: string; errors: TypedError[] }> {
+    const outcome = await callAdapter(
+      this.adapter,
+      {
+        schema: "seed.adapter-request/0.1",
+        verb: "cancel",
+        requestId: `cancel-${this.newId()}`,
+        actor: req.actor,
+        jobId,
+        ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
+      },
+      { projectRoot: this.projectRoot, timeoutMs: this.callTimeoutMs }
+    );
+    if (!outcome.ok) {
+      return { confirmed: false, errors: outcome.errors };
+    }
+    const reply = outcome.reply as Record<string, unknown>;
+    if (!reply.ok) {
+      return { confirmed: false, errors: reply.errors as TypedError[] };
+    }
+    const result = reply.result as { lifecycle: string; cancelled: boolean };
+    if (result.cancelled === true) {
+      return { confirmed: true };
+    }
+    if (TERMINAL_STATES.includes(result.lifecycle)) {
+      return { confirmed: false, terminal: result.lifecycle, errors: [] };
+    }
+    return {
+      confirmed: false,
+      errors: [
+        {
+          code: "E_APP_FAILED",
+          field: "",
+          message: "the adapter did not confirm that the job was stopped; it may still be running",
+          source: "seed",
+        },
+      ],
+    };
   }
 
   private async collectAndFinalize(
@@ -878,6 +1023,19 @@ export class RunManager {
     };
 
     const resolvedIndex = resolveInside(this.projectRoot, collectResult.resultsIndex);
+    if (resolvedIndex.ok && !this.insideRun(runAbsDir, resolvedIndex.value)) {
+      return markCollectFailed(
+        [
+          {
+            code: "E_OUTPUT_INCOMPLETE",
+            field: "/resultsIndex",
+            message: "resultsIndex is not inside this run's directory",
+            source: "seed",
+          },
+        ],
+        "resultsIndex outside the run directory"
+      );
+    }
     if (!resolvedIndex.ok) {
       return markCollectFailed(
         [
@@ -983,6 +1141,15 @@ export class RunManager {
       );
     }
 
+    // The results must belong to THIS snapshot: same inputs, and every quantity derived from them.
+    const provenanceErrors = checkResultsAgainstRecord(indexDoc, record);
+    if (provenanceErrors.length > 0) {
+      return markCollectFailed(
+        provenanceErrors.map((e) => ({ ...e, code: "E_OUTPUT_INCOMPLETE" })),
+        "results do not belong to the run snapshot"
+      );
+    }
+
     const quantities = (indexDoc.quantities as Array<{ data?: { path?: string; sha256?: string } }>) ?? [];
     const outputsMap = new Map<string, string>();
     outputsMap.set(collectResult.resultsIndex, collectResult.resultsSha256);
@@ -1015,6 +1182,20 @@ export class RunManager {
             },
           ],
           "quantity data path invalid"
+        );
+      }
+
+      if (!this.insideRun(runAbsDir, resolvedData.value)) {
+        return markCollectFailed(
+          [
+            {
+              code: "E_OUTPUT_INCOMPLETE",
+              field: `/quantities/${i}/data/path`,
+              message: "quantity data is not inside this run's directory",
+              source: "seed",
+            },
+          ],
+          "quantity data outside the run directory"
         );
       }
 
@@ -1057,10 +1238,30 @@ export class RunManager {
     return { ok: true, runId, state: "completed", record };
   }
 
+  /** An output path must lie inside the run's own directory, lexically and after resolving symlinks. */
+  private insideRun(runAbsDir: string, candidateAbs: string): boolean {
+    if (!lexicallyInside(runAbsDir, candidateAbs)) return false;
+    // A path that does not exist yet is judged by the caller's existence check; containment of existing files is physical.
+    return !existsSync(candidateAbs) || physicallyInside(runAbsDir, candidateAbs);
+  }
+
   async cancel(runId: string): Promise<RunOutcome> {
+    if (typeof runId !== "string" || !RUN_ID_PATTERN.test(runId)) {
+      return {
+        ok: false,
+        errors: [{ code: "E_PROP_MISSING", field: "/runId", message: "Unknown runId", source: "seed" }],
+      };
+    }
     const inFlight = this.inFlightRuns.get(runId);
     if (inFlight) {
+      const attempt = new Promise<{ ok: true } | { ok: false; errors: TypedError[] }>((resolve) => {
+        inFlight.cancelWaiters.push(resolve);
+      });
       inFlight.cancelRequested = true;
+      const result = await attempt;
+      if (!result.ok && result.errors.some((e) => e.code !== "E_TIMEOUT")) {
+        return { ok: false, errors: result.errors, runId };
+      }
       return await inFlight.promise;
     }
 
@@ -1114,6 +1315,12 @@ export class RunManager {
       };
     }
 
+    if (record.runId !== runId) {
+      return {
+        ok: false,
+        errors: [{ code: "E_INTERNAL", field: "/runId", message: "the record does not belong to this run id", source: "seed" }],
+      };
+    }
     const curState = record.state as string;
     if (TERMINAL_STATES.includes(curState)) {
       return { ok: true, runId, state: curState, record };
@@ -1164,8 +1371,21 @@ export class RunManager {
         }
         writeFileAtomic(recordPath, JSON.stringify(record, null, 2) + "\n");
         return { ok: true, runId, state: "cancelled", record };
-      } else {
+      } else if (TERMINAL_STATES.includes(cancelResult.lifecycle)) {
         return { ok: true, runId, state: curState, record };
+      } else {
+        return {
+          ok: false,
+          runId,
+          errors: [
+            {
+              code: "E_APP_FAILED",
+              field: "",
+              message: "the adapter did not confirm that the job was stopped; it may still be running",
+              source: "seed",
+            },
+          ],
+        };
       }
     } else {
       if (!isLegalTransition(curState, "cancelled")) {
@@ -1204,6 +1424,16 @@ export class RunManager {
 
     const entries = readdirSync(runsDir, { withFileTypes: true });
     const results: { runId: string; from: string; to: string }[] = [];
+
+    // Request reservations left behind by a stopped manager would block those requestIds forever.
+    const liveReservations = new Set(
+      Array.from(this.inFlightByRequestId.keys()).map((id) => ".reserve-" + sha256Hex(id).slice(0, 24))
+    );
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith(".reserve-") && !liveReservations.has(entry.name)) {
+        rmSync(join(runsDir, entry.name), { recursive: true, force: true });
+      }
+    }
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;

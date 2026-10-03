@@ -391,3 +391,45 @@ export function verifyStudyLog(lines: string[]): TypedError[] {
 
   return errors;
 }
+
+/**
+ * A results index must belong to the run snapshot it is attached to: its inputHashes equal the record's inputs
+ * (as a set of path + sha256) and every quantity's provenance.inputRevisions names only hashes of those inputs.
+ */
+export function checkResultsAgainstRecord(index: unknown, record: unknown): TypedError[] {
+  const errors: TypedError[] = [];
+  const idx = index as Record<string, unknown> | null;
+  const rec = record as Record<string, unknown> | null;
+  if (idx === null || typeof idx !== "object" || rec === null || typeof rec !== "object") {
+    return [{ code: "E_SCHEMA_INVALID", field: "", message: "expected objects", source: "seed" }];
+  }
+  type InputRef = { path: string; sha256: string };
+  const keyOf = (i: InputRef): string => i.path + "\u0000" + i.sha256;
+  const recordInputs = Array.isArray(rec.inputs) ? (rec.inputs as InputRef[]) : [];
+  const indexInputs = Array.isArray(idx.inputHashes) ? (idx.inputHashes as InputRef[]) : [];
+  const a = indexInputs.map(keyOf).sort();
+  const b = recordInputs.map(keyOf).sort();
+  if (a.length !== b.length || a.some((k, i) => k !== b[i])) {
+    errors.push({
+      code: "E_SCHEMA_INVALID",
+      field: "/inputHashes",
+      message: "results-index inputHashes do not match the run's input snapshot",
+      source: "seed"
+    });
+  }
+  const snapshotHashes = new Set(recordInputs.map((i) => i.sha256));
+  const quantities = Array.isArray(idx.quantities) ? (idx.quantities as Record<string, unknown>[]) : [];
+  quantities.forEach((q, qi) => {
+    const prov = q.provenance as { inputRevisions?: unknown } | undefined;
+    const revisions = Array.isArray(prov?.inputRevisions) ? (prov?.inputRevisions as string[]) : [];
+    if (!revisions.every((h) => snapshotHashes.has(h))) {
+      errors.push({
+        code: "E_SCHEMA_INVALID",
+        field: `/quantities/${qi}/provenance/inputRevisions`,
+        message: "quantity provenance names an input revision that is not in the run's snapshot",
+        source: "seed"
+      });
+    }
+  });
+  return errors;
+}
