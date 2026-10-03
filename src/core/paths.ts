@@ -229,6 +229,10 @@ export function toWindows(input: string, opts?: MapOptions): PathResult<string> 
   if (!mntRootRes.ok) return mntRootRes;
   const mntRoot = mntRootRes.value;
 
+  if (opts?.distro !== undefined && (opts.distro === "" || /[\\/\0]/.test(opts.distro))) {
+    return err("E_PATH_INVALID", "distro must be a non-empty name without separators");
+  }
+
   // In posix input, backslash inside a segment cannot be represented in Windows
   if (input.startsWith("/") && input.includes("\\")) {
     return err("E_PATH_INVALID", "POSIX path segment contains backslash");
@@ -285,7 +289,7 @@ export function toWindows(input: string, opts?: MapOptions): PathResult<string> 
 }
 
 export function isPortableRelative(p: string): PathResult<string> {
-  if (typeof p !== "string" || p.length === 0 || p.includes("\0") || p.length > 512) {
+  if (typeof p !== "string" || p.length === 0 || p.includes("\0") || Array.from(p).length > 512) {
     return err("E_PATH_INVALID", "Invalid portable relative path");
   }
 
