@@ -180,6 +180,21 @@
     "valid": true
   },
   {
+    "file": "good/adapter-reply-error-E_PROJECT_LOCKED.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_NOT_FOUND.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
+    "file": "good/adapter-reply-error-E_EXISTS.json",
+    "family": "adapter-reply",
+    "valid": true
+  },
+  {
     "file": "good/results-index-basic.json",
     "family": "results-index",
     "valid": true
