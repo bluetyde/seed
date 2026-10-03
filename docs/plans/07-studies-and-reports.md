@@ -53,7 +53,7 @@ Create a project, attach a model, save a revision, import or run, compare named 
 
 ## Open
 
-- Record as files or embedded store ([TODO decisions](../../TODO.md)).
+- Decided (D2): files. Append-only JSONL study record, atomic writes, optional hash chain; a database index may be added later as a rebuildable cache only. Remaining: the record schema identifier and migration policy.
 - Plot library for the report and views.
 - Whether a conclusion needs a second human sign-off at A2 and above.
 - Study templates for teaching (a student starts from "compare two redundancy designs").

@@ -33,7 +33,7 @@ These are semantic operations, not endpoint names.
 
 Leaning toward D, decided after the inventory (TODO E0 task 1) shows each app's real entry points. The decision records the rejected options and why.
 
-Agents reach SEED through **one MCP server** that wraps the core; an agent never talks to an app's own port. Whether a plain CLI for scripts and CI is added beside MCP is an open decision ([plan 05](05-agent-harness.md)).
+Agents reach SEED through **one MCP server** that wraps the core; an agent never talks to an app's own port. A plain CLI over the same command set serves scripts and CI (decision D1, [../DECISIONS.md](../DECISIONS.md)); the CLI is built first and MCP wraps it.
 
 ## Reply rules
 

@@ -4,6 +4,7 @@ SEED = System for Engineering and Experimental Design. Folder and log keep the r
 
 Detailed documents:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the parts fit together (components, interfaces, run lifecycle, conventions, repo layout, dependency graph)
+- [docs/DECISIONS.md](docs/DECISIONS.md): design decisions D1 to D6 with reasons, consequences and rejected options
 - [docs/WORKFLOWS.md](docs/WORKFLOWS.md): step-by-step procedures (setup, adding an adapter, adding an oracle, running a study, releases, multi-agent rules)
 - [docs/TOOLING.md](docs/TOOLING.md): tools in use or considered, versions, prior art to survey
 - [docs/AGENT-TASKS.md](docs/AGENT-TASKS.md): who does what under the delegation workflow, and the task board
@@ -93,13 +94,14 @@ This is close to how a careful engineer works by hand. It fails if the oracle se
 - Electron host, TypeScript, vitest, Playwright (implemented; see [TOOLING](docs/TOOLING.md)).
 - Core in TypeScript so the host and an MCP server share it; adapters may be any language behind the transport.
 - JSON Schema for contracts, with good and bad fixtures and a small validator (the pattern used in Virtual Reactor's `schema/`).
-- Study record and run store as plain files in the project folder first; an embedded store only if files prove too slow (decision in E0).
+- Study record and run store as plain files in the project folder: append-only JSONL for the study record, atomic writes, optional hash chain; an index database may be added later as a rebuildable cache only (decision D2, [docs/DECISIONS.md](docs/DECISIONS.md)).
 - No fixed ports reserved until the implementation plan checks existing allocations (shared rule: user 8765, Claude 8766, Antigravity 8767, Codex 8768).
 
 ## First test cases
 
 - **Fake adapter:** succeeds, fails validation, crashes, hangs, leaves partial output, trips, reports a stale revision. Drives the harness tests with no physics.
-- **PRA two-pump lesson:** first real adapter. Hand oracles: A=0.1, B=0.2, AND 0.02, OR 0.28; A AND A and A OR A both 0.1; (A AND B) OR (A AND C).
+- **Virtual Reactor (RAFT):** first real adapter, by availability (decision D5): deterministic engine with replay and analytic point-kinetics checks, to be confirmed by the E0 inventory.
+- **PRA two-pump lesson:** second real adapter, when its P2 gate passes. Hand oracles: A=0.1, B=0.2, AND 0.02, OR 0.28; A AND A and A OR A both 0.1; (A AND B) OR (A AND C).
 - **OpenMC heating to Fuel Performance Studio:** first reviewed transfer and first end-to-end agent demonstration.
 
 ## Milestones
@@ -110,18 +112,23 @@ Detail and exit evidence per milestone are in [TODO.md](TODO.md) and the area pl
 |---|---|---|
 | E0: contracts | App inventory, transport decision, schemas with fixtures, study and oracle record formats, tier policy, fake adapter | Open vs run, revisions, material preservation and status semantics documented; harness acceptance tests 1, 3, 4, 5, 6 pass against the fake adapter |
 | E1: project launcher | Project create/open/reopen, attach native models, open editors, import completed runs, headless core | Reopen and relocate a project; missing app is actionable; Windows/WSL path mapping explicit; no physics required |
-| E2: single-app runs | One real adapter (PRA) through all verbs, MCP server, oracle registry v1, tier enforcement | Direct, workspace and MCP results agree on every oracle; cancellation, crash, partial output, edit conflict and stale result handled |
+| E2: single-app runs | First real adapter (Virtual Reactor; PRA next) through all verbs, MCP server and CLI, oracle index and runner, tier enforcement | Direct, workspace and MCP results agree on every oracle; cancellation, crash, partial output, edit conflict and stale result handled |
 | E3: experiments | Typed parameters, bounded sweeps, comparison, study record, generated report, replay | Failed cases visible; same inputs and seed replay or list differences; each figure traces to a run |
 | E4: reviewed transfer | One-way, offline OpenMC heating to Fuel Performance Studio with human-approved mapping | Unit, normalization and coverage refusals hold; conserved power within a tolerance fixed beforehand; downstream invalidation |
 | E5: advanced studies | Sensitivity and uncertainty an agent can drive; optional feedback coupling | Monte Carlo noise, input uncertainty and deterministic sensitivity reported separately; feedback only after its gates are written |
 
-## Open questions
+## Decisions and open questions
 
-- MCP only, or MCP plus a plain CLI for scripts and CI.
-- Study record as project files or an embedded store with files as the export.
-- Oracle registry in this repo, or in each app's repo with SEED indexing it.
-- Where tier enforcement runs (host main process or a small separate service).
-- UI framework for project, study and report views (the shell uses plain TypeScript and HTML).
-- First real adapter if PRA is late: NODAL or Virtual Reactor have existing run contracts.
+Decided 2026-10-03 (reasons and consequences in [docs/DECISIONS.md](docs/DECISIONS.md)):
+- **D1** Both an MCP server and a plain CLI, thin front-ends over one core.
+- **D2** Project files (append-only JSONL study record, atomic writes), not an embedded database; an index cache may come later.
+- **D3** Each app owns its oracles; SEED owns the schema, runner and index and pins oracle hashes and app commits.
+- **D4** Tier enforcement lives in the headless core library, run in-process by the host; approvals are pluggable and no client surface can approve.
+- **D5** Virtual Reactor is the first real adapter; PRA follows.
+- **D6** UI framework deferred to E3.
+
+Still open:
+- Schema identifiers, migration policy and the exact adapter message shapes (E0 task 3).
+- Policy file format and who may sign it; per-agent tokens and budgets.
 - One log convention for dev agents and engineering agents, without mixing them.
 - License of bundled engines and of any redistributed packages; distribution model.

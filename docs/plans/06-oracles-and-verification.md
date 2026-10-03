@@ -32,9 +32,11 @@ oracles/<adapter>/<id>.json      entries (inputs by reference, expected, toleran
 oracles/<adapter>/results/       verdicts per adapter and engine version
 ```
 
-Open: whether entries live here or in each app's repo with SEED indexing them. If in app repos, SEED pins the commit it ran.
+Decided (D3, 2026-10-03): entries live in each app's own repo. SEED owns the schema, the runner and an index, and keeps a small set for its fake adapter. On every run SEED records the oracle file hash and the app commit; a changed pin flags the study until a human accepts it.
 
-## First entries (E2, PRA)
+## First entries (E2): Virtual Reactor analytic cases, then PRA
+
+The first real adapter is Virtual Reactor (decision D5); its analytic and replay cases are chosen from its own validation documents and live in its repo. PRA's entries below are added when PRA's P2 gate passes.
 
 Synthetic probabilities only; independence stated.
 
