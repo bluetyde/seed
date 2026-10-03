@@ -106,8 +106,9 @@ function updateRequestsFile(
   if (existsSync(requestsJsonPath)) {
     try {
       map = JSON.parse(readFileSync(requestsJsonPath, "utf8"));
-    } catch {
-      map = {};
+    } catch (err) {
+      // start() refuses before reaching this point; never overwrite a file we cannot read.
+      throw new Error("requests.json is unreadable: " + (err instanceof Error ? err.message : String(err)));
     }
   }
   map[requestId] = entry;
@@ -297,7 +298,18 @@ export class RunManager {
       try {
         requestsMap = JSON.parse(readFileSync(requestsJsonPath, "utf8"));
       } catch {
-        requestsMap = {};
+        // Idempotency memory is unreadable: starting anyway could duplicate a run and would overwrite the evidence.
+        return {
+          ok: false,
+          errors: [
+            {
+              code: "E_INTERNAL",
+              field: "/requests",
+              message: "the request log requests.json is unreadable; refusing to start a run",
+              source: "seed",
+            },
+          ],
+        };
       }
     }
 
