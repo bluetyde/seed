@@ -29,7 +29,8 @@ Order matters: the contracts (E0) come before anything that reads or writes them
 11. [ ] Run the real-app integration check on Windows and Linux hosts; configuration coverage is not runtime verification.
 12. [ ] Verify the default start command of each app by a real launch on Windows, macOS and Linux.
 13. [ ] Section 4 of [docs/TOOLING.md](docs/TOOLING.md): survey the candidates and date each verdict before any claim leaves the repo.
-14. [ ] Merge the harness docs branch (`claude/agentic-harness`) when the user agrees; fast-forward the shared folder afterward (status clean first).
+14. [x] 2026-10-03: Harness docs branch `claude/agentic-harness` merged to main (4c1e6f7) and the shared folder fast-forwarded (clean tree first).
+15. [ ] Align with the PRA and Fuel plans written 2026-10-03 (`pra-studio/`, `fuel-performance-studio/`): their oracle entries use this repo's oracle-entry format and their adapters follow plan 03; reconcile the schemas when E0 task 3 lands.
 
 ## Now
 
@@ -136,7 +137,6 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 - [ ] Oracle registry in this repo, or in each app's repo with SEED indexing it.
 - [ ] Where tier enforcement runs.
 - [ ] UI framework for project, study and report views; packaging; first real adapter if PRA is late.
-- [ ] Merge `claude/agentic-harness`.
 
 ## Done
 
