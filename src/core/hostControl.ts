@@ -10,6 +10,7 @@ import { callAdapter } from "./adapterClient";
 import { appendLine } from "./atomicFile";
 import { openProject, withProjectLockAsync } from "./projectStore";
 import { validate } from "./validate";
+import { RunManager } from "./runManager";
 
 export function controlBinding(c: HostConfiguration): string {
   return sha256Hex(canonicalJson({ project: realpathSync(c.projectRoot), adapter: c.adapter,
@@ -78,13 +79,39 @@ export async function recoverHostCalculation(file: string, request: unknown) {
       appendAdmission(h.engine, { phase: "recovery-request", actor: h.c.actor, requestId: h.active.requestId, runId, owner: h.owner });
       // Select the native target only from external host launch evidence, never a reread project record.
       const stopped = await callAdapter({ ...h.c.adapter, ...(h.c.adapter.id === "raft" ? { env: { SEED_RAFT_HEADLESS: realpathSync(h.c.runtime.path) } } : {}) },
-        { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "recover-" + randomBytes(12).toString("hex"), actor: h.c.actor, jobId: h.active.jobId },
+        { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "recover-" + randomBytes(12).toString("hex"), actor: h.c.actor, jobId: h.active.jobId,
+          extensions: { "seed.launch": { runDir: `${(project.value.manifest.folders as { runs: string }).runs}/${runId}`,
+            ...(h.active.nativeProcesses ? { nativeProcesses: h.active.nativeProcesses } : {}) } } },
         { projectRoot: h.project, timeoutMs: 15000 });
       const reply = stopped.ok ? stopped.reply as any : undefined;
       const confirmed = reply?.ok === true && reply.result?.jobId === h.active.jobId && reply.result?.cancelled === true && reply.result?.lifecycle === "cancelled";
-      appendAdmission(h.engine, { phase: "recovery-stop", actor: h.c.actor, runId, jobId: h.active.jobId, confirmed });
-      if (!confirmed) throw Error("adapter stop not confirmed; lease retained for inspection");
+      const completed = reply?.ok === true && reply.result?.jobId === h.active.jobId && reply.result?.lifecycle === "completed" && reply.result?.nativeStopped === true;
+      appendAdmission(h.engine, { phase: "recovery-stop", actor: h.c.actor, runId, jobId: h.active.jobId, confirmed, completed });
+      if (!confirmed && !completed) throw Error("adapter stop not confirmed; lease retained for inspection");
+      if (h.active.nativeProcesses && (!Array.isArray(h.active.nativeProcesses) || h.active.nativeProcesses.some((pid: unknown) =>
+        !Number.isSafeInteger(pid) || (pid as number) < 2 || isAlive(pid as number)))) throw Error("launch-bound native processes are still alive; lease retained");
       if (canonicalJson(readHostJson(safeChild(dir, "run-record.json"))) !== canonicalJson(record)) throw Error("run record changed during stop; job stopped but lease retained for inspection");
+      if (completed) {
+        if (!Array.isArray(h.active.nativeProcesses) || !h.active.nativeProcesses.length ||
+          h.active.nativeProcesses.some((pid: unknown) => !Number.isSafeInteger(pid) || (pid as number) < 2 || isAlive(pid as number))) throw Error("launch-bound native processes are absent or still alive; lease retained");
+        const boundInputs = record.inputs.map((i: any) => ({ artifact: i.path, revision: i.sha256 }));
+        if (canonicalJson(boundInputs) !== canonicalJson(h.active.inputs)) throw Error("snapshot inputs differ from host launch binding");
+        const manager = new RunManager({ projectRoot: h.project, runsFolder: (project.value.manifest.folders as { runs: string }).runs,
+          adapter: { ...h.c.adapter, ...(h.c.adapter.id === "raft" ? { env: { SEED_RAFT_HEADLESS: realpathSync(h.c.runtime.path) } } : {}) } });
+        const outcome = await manager.collectBoundRecovery(record, h.c.actor, () => {
+          const current = activeControl(file, request);
+          if (current.owner.token !== h.owner.token || isAlive(current.owner.pid) || canonicalJson(current.c) !== canonicalJson(h.c) ||
+            canonicalJson(current.active) !== canonicalJson(h.active) || h.active.nativeProcesses.some((pid: number) => isAlive(pid)) ||
+            sha256Hex(readFileSync(realpathSync(h.c.runtime.path))) !== h.c.runtime.sha256 ||
+            canonicalJson(readHostJson(safeChild(dir, "run-record.json"))) !== canonicalJson(record)) throw Error("recovery evidence changed; lease retained");
+        });
+        if (!outcome.ok || outcome.state !== "completed") throw Error("recovered collection failed; lease retained");
+        appendAdmission(h.engine, { phase: "recovery-outcome", actor: h.c.actor, runId, state: "completed" });
+        const owner = readHostJson(safeChild(h.lease, "owner.json"));
+        if (owner.token !== h.owner.token || isAlive(owner.pid)) throw Error("ownership changed; lease retained");
+        rmSync(safeChild(h.engine, "lease", true), { recursive: true });
+        return { ok: true as const, state: "recovered-completed", runId };
+      }
       const finalRecord = { ...record, state: "cancelled", native: { status: "cancelled" }, finishedAt: new Date().toISOString() };
       if (!validate("run-record", finalRecord).ok) throw Error("recovered record invalid; lease retained");
       appendLine(join(safeChild(dir, "log", true), "transitions.jsonl"), JSON.stringify({ time: finalRecord.finishedAt, from: record.state, to: "cancelled", reason: "human recovery: bound adapter stop confirmed" }));

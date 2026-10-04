@@ -85,9 +85,9 @@ Required: `schema`, `verb`, `requestId`, `ok` (boolean), `errors` (array of type
 | `describe` | `app` `{id, name, version}`; `engine?` `{name, version}`; `formats` `[{id, version}]`; `capabilities` `[string]`; `parameters` `[{id, type: "number"\|"integer"\|"string"\|"boolean", unit?, min?, max?, enum?}]`; `quantities` `[{name, unit, normalization}]`; `oracleCoverage` `[{quantity, domain}]`; `oraclePin?` `{sha256, commit}` |
 | `open` | `editor` (`"opened"` or `"focused"`) |
 | `validate` | `valid` (boolean), `problems` (array of typed errors). `valid` is true exactly when no problem has an `E_` code (warnings allowed) |
-| `run` | `jobId` (`id`), `runDir` (`relPath`), `lifecycle` (`queued` or `running`) |
+| `run` | `jobId` (`id`), `runDir` (`relPath`), `lifecycle` (`queued` or `running`), optional `nativeProcesses` (1..16 distinct integer PIDs >= 2, obtained from trusted launch) |
 | `status` | `jobId`, `lifecycle`, `native` (`nativeStatus`), `startedAt?`, `finishedAt?` (`time`) |
-| `cancel` | `jobId`, `lifecycle`, `cancelled` (boolean) |
+| `cancel` | `jobId`, `lifecycle`, `cancelled` (boolean), optional `nativeStopped` (boolean; confirms all owned native processes stopped) |
 | `collect` | `jobId`, `lifecycle` (must be `completed`), `resultsIndex` (`relPath`), `resultsSha256` |
 
 ## 3. Results index: `seed.results-index/0.1`

@@ -381,6 +381,10 @@
               "runDir": {
                 "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
               },
+              "nativeProcesses": {
+                "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+                "items": { "type": "integer", "minimum": 2 }
+              },
               "lifecycle": {
                 "type": "string",
                 "enum": ["queued", "running"]
@@ -454,6 +458,10 @@
               },
               "cancelled": {
                 "type": "boolean"
+              },
+              "nativeStopped": {
+                "type": "boolean",
+                "description": "Adapter confirms all owned native processes have stopped; optional recovery evidence."
               }
             }
           }
