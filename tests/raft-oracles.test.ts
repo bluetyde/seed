@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import * as hostFiles from "../src/core/hostFiles";
+import * as adapterClient from "../src/core/adapterClient";
 import { callAdapter } from "../src/core/adapterClient";
 import { sha256Hex } from "../src/core/canonical";
 import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantities, type IndexedOracle, type Observed, type OracleEntry } from "../src/core/oracle";
@@ -224,11 +226,23 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       } finally { writeHostJson(jobPath, job); writeHostJson(childPath, child); writeFileSync(statusPath, savedStatus); }
       expect(await runFromHostFile(config, { requestId: "blocked-after-crash", caseId: "approved", budget })).toMatchObject({ ok: false,
         errors: [{ code: "E_BUDGET_EXCEEDED", message: expect.stringContaining("E_ENGINE_BUSY") }] });
+      const append = hostFiles.appendAdmission;
+      const failingAudit = vi.spyOn(hostFiles, "appendAdmission").mockImplementation((root, event: any) => {
+        if (event.phase === "recovery-outcome") throw Error("injected audit interruption after saved cancellation");
+        return append(root, event);
+      });
+      try { expect((await recoverHostCalculation(config, { requestId: "real-crash" })).ok).toBe(false); }
+      finally { failingAudit.mockRestore(); }
+      const cancelledPath = join(project, "runs", active.runId, "run-record.json");
+      const cancelledBytes = readFileSync(cancelledPath);
+      expect(JSON.parse(cancelledBytes.toString()).state).toBe("cancelled");
+      expect(existsSync(join(engine, "lease"))).toBe(true);
       const recovery = spawnSync(process.execPath, [join(__dirname, "../dist/cli/seed.js"), "recover"], {
         input: JSON.stringify({ requestId: "real-crash" }), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_HOST_CONFIG: config } });
       expect(recovery.status, recovery.stdout + recovery.stderr).toBe(0);
       expect(JSON.parse(recovery.stdout)).toMatchObject({ state: "recovered-cancelled", runId: active.runId });
       expect(isAlive(job.pid)).toBe(false); expect(isAlive(child.pid)).toBe(false);
+      expect(readFileSync(cancelledPath)).toEqual(cancelledBytes);
       expect(existsSync(join(engine, "lease"))).toBe(false);
       expect(JSON.parse(readFileSync(join(project, "runs", active.runId, "run-record.json"), "utf8")).state).toBe("cancelled");
       const recoveredLog = readFileSync(join(engine, "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
@@ -281,10 +295,65 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       expect(existsSync(join(engine, "lease"))).toBe(true);
       expect(JSON.parse(readFileSync(recordPath, "utf8")).state).toBe("running");
       writeFileSync(resultsPath, original);
-      expect(await recoverHostCalculation(config, { requestId: "real-finished-crash" })).toMatchObject({ ok: true, state: "recovered-completed", runId: active.runId });
+      const append = hostFiles.appendAdmission;
+      const failingAudit = vi.spyOn(hostFiles, "appendAdmission").mockImplementation((root, event: any) => {
+        if (event.phase === "recovery-outcome") throw Error("injected audit interruption after saved completion");
+        return append(root, event);
+      });
+      try { expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false); }
+      finally { failingAudit.mockRestore(); }
+      const terminalBytes = readFileSync(recordPath);
       const finished = JSON.parse(readFileSync(recordPath, "utf8"));
       expect(finished.state).toBe("completed"); expect(finished.outputs.length).toBeGreaterThan(0);
       for (const output of finished.outputs) expect(sha256Hex(readFileSync(join(project, output.path)))).toBe(output.sha256);
+      expect(existsSync(join(engine, "lease"))).toBe(true);
+      writeHostJson(recordPath, { ...finished, state: "cancelled" });
+      expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false);
+      expect(existsSync(join(engine, "lease"))).toBe(true);
+      writeFileSync(recordPath, terminalBytes);
+      const journalPath = join(engine, "admissions.jsonl"), journalBytes = readFileSync(journalPath);
+      writeFileSync(journalPath, Buffer.concat([journalBytes, Buffer.from('{"partial":')]));
+      expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false);
+      expect(readFileSync(recordPath)).toEqual(terminalBytes); expect(existsSync(join(engine, "lease"))).toBe(true);
+      expect(readFileSync(journalPath)).toEqual(Buffer.concat([journalBytes, Buffer.from('{"partial":')]));
+      writeFileSync(journalPath, journalBytes); // Fixture restoration only; production never repairs the audit log automatically.
+      const outputPath = join(project, finished.outputs[0].path), outputBytes = readFileSync(outputPath);
+      writeFileSync(outputPath, "{}");
+      expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false);
+      expect(readFileSync(recordPath)).toEqual(terminalBytes); expect(existsSync(join(engine, "lease"))).toBe(true);
+      writeFileSync(outputPath, outputBytes);
+      // A hash-consistent but invalid saved index must not rewrite records, outputs or prior error evidence.
+      const invalidRecord = structuredClone(finished);
+      const invalidIndex = JSON.stringify({ schema: "seed.results-index/0.1" });
+      writeFileSync(outputPath, invalidIndex); invalidRecord.outputs[0].sha256 = sha256Hex(invalidIndex);
+      writeHostJson(recordPath, invalidRecord);
+      const invalidBytes = readFileSync(recordPath), errorsPath = join(project, "runs", active.runId, "log", "errors.json");
+      const priorErrors = readFileSync(errorsPath);
+      expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false);
+      expect(readFileSync(recordPath)).toEqual(invalidBytes); expect(readFileSync(outputPath, "utf8")).toBe(invalidIndex);
+      expect(readFileSync(errorsPath)).toEqual(priorErrors); expect(existsSync(join(engine, "lease"))).toBe(true);
+      writeFileSync(recordPath, terminalBytes); writeFileSync(outputPath, outputBytes);
+      for (const field of ["id", "version"]) {
+        const wrongIndex = JSON.parse(outputBytes.toString()); wrongIndex.adapter[field] = "unrelated-adapter";
+        writeHostJson(outputPath, wrongIndex);
+        const wrongRecord = structuredClone(finished); wrongRecord.outputs[0].sha256 = sha256Hex(readFileSync(outputPath));
+        writeHostJson(recordPath, wrongRecord);
+        const wrongBytes = readFileSync(recordPath), wrongOutput = readFileSync(outputPath);
+        expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false);
+        expect(readFileSync(recordPath)).toEqual(wrongBytes); expect(readFileSync(outputPath)).toEqual(wrongOutput);
+        expect(existsSync(join(engine, "lease"))).toBe(true);
+        writeFileSync(recordPath, terminalBytes); writeFileSync(outputPath, outputBytes);
+      }
+      const savedOutputs = finished.outputs.map((output: any) => ({ path: output.path, bytes: readFileSync(join(project, output.path)) }));
+      const call = adapterClient.callAdapter;
+      const readOnlyVerification = vi.spyOn(adapterClient, "callAdapter").mockImplementation((spec, request: any, options) => {
+        if (request.verb === "collect") throw Error("terminal verification must not invoke a mutating collector");
+        return call(spec, request, options);
+      });
+      try { expect(await recoverHostCalculation(config, { requestId: "real-finished-crash" })).toMatchObject({ ok: true, state: "recovered-completed", runId: active.runId }); }
+      finally { readOnlyVerification.mockRestore(); }
+      expect(readFileSync(recordPath)).toEqual(terminalBytes);
+      for (const output of savedOutputs) expect(readFileSync(join(project, output.path))).toEqual(output.bytes);
       expect(existsSync(join(engine, "lease"))).toBe(false);
     } finally {
       if (active?.jobId) await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "finished-cleanup", actor: host.actor, jobId: active.jobId }, { projectRoot: project, timeoutMs: 30000 });
