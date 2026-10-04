@@ -988,20 +988,38 @@ export class RunManager {
   /** Trusted recovery caller supplies an already bound record and guards its final write under its project lock. */
   async collectBoundRecovery(record: Record<string, unknown>, actor: StartRequest["actor"], beforeCommit: () => void): Promise<RunOutcome> {
     const runId = record.runId as string;
-    if (!/^r-[A-Za-z0-9_-]+$/.test(runId) || record.state !== "running" || !validate("run-record", record).ok) throw Error("invalid recovery record");
+    if (!/^r-[A-Za-z0-9_-]+$/.test(runId) || !["running", "completed"].includes(record.state as string) || !validate("run-record", record).ok) throw Error("invalid recovery record");
     const runRelDir = `${this.runsFolder}/${runId}`, runAbsDir = join(this.projectRoot, runRelDir);
     const copy = structuredClone(record);
+    let savedResult: { jobId: string; lifecycle: string; resultsIndex: string; resultsSha256: string } | undefined;
+    if (record.state === "completed") {
+      const indexes: { path: string; sha256: string }[] = [];
+      for (const output of record.outputs as { path: string; sha256: string }[]) {
+        const resolved = resolveInside(this.projectRoot, output.path);
+        if (!resolved.ok || !this.insideRun(runAbsDir, resolved.value) || !existsSync(resolved.value) ||
+          sha256Hex(readFileSync(resolved.value)) !== output.sha256) throw Error("saved completed output changed; lease retained");
+        try {
+          if (JSON.parse(readFileSync(resolved.value, "utf8")).schema === "seed.results-index/0.1") indexes.push(output);
+        } catch { /* Non-index quantity formats are checked by the normal results validator. */ }
+      }
+      if (indexes.length !== 1) throw Error("saved completion must contain exactly one results index");
+      savedResult = { jobId: record.jobId as string, lifecycle: "completed", resultsIndex: indexes[0]!.path, resultsSha256: indexes[0]!.sha256 };
+    }
     return this.collectAndFinalize(copy, runAbsDir, runRelDir, {
       requestId: "recovery-collect", actor, artifact: { path: "dummy", revision: { hash: "0".repeat(64), counter: 1 } },
       inputs: copy.inputs as StartRequest["inputs"], budget: copy.budget as Budget,
     }, (to, reason) => {
       beforeCommit();
       if (to !== "completed") throw Error("recovered outputs incomplete; lease retained for inspection");
+      if (record.state === "completed") {
+        if (canonicalJson(copy.outputs) !== canonicalJson(record.outputs)) throw Error("validated outputs differ from saved completion; lease retained");
+        return; // Preserve the terminal record and its original finishedAt; this is verification only.
+      }
       copy.state = to; copy.finishedAt = this.now().toISOString();
       if (!validate("run-record", copy).ok) throw Error("recovered record invalid");
       appendLine(join(runAbsDir, "log", "transitions.jsonl"), JSON.stringify({ time: copy.finishedAt, from: record.state, to, reason: `human recovery: ${reason}` }));
       writeFileAtomic(join(runAbsDir, "run-record.json"), JSON.stringify(copy, null, 2) + "\n");
-    });
+    }, savedResult);
   }
 
   private async collectAndFinalize(
@@ -1009,7 +1027,8 @@ export class RunManager {
     runAbsDir: string,
     runRelDir: string,
     req: StartRequest,
-    transition: (to: string, reason: string) => void
+    transition: (to: string, reason: string) => void,
+    savedResult?: { jobId: string; lifecycle: string; resultsIndex: string; resultsSha256: string }
   ): Promise<RunOutcome> {
     const runId = record.runId as string;
     const collectReq = {
@@ -1022,12 +1041,13 @@ export class RunManager {
       ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
     };
 
-    const collectOutcome = await callAdapter(this.adapter, collectReq, {
+    const collectOutcome = savedResult ? { ok: true as const, reply: { ok: true, result: savedResult } } : await callAdapter(this.adapter, collectReq, {
       projectRoot: this.projectRoot,
       timeoutMs: this.callTimeoutMs,
     });
 
     const markCollectFailed = (errors: TypedError[], reason: string): RunOutcome => {
+      if (savedResult) throw Error(`saved completion verification failed: ${reason}; lease retained`);
       writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(errors, null, 2) + "\n");
       delete record.outputs;
       transition("failed", reason);
@@ -1168,9 +1188,15 @@ export class RunManager {
             source: "seed",
           },
         ],
-        "runId mismatch in resultsIndex"
-      );
-    }
+          "runId mismatch in resultsIndex"
+        );
+      }
+
+      const indexAdapter = indexDoc.adapter as { id?: string; version?: string };
+      const recordAdapter = record.adapter as { id?: string; version?: string };
+      if (indexAdapter.id !== recordAdapter.id || indexAdapter.version !== recordAdapter.version) {
+        return markCollectFailed([{ code: "E_OUTPUT_INCOMPLETE", field: "/adapter", message: "results-index adapter differs from bound run", source: "seed" }], "adapter mismatch in resultsIndex");
+      }
 
     // The results must belong to THIS snapshot: same inputs, and every quantity derived from them.
     const provenanceErrors = checkResultsAgainstRecord(indexDoc, record);
