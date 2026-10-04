@@ -12,6 +12,7 @@ import { writeHostJson } from "../src/core/hostFiles";
 import { createProject } from "../src/core/projectStore";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
+import { connectSeedMcp } from "./helpers/mcp-client";
 import { RunManager, type Budget } from "../src/core/runManager";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
@@ -121,7 +122,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     expect(await observe(entry, base, set)).toEqual(await cached(entry));
   }, 600000);
 
-  it("runs a real case through persistent configuration and the public CLI", async () => {
+  it("runs a real case through persistent configuration, CLI and MCP", async () => {
     const { entries } = loadOracleEntries(join(base, "entries"));
     const set = await runOracleSet({ entries, adapter: { id: "raft", version: "0.1.0" }, appCommit, baseDir: base, run: e => cached(e) });
     expect(set.blocked).toBe(false);
@@ -149,6 +150,20 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const log = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
     expect(log.map(row => row.event.phase)).toEqual(["request", "decision", "outcome"]);
     expect(log[1].event.event.decision.allow).toBe(true); expect(log[2].event.event.runId).toBe(reply.runId);
+    const m = await connectSeedMcp(config);
+    try {
+      const result = await m.client.callTool({ name: "seed_run_case", arguments: { requestId: "real-mcp", caseId: "approved", budget } }, undefined, { timeout: 360000 });
+      expect(result.isError).toBe(false);
+      const mcpReply = result.structuredContent as { state: string; runId: string };
+      expect(mcpReply.state).toBe("completed");
+      const mcpIndex = JSON.parse(readFileSync(join(project, "runs", mcpReply.runId, "results.json"), "utf8"));
+      const mq = mcpIndex.quantities.find((q: any) => q.name === entry.expected.quantity);
+      expect(JSON.parse(readFileSync(join(project, mq.data.path), "utf8")).values).toEqual(values);
+      expect(m.stderr()).toBe("");
+      const journal = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+      expect(journal.map(row => row.event.phase)).toEqual(["request", "decision", "outcome", "request", "decision", "outcome"]);
+      expect(journal[5].event.event.runId).toBe(mcpReply.runId);
+    } finally { await m.client.close(); }
   }, 600000);
 
   it("describe reports the coverage of the good entries", async () => {

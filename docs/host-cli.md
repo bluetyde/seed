@@ -34,6 +34,6 @@ An abandoned lease is deliberately not taken over automatically. Inspect its own
 
 ## Remaining E2 work
 
-MCP and GUI routes must reuse the guarded file host. Cancellation, host-death cleanup, resource enforcement, a complete study/report demonstration and E2 review remain unfinished. Budget admission alone does not impose OS CPU, memory or disk limits. RAFT acceptance uses its synthetic library and establishes transport agreement, not independent validation of every physics quantity.
+The [stdio MCP route](mcp.md) now reuses the guarded file host; future GUI routes must do the same. Cancellation, host-death cleanup, resource enforcement, a complete study/report demonstration and E2 review remain unfinished. Budget admission alone does not impose OS CPU, memory or disk limits. RAFT acceptance uses its synthetic library and establishes transport agreement, not independent validation of every physics quantity.
 
 Verification: `npm test` builds the CLI before tests; `npm run test:e2:raft` requires a built RAFT checkout selected by `SEED_RAFT_REPO`, and exercises the real CLI as well as oracle/direct agreement.
