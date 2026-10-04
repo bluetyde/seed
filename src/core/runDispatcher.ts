@@ -44,6 +44,10 @@ export class RunDispatcher {
     this.#manager = new RunManager({ ...options.manager, adapter: structuredClone(options.manager.adapter) });
   }
 
+  /** Called only by the trusted host after its cancellation gate and durable audit. */
+  hasActiveRequest(requestId: string): boolean { return this.#manager.hasActiveRequest(requestId); }
+  cancelRequest(requestId: string): Promise<RunOutcome> | undefined { return this.#manager.cancelRequest(requestId); }
+
   async start(input: DispatchRequest): Promise<RunOutcome> {
     const o = this.#options;
     let request: DispatchRequest;
@@ -51,7 +55,7 @@ export class RunDispatcher {
       request = structuredClone(input);
       if (!request || Object.keys(request).some(k => !["requestId", "caseId", "budget"].includes(k)) ||
           !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(request.caseId) || typeof request.caseId !== "string" ||
-          typeof request.requestId !== "string" || !request.requestId || !request.budget ||
+          typeof request.requestId !== "string" || !request.requestId || request.requestId.length > 256 || !request.budget ||
           Object.keys(request.budget).sort().join() !== "maxCores,maxDiskMB,maxMemoryMB,maxWallSeconds" ||
           Object.values(request.budget).some(v => !Number.isSafeInteger(v) || v < 1)) {
         return refusal("invalid run request; only requestId, registered caseId and budget are accepted", "E_SCHEMA_INVALID");
@@ -91,7 +95,7 @@ export class RunDispatcher {
         return this.#manager.start({ requestId: request.requestId, actor: structuredClone(o.actor),
           artifact: registered.artifact, inputs: registered.inputs, settings: registered.settings, seed: registered.seed,
           budget: request.budget, studyBudget: a.context.study.budget,
-          extensions: { "seed.dispatch": { studyId: a.context.study.studyId, actor: o.actor, caseId: request.caseId, pins: a.currentPins, via: decision.via, ...(decision.grantId ? { grantId: decision.grantId } : {}) } },
+          extensions: { "seed.dispatch": { requestId: request.requestId, studyId: a.context.study.studyId, actor: o.actor, caseId: request.caseId, pins: a.currentPins, via: decision.via, ...(decision.grantId ? { grantId: decision.grantId } : {}) } },
         });
       });
       return locked.ok ? locked.value : { ok: false, errors: locked.errors };

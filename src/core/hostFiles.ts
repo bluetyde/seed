@@ -74,7 +74,8 @@ export async function withEngineLease<T>(stateRoot: string, engineKey: string, f
     return await fn(engineRoot);
   } finally {
     // If owner creation failed, leave the lease for inspection rather than guessing ownership.
-    if (existsSync(join(lease, "owner.json")) && readHostJson(join(lease, "owner.json")).token === token) {
+    if (existsSync(join(lease, "owner.json")) && readHostJson(join(lease, "owner.json")).token === token &&
+      readHostJson(join(lease, "owner.json")).retain !== true) {
       safeChild(engineRoot, "lease", true); rmSync(lease, { recursive: true });
     }
   }

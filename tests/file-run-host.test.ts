@@ -11,6 +11,7 @@ import { createProject, openProject, saveProject } from "../src/core/projectStor
 import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/oracle";
 import { readRequest, runCli } from "../src/cli/seed";
 import { connectSeedMcp } from "./helpers/mcp-client";
+import { recoverHostCalculation, requestHostCancellation } from "../src/core/hostControl";
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 async function fixture(delayMs = 10) {
@@ -51,12 +52,108 @@ function cli(file: string, input: unknown, args = ["run"]) {
 it("real MCP discovery and run preserve guarded host admission", async () => {
   const f = await fixture(); const m = await connectSeedMcp(f.file);
   try {
-    const tools = await m.client.listTools(); expect(tools.tools.map(t => t.name)).toEqual(["seed_run_case"]);
+    const tools = await m.client.listTools(); expect(tools.tools.map(t => t.name)).toEqual(["seed_run_case", "seed_cancel_calculation"]);
     expect(tools.tools[0]!.inputSchema.additionalProperties).toBe(false);
     const result = await m.client.callTool({ name: "seed_run_case", arguments: f.request });
     expect(result.isError).toBe(false); expect(result.structuredContent).toMatchObject({ ok: true, state: "completed" });
     expect(rows(f.engineRoot).map(x => x.event.phase)).toEqual(["request", "decision", "outcome"]);
     expect(m.stderr()).toBe("");
+  } finally { await m.client.close(); }
+});
+it("MCP cancels a real adapter calculation through its live owner and records the stop", async () => {
+  const f = await fixture(10000); const m = await connectSeedMcp(f.file);
+  try {
+    const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request });
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(f.engineRoot, "lease", "active.json")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    const cancel = await m.client.callTool({ name: "seed_cancel_calculation", arguments: { requestId: f.request.requestId } });
+    expect(cancel.isError).toBe(false); expect(cancel.structuredContent).toMatchObject({ state: "cancellation-requested" });
+    const outcome = await pending; expect(outcome.structuredContent).toMatchObject({ ok: true, state: "cancelled" });
+    expect(rows(f.engineRoot).map(x => x.event.phase)).toContain("cancel-decision");
+    expect(rows(f.engineRoot).map(x => x.event.phase)).toContain("cancel-outcome");
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(false);
+  } finally { await m.client.close(); }
+});
+it("cancel and recovery reject unrelated requests, client authority and live-owner takeover", async () => {
+  const f = await fixture(1000); const m = await connectSeedMcp(f.file);
+  try {
+    const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request });
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(f.engineRoot, "lease", "active.json")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(requestHostCancellation(f.file, { requestId: "other" }).ok).toBe(false);
+    expect(requestHostCancellation(f.file, { requestId: f.request.requestId, pid: process.pid }).ok).toBe(false);
+    expect((await recoverHostCalculation(f.file, { requestId: f.request.requestId })).ok).toBe(false);
+    f.config.actor = { kind: "human", name: "owner" }; saveHostConfiguration(f.file, f.config);
+    expect((await recoverHostCalculation(f.file, { requestId: f.request.requestId })).ok).toBe(false);
+    // Revert so the run's unchanged-host check remains satisfied.
+    f.config.actor = { kind: "agent", name: "test-agent", model: "fixture" }; saveHostConfiguration(f.file, f.config);
+    expect((await pending).isError).toBe(false);
+  } finally { await m.client.close(); }
+});
+it("human recovery stops a calculation after its supervisor dies, preserving run evidence", async () => {
+  const f = await fixture(10000); f.config.actor = { kind: "human", name: "owner" }; saveHostConfiguration(f.file, f.config);
+  const m = await connectSeedMcp(f.file);
+  const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request }).then(() => undefined, () => undefined);
+  try {
+    const deadline = Date.now() + 10000;
+    let record: any;
+    while (Date.now() < deadline) {
+      const run = readdirSync(join(f.project, "runs")).find(n => n.startsWith("r-"));
+      if (run && existsSync(join(f.project, "runs", run, "run-record.json"))) record = JSON.parse(readFileSync(join(f.project, "runs", run, "run-record.json"), "utf8"));
+      if (record?.jobId) break; await new Promise(r => setTimeout(r, 20));
+    }
+    expect(record?.jobId).toBeTruthy();
+    const owner = readHostJson(join(f.engineRoot, "lease", "owner.json"));
+    process.kill(owner.pid, "SIGKILL"); await pending;
+    const originalJob = record.jobId; record.jobId = "job-unrelated";
+    writeHostJson(join(f.project, "runs", record.runId, "run-record.json"), record);
+    const refused = cli(f.file, { requestId: f.request.requestId }, ["recover"]);
+    expect(refused.status).toBe(2); expect(refused.reply.errors[0].message).toMatch(/authoritative job identity/);
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
+    expect(rows(f.engineRoot).some(x => x.event.phase === "recovery-request")).toBe(false);
+    record.jobId = originalJob; writeHostJson(join(f.project, "runs", record.runId, "run-record.json"), record);
+    const recovered = cli(f.file, { requestId: f.request.requestId }, ["recover"]);
+    expect(recovered.status, JSON.stringify(recovered.reply)).toBe(0);
+    expect(recovered.reply.state).toBe("recovered-cancelled");
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(f.project, "runs", record.runId, "run-record.json"), "utf8")).state).toBe("cancelled");
+    expect(rows(f.engineRoot).at(-1).event.phase).toBe("recovery-outcome");
+  } finally { await m.client.close(); }
+});
+it("a transient unconfirmed stop allows a fresh cancellation attempt", async () => {
+  const f = await fixture(10000);
+  const wrapper = join(f.root, "retry-adapter.cjs"), flag = join(f.root, "first-cancel");
+  const actual = f.config.runtime.path;
+  writeFileSync(wrapper, `const fs=require('node:fs'),{spawnSync}=require('node:child_process');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>{const r=JSON.parse(text),verb=process.argv[2];if(verb==='cancel'&&!fs.existsSync(${JSON.stringify(flag)})){fs.writeFileSync(${JSON.stringify(flag)},'once');process.stdout.write(JSON.stringify({schema:'seed.adapter-reply/0.1',verb,requestId:r.requestId,ok:true,errors:[],warnings:[],result:{jobId:r.jobId,lifecycle:'running',cancelled:false}})+'\\n');}else{const p=spawnSync(process.execPath,[${JSON.stringify(actual)},verb],{input:text,encoding:'utf8',env:process.env});process.stdout.write(p.stdout);process.stderr.write(p.stderr);process.exitCode=p.status;}});`);
+  f.config.adapter.args = [wrapper]; f.config.runtime = { path: wrapper, sha256: sha256Hex(readFileSync(wrapper)) }; saveHostConfiguration(f.file, f.config);
+  f.engineRoot = join(f.state, "engines", sha256Hex(wrapper));
+  const m = await connectSeedMcp(f.file);
+  try {
+    const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request });
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(f.engineRoot, "lease", "active.json")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(requestHostCancellation(f.file, { requestId: f.request.requestId }).ok).toBe(true);
+    while (!rows(f.engineRoot).some(x => x.event.phase === "cancel-outcome") && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(rows(f.engineRoot).find(x => x.event.phase === "cancel-outcome").event.event.ok).toBe(false);
+    expect(requestHostCancellation(f.file, { requestId: f.request.requestId }).ok).toBe(true);
+    expect((await pending).structuredContent).toMatchObject({ state: "cancelled" });
+    expect(rows(f.engineRoot).filter(x => x.event.phase === "cancel-decision")).toHaveLength(2);
+  } finally { await m.client.close(); }
+});
+it("an A0 run grant does not allow stopping; the owner reloads a separate cancellation grant", async () => {
+  const f = await fixture(5000); f.config.study.tier = "A0";
+  const grant = { grantId: "run-only", studyId: "study", actor: { kind: "agent" as const, name: "test-agent" }, operation: "run_case", inputRevisions: [{ artifact: "models/case.json", revision: f.config.cases.approved!.inputs[0]!.sha256 }], issuedAt: "2000-01-01T00:00:00Z", expires: "2099-01-01T00:00:00Z", approvedBy: { kind: "human" as const, name: "owner" } };
+  f.config.grants = [grant]; saveHostConfiguration(f.file, f.config);
+  const m = await connectSeedMcp(f.file);
+  try {
+    const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request });
+    const deadline = Date.now() + 10000;
+    while ((!existsSync(join(f.engineRoot, "admissions.jsonl")) || !rows(f.engineRoot).some(x => x.event.phase === "decision")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(requestHostCancellation(f.file, { requestId: f.request.requestId }).ok).toBe(false);
+    f.config.grants.push({ ...grant, grantId: "cancel-allowed", operation: "cancel" }); saveHostConfiguration(f.file, f.config);
+    expect(requestHostCancellation(f.file, { requestId: f.request.requestId }).ok).toBe(true);
+    expect((await pending).structuredContent).toMatchObject({ state: "cancelled" });
+    expect(rows(f.engineRoot).find(x => x.event.phase === "cancel-decision").event.event.decision).toMatchObject({ allow: true, via: "grant", grantId: "cancel-allowed" });
   } finally { await m.client.close(); }
 });
 it("MCP refuses client authority and unknown verbs before any host run", async () => {

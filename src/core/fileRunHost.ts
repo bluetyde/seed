@@ -1,10 +1,11 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import Ajv2020 from "ajv/dist/2020";
 import { sha256Hex } from "./canonical";
 import { checkOracleInputs, latestEntries, loadOracleEntries, pinsOf, type PinSet, type SetResult } from "./oracle";
-import { issueGrant, type Actor, type Grant, type PolicyStudy } from "./policy";
+import { evaluateGate, issueGrant, type Actor, type Grant, type PolicyStudy } from "./policy";
+import { controlBinding } from "./hostControl";
 import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runDispatcher";
 import { openProject } from "./projectStore";
 import { type RunOutcome } from "./runManager";
@@ -68,6 +69,12 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
     return await withEngineLease(state, engineKey, async engineRoot => {
       const audit = (phase: string, event: unknown) => appendAdmission(engineRoot, { phase, actor: c.actor, projectId: p.value.manifest.projectId, configHash, event });
       audit("request", { request, configuration: c });
+      const lease = join(engineRoot, "lease");
+      const owner = readHostJson(join(lease, "owner.json"));
+      if (request && typeof request === "object" && typeof (request as any).requestId === "string") {
+        writeHostJson(join(lease, "active.json"), { requestId: (request as any).requestId, token: owner.token,
+          binding: controlBinding(c), inputs: c.cases[(request as any).caseId]?.inputs.map(i => ({ artifact: i.path, revision: i.sha256 })) ?? [] });
+      }
       const unchanged = () => {
         regularFile(file);
         if (sha256Hex(readFileSync(file)) !== configHash) throw Error("host configuration changed during admission");
@@ -78,7 +85,12 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
       try {
         unchanged();
         // Fixed host environment for the RAFT adapter, never request content.
-        const dispatcher = new RunDispatcher({ manager: { projectRoot: project, runsFolder: (p.value.manifest.folders as { runs: string }).runs, adapter: { ...c.adapter, ...(c.adapter.id === "raft" ? { env: { SEED_RAFT_HEADLESS: runtime } } : {}) } }, actor: c.actor, engine: engineKey,
+        const dispatcher = new RunDispatcher({ manager: { projectRoot: project, runsFolder: (p.value.manifest.folders as { runs: string }).runs,
+          onLaunch: identity => {
+            writeHostJson(join(lease, "owner.json"), { ...owner, retain: true });
+            const active = readHostJson(join(lease, "active.json"));
+            writeHostJson(join(lease, "active.json"), { ...active, ...identity });
+          }, adapter: { ...c.adapter, ...(c.adapter.id === "raft" ? { env: { SEED_RAFT_HEADLESS: runtime } } : {}) } }, actor: c.actor, engine: engineKey,
           loadCase: async id => {
             unchanged(); if (!Object.hasOwn(c.cases, id)) throw Error("case is not registered"); return c.cases[id]!;
           },
@@ -97,9 +109,43 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           },
           audit: async event => { unchanged(); audit("decision", event); },
         });
-        const outcome = await dispatcher.start(request as DispatchRequest);
+        let busy = false; let lastNonce = ""; let lastFailure = ""; let attempt: Promise<unknown> | undefined; let controlError: unknown;
+        const timer = setInterval(() => {
+          if (busy || !existsSync(join(lease, "cancel.json"))) return;
+          try {
+            const control = readHostJson(join(lease, "cancel.json"));
+            if (typeof control.nonce !== "string" || !/^[0-9a-f]{32}$/.test(control.nonce)) throw Error("invalid cancellation nonce");
+            if (control.nonce === lastNonce || control.token !== owner.token || control.requestId !== (request as any)?.requestId) return;
+            const current = validateHostConfiguration(readHostJson(file));
+            if (controlBinding(current) !== controlBinding(c)) throw Error("host recipe changed; cancellation refused");
+            const active = readHostJson(join(lease, "active.json"));
+            const decision = evaluateGate({ operation: "cancel", actor: current.actor, studyId: current.study.studyId,
+              inputRevisions: active.inputs }, { study: current.study, grants: current.grants });
+            // Cancellation may arrive before RunManager creates the run. Retry until owner routing exists.
+            if (!dispatcher.hasActiveRequest(control.requestId)) return;
+            audit("cancel-decision", { requestId: control.requestId, actor: current.actor, decision });
+            lastNonce = control.nonce;
+            if (!decision.allow) return;
+            busy = true;
+            attempt = dispatcher.cancelRequest(control.requestId)?.then(result => { audit("cancel-outcome", result); }).catch(e => { controlError = e; }).finally(() => { busy = false; });
+          } catch (e) {
+            const message = e instanceof Error ? e.message : "cancel refused";
+            if (message === lastFailure) return; lastFailure = message;
+            try { audit("cancel-refusal", { message }); }
+            catch (failure) { controlError = failure; }
+          }
+        }, 100);
+        let outcome: RunOutcome;
+        try {
+          outcome = await dispatcher.start(request as DispatchRequest); dispatched = outcome;
+          // Failed/interrupted records alone cannot prove the native process stopped.
+          if (outcome.ok && ["failed", "interrupted"].includes(outcome.state)) writeHostJson(join(lease, "owner.json"), { ...owner, retain: true });
+          await attempt; if (controlError) throw controlError;
+        }
+        finally { clearInterval(timer); }
         dispatched = outcome;
         audit("outcome", outcome.ok ? { ok: true, runId: outcome.runId, state: outcome.state } : outcome);
+        if (outcome.ok && ["completed", "cancelled", "terminated-by-trip"].includes(outcome.state)) writeHostJson(join(lease, "owner.json"), { ...owner, retain: false });
         return outcome;
       } catch (e) {
         const message = e instanceof Error ? e.message : "host dispatch failed";

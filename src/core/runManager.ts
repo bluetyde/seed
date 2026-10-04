@@ -24,6 +24,8 @@ export type RunManagerOptions = {
   newId?: () => string;
   pollMs?: number;
   callTimeoutMs?: number;
+  /** Trusted host records launch intent and the adapter-issued native identity outside project files. */
+  onLaunch?: (identity: { requestId: string; runId: string; jobId?: string }) => void;
 };
 
 export type StartRequest = {
@@ -133,7 +135,7 @@ function internalRefusal(field: string, message: string): RunOutcome {
 }
 
 interface CancelWaiter {
-  (result: { ok: true } | { ok: false; errors: TypedError[] }): void;
+  (result: { ok: true } | { ok: false; errors: TypedError[]; terminal?: boolean }): void;
 }
 
 interface InFlightRequest {
@@ -144,6 +146,7 @@ interface InFlightRequest {
 
 interface InFlightRun {
   runId: string;
+  requestId: string;
   cancelRequested: boolean;
   cancelWaiters: CancelWaiter[];
   promise: Promise<RunOutcome>;
@@ -184,6 +187,7 @@ export class RunManager {
   private readonly newId: () => string;
   private readonly pollMs: number;
   private readonly callTimeoutMs: number;
+  private readonly onLaunch?: RunManagerOptions["onLaunch"];
 
   private inFlightByRequestId = new Map<string, InFlightRequest>();
   private inFlightRuns = new Map<string, InFlightRun>();
@@ -196,6 +200,7 @@ export class RunManager {
     this.newId = opts.newId ?? (() => randomBytes(6).toString("hex"));
     this.pollMs = opts.pollMs ?? 200;
     this.callTimeoutMs = opts.callTimeoutMs ?? 15000;
+    this.onLaunch = opts.onLaunch;
   }
 
   public transition(runId: string, to: string, reason: string): void {
@@ -689,6 +694,7 @@ export class RunManager {
 
     const inFlightRun: InFlightRun = {
       runId,
+      requestId: req.requestId,
       cancelRequested: false,
       cancelWaiters: [],
       promise: runPromise,
@@ -745,6 +751,7 @@ export class RunManager {
         ...(req.extensions !== undefined ? { extensions: req.extensions } : {}),
       };
 
+      this.onLaunch?.({ requestId: req.requestId, runId });
       const runOutcome = await callAdapter(this.adapter, runReq, {
         projectRoot: this.projectRoot,
         timeoutMs: this.callTimeoutMs,
@@ -767,6 +774,7 @@ export class RunManager {
       record.jobId = runResult.jobId;
       record.startedAt = this.now().toISOString();
       transition("running", "adapter started job");
+      this.onLaunch?.({ requestId: req.requestId, runId, jobId: runResult.jobId });
 
       // 8. Poll loop
       const startTime = performance.now();
@@ -793,7 +801,7 @@ export class RunManager {
           }
           writeFileAtomic(join(runAbsDir, "log", "errors.json"), JSON.stringify(timeoutErrors, null, 2) + "\n");
           record.native = stop.confirmed ? { status: "timeout" } : { status: "timeout", detail: "the job could not be confirmed stopped and may still be running" };
-          this.settleCancel(inFlightRun, { ok: false, errors: [{ code: "E_TIMEOUT", field: "", message: "run ended by the wall-clock limit", source: "seed" }] });
+          this.settleCancel(inFlightRun, { ok: false, terminal: true, errors: [{ code: "E_TIMEOUT", field: "", message: "run ended by the wall-clock limit", source: "seed" }] });
           transition("failed", "timeout");
           return { ok: true, runId, state: "failed", record };
         }
@@ -925,7 +933,7 @@ export class RunManager {
   }
 
   /** Resolves every pending cancel() call with the outcome of the cancel attempt. */
-  private settleCancel(run: InFlightRun, result: { ok: true } | { ok: false; errors: TypedError[] }): void {
+  private settleCancel(run: InFlightRun, result: { ok: true } | { ok: false; errors: TypedError[]; terminal?: boolean }): void {
     const waiters = run.cancelWaiters.splice(0);
     for (const w of waiters) w(result);
   }
@@ -1245,6 +1253,14 @@ export class RunManager {
     return !existsSync(candidateAbs) || physicallyInside(runAbsDir, candidateAbs);
   }
 
+  /** Owner-only routing: transports never select a native job or process ID. */
+  hasActiveRequest(requestId: string): boolean { return [...this.inFlightRuns.values()].some(r => r.requestId === requestId); }
+
+  cancelRequest(requestId: string): Promise<RunOutcome> | undefined {
+    const run = [...this.inFlightRuns.values()].find(r => r.requestId === requestId);
+    return run ? this.cancel(run.runId) : undefined;
+  }
+
   async cancel(runId: string): Promise<RunOutcome> {
     if (typeof runId !== "string" || !RUN_ID_PATTERN.test(runId)) {
       return {
@@ -1254,12 +1270,12 @@ export class RunManager {
     }
     const inFlight = this.inFlightRuns.get(runId);
     if (inFlight) {
-      const attempt = new Promise<{ ok: true } | { ok: false; errors: TypedError[] }>((resolve) => {
+      const attempt = new Promise<{ ok: true } | { ok: false; errors: TypedError[]; terminal?: boolean }>((resolve) => {
         inFlight.cancelWaiters.push(resolve);
       });
       inFlight.cancelRequested = true;
       const result = await attempt;
-      if (!result.ok && result.errors.some((e) => e.code !== "E_TIMEOUT")) {
+      if (!result.ok && !result.terminal) {
         return { ok: false, errors: result.errors, runId };
       }
       return await inFlight.promise;
@@ -1550,4 +1566,3 @@ export class RunManager {
     return results;
   }
 }
-
