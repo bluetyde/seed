@@ -129,6 +129,7 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 
 ## Installer/updater, still open ([plan 01](docs/plans/01-shell-and-installer.md))
 
+- [ ] **Optional add-ons and component-selective installation (2026-10-04, user request).** SEED manages core app and optional feature packages separately: show dependencies, download/disk size and installed capabilities; let users install, add later, update or remove add-ons. First example: install OpenMC Studio without GEOUNED/FreeCAD CAD support; only CAD import/conversion requires that add-on. Apps own component recipes and feature requirements; SEED owns installation/lifecycle. Do not download an unselected optional component or install it silently during a study. Preserve projects/custom materials and shared dependencies when removing add-ons. Split artifacts/environments where necessary, then verify core-only launch/run, later add/remove, offline behavior and interrupted update rollback. See [plan 11](docs/plans/11-runtime-and-shared-acceptance.md#optional-add-ons-and-component-selection).
 - [ ] Install the conda environment and nuclear data for OpenMC Studio.
 - [ ] Update SEED itself.
 - [ ] Sign-in help beyond the message; offline use of a cached copy; a schedule or notice for available updates.

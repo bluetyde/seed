@@ -28,6 +28,18 @@ Stage artifacts, validate hash and safe extraction paths (including links), impo
 
 Offline has two modes: install from verified cached artifacts with no fetch, and run an already installed compatible app. If a required artifact is absent, explain exactly what is missing. Do not claim first-time offline installation without a complete cache and prerequisites.
 
+## Optional add-ons and component selection
+
+Requested by the user on 2026-10-04. SEED manages an app's core installation and optional add-ons through the same transaction system. A student can choose the core app first and install advanced feature dependencies later. The first case is OpenMC Studio without the GEOUNED/FreeCAD CAD stack; CAD import/conversion needs that component, while core model editing and OpenMC transport must remain usable with their required runtime/data. Current bundled artifacts do not establish that this separation already works: inventory imports and split recipes/artifacts/environments before claiming core-only support.
+
+Each app publishes component IDs, versions, required/optional status, dependencies, compatible platforms/app versions, enabled capabilities, hashes, sizes and license information. SEED resolves the dependency graph and shows the resulting selection and disk/download cost before installation. A required dependency cannot be deselected while its feature package remains selected. Optional packages are downloaded only when selected or explicitly added later; a study request cannot install missing software implicitly.
+
+An Add-ons view provides install, update and remove actions, component health and a clear explanation when a capability is absent. Apps own capability declarations and precise feature refusals; missing CAD support blocks the CAD operation and offers a setup route, not the entire OpenMC app. Installed-component versions are recorded in run provenance when relevant to that operation. Installation remains usable outside SEED through the app's equivalent recipe/standalone setup.
+
+Use component-scoped staging, compatibility checks, offline cache and rollback. Defer replacement/removal while a job uses the component. Shared dependencies are removed only if no installed component needs them; adopted dependencies are never implicitly removed. Removing an add-on preserves saved models, results, custom material sets and original CAD files. A core-only install must avoid transferring optional CAD artifacts, not merely hide their controls after installing them.
+
+Acceptance: core-only OpenMC launch and a small non-CAD run; CAD refusal with named missing component; adding CAD later enables the native CAD check; removing it restores the refusal without breaking core runs or changing project data. Also exercise incompatible component versions, shared dependency retention, offline cached addition/missing cache, cancelled installs and failed-update rollback. Start with fake component artifacts; real OpenMC recipe changes and native CAD validation require coordinated OpenMC work. This SEED task does not claim that app's implementation.
+
 ## Lifecycle authority
 
 Use one process-ownership record per app launch/job: run/launch ID, runtime ID, host/worker identity, process start identity, endpoint and generation token. A PID alone is insufficient after PID reuse. Health checks must identify the expected app/session; an arbitrary HTTP 200 is not enough for a managed launch.
