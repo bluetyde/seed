@@ -9,6 +9,8 @@ import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantit
 import { evaluateGate } from "../src/core/policy";
 import { runFromHostFile, saveHostConfiguration } from "../src/core/fileRunHost";
 import { writeHostJson } from "../src/core/hostFiles";
+import { recoverHostCalculation } from "../src/core/hostControl";
+import { isAlive } from "../src/core/procTree";
 import { createProject } from "../src/core/projectStore";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
@@ -164,6 +166,59 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       expect(journal.map(row => row.event.phase)).toEqual(["request", "decision", "outcome", "request", "decision", "outcome"]);
       expect(journal[5].event.event.runId).toBe(mcpReply.runId);
     } finally { await m.client.close(); }
+
+    // Lifecycle acceptance only: lengthen a registered synthetic case, without claiming new physics oracle coverage.
+    const host = JSON.parse(readFileSync(config, "utf8"));
+    const longPath = "models/recovery-long.json";
+    const longCase = JSON.parse(readFileSync(join(project, artifact.path), "utf8"));
+    longCase.steps = 2_000_000; longCase.sampleEvery = 100_000;
+    writeHostJson(join(project, longPath), longCase);
+    const longHash = sha256Hex(readFileSync(join(project, longPath)));
+    host.actor = { kind: "human", name: "recovery-acceptance" };
+    host.cases.long = { artifact: { path: longPath, revision: { hash: longHash, counter: 1 } },
+      inputs: [...entry.inputs.filter(i => i.path !== artifact.path), { path: longPath, sha256: longHash }], params: [], settings: { case: longPath } };
+    saveHostConfiguration(config, host);
+    const crashed = await connectSeedMcp(config);
+    const pending = crashed.client.callTool({ name: "seed_run_case", arguments: { requestId: "real-crash", caseId: "long", budget } }, undefined, { timeout: 360000 }).then(() => undefined, () => undefined);
+    const engine = join(state, "engines", sha256Hex(bundle));
+    let active: any, nativeDir: string | undefined;
+    try {
+      const deadline = Date.now() + 30000;
+      while (Date.now() < deadline) {
+        const activeFile = join(engine, "lease", "active.json");
+        if (existsSync(activeFile)) active = JSON.parse(readFileSync(activeFile, "utf8"));
+        if (active?.jobId) {
+          nativeDir = join(project, "runs", active.runId, "native");
+          if (existsSync(join(nativeDir, "child.json")) && existsSync(join(nativeDir, "heartbeat.json"))) break;
+        }
+        await new Promise(r => setTimeout(r, 20));
+      }
+      expect(active?.jobId).toBeTruthy();
+      expect(nativeDir).toBeTruthy();
+      const job = JSON.parse(readFileSync(join(nativeDir!, "job.json"), "utf8"));
+      const child = JSON.parse(readFileSync(join(nativeDir!, "child.json"), "utf8"));
+      expect(isAlive(job.pid)).toBe(true); expect(isAlive(child.pid)).toBe(true);
+      expect(await recoverHostCalculation(config, { requestId: "real-crash" })).toMatchObject({ ok: false,
+        errors: [{ message: "owner is alive or its identity is ambiguous; recovery refused" }] });
+      const owner = JSON.parse(readFileSync(join(engine, "lease", "owner.json"), "utf8"));
+      process.kill(owner.pid, "SIGKILL"); await pending;
+      expect(await runFromHostFile(config, { requestId: "blocked-after-crash", caseId: "approved", budget })).toMatchObject({ ok: false,
+        errors: [{ code: "E_BUDGET_EXCEEDED", message: expect.stringContaining("E_ENGINE_BUSY") }] });
+      const recovery = spawnSync(process.execPath, [join(__dirname, "../dist/cli/seed.js"), "recover"], {
+        input: JSON.stringify({ requestId: "real-crash" }), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_HOST_CONFIG: config } });
+      expect(recovery.status, recovery.stdout + recovery.stderr).toBe(0);
+      expect(JSON.parse(recovery.stdout)).toMatchObject({ state: "recovered-cancelled", runId: active.runId });
+      expect(isAlive(job.pid)).toBe(false); expect(isAlive(child.pid)).toBe(false);
+      expect(existsSync(join(engine, "lease"))).toBe(false);
+      expect(JSON.parse(readFileSync(join(project, "runs", active.runId, "run-record.json"), "utf8")).state).toBe("cancelled");
+      const recoveredLog = readFileSync(join(engine, "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+      expect(recoveredLog.slice(-3).map(row => row.event.phase)).toEqual(["recovery-request", "recovery-stop", "recovery-outcome"]);
+      expect((await runFromHostFile(config, { requestId: "after-recovery", caseId: "approved", budget })).state).toBe("completed");
+    } finally {
+      // Only this test's bound job; ensure a failed assertion cannot leave its runner behind.
+      if (active?.jobId) await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "acceptance-cleanup", actor: host.actor, jobId: active.jobId }, { projectRoot: project, timeoutMs: 30000 });
+      await crashed.client.close();
+    }
   }, 600000);
 
   it("describe reports the coverage of the good entries", async () => {
