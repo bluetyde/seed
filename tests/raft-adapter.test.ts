@@ -24,6 +24,9 @@ const budget: Budget = { maxWallSeconds: 300, maxCores: 1, maxMemoryMB: 1024, ma
 const CASE = "models/raft/case.json";
 
 const dirs: string[] = [];
+// Keep identities after cleanup so the final inventory checks this suite's children,
+// without treating concurrent oracle/MCP acceptance runs as leaked processes.
+const ownedProjects = new Set<string>();
 const pids: number[] = [];
 const savedEnv = process.env.SEED_RAFT_HEADLESS;
 afterEach(() => {
@@ -48,6 +51,7 @@ beforeEach(() => {
 function newProject(): string {
   const root = mkdtempSync(join(tmpdir(), "seed-raft-"));
   dirs.push(root);
+  ownedProjects.add(root.replaceAll("\\", "/").toLowerCase());
   for (const d of ["models", "runs", "studies", "oracles"]) mkdirSync(join(root, d));
   return root;
 }
@@ -406,7 +410,8 @@ describe.skipIf(!haveRaft)("RAFT adapter against the real headless runner", () =
       process.platform === "win32"
         ? spawnSync("powershell", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object -ExpandProperty CommandLine"], { encoding: "utf8" }).stdout
         : spawnSync("ps", ["-eo", "args"], { encoding: "utf8" }).stdout;
-    const mine = list.split("\n").filter((l) => l.includes("adapters") && l.includes("raft") && l.includes("job.cjs"));
+    const mine = list.split("\n").filter((l) => l.includes("adapters") && l.includes("raft") && l.includes("job.cjs") &&
+      [...ownedProjects].some(root => l.replaceAll("\\", "/").toLowerCase().includes(root + "/")));
     expect(mine).toEqual([]);
   });
 });

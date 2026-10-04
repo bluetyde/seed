@@ -24,7 +24,7 @@ The host account controls configuration and accepted pins. The hash chain is not
 
 ## Action items
 
-- Add MCP over the same file host and cancellation with verified process ownership.
+- MCP over the same file host implemented 2026-10-04; add calculation cancellation with verified process ownership.
 - Define recovery and journal rotation before unattended operation.
 - Complete a reproducible study/report demonstration and E2 review.
 - Obtain the owner's decision on production policy format and signing authority.

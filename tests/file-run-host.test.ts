@@ -10,6 +10,7 @@ import { runFromHostFile, saveHostConfiguration, validateHostConfiguration, type
 import { createProject, openProject, saveProject } from "../src/core/projectStore";
 import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/oracle";
 import { readRequest, runCli } from "../src/cli/seed";
+import { connectSeedMcp } from "./helpers/mcp-client";
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 async function fixture(delayMs = 10) {
@@ -47,6 +48,108 @@ function cli(file: string, input: unknown, args = ["run"]) {
   expect(r.error).toBeUndefined(); expect(r.stderr).toBe("");
   expect(r.stdout.trim().split("\n")).toHaveLength(1); return { ...r, reply: JSON.parse(r.stdout) };
 }
+it("real MCP discovery and run preserve guarded host admission", async () => {
+  const f = await fixture(); const m = await connectSeedMcp(f.file);
+  try {
+    const tools = await m.client.listTools(); expect(tools.tools.map(t => t.name)).toEqual(["seed_run_case"]);
+    expect(tools.tools[0]!.inputSchema.additionalProperties).toBe(false);
+    const result = await m.client.callTool({ name: "seed_run_case", arguments: f.request });
+    expect(result.isError).toBe(false); expect(result.structuredContent).toMatchObject({ ok: true, state: "completed" });
+    expect(rows(f.engineRoot).map(x => x.event.phase)).toEqual(["request", "decision", "outcome"]);
+    expect(m.stderr()).toBe("");
+  } finally { await m.client.close(); }
+});
+it("MCP refuses client authority and unknown verbs before any host run", async () => {
+  const f = await fixture(); const m = await connectSeedMcp(f.file);
+  try {
+    for (const args of [{ ...f.request, actor: { kind: "human" } }, { ...f.request, hostConfig: f.file }, { ...f.request, budget: { ...f.budget, extra: 1 } }, { ...f.request, budget: { ...f.budget, maxCores: 0 } }]) {
+      expect((await m.client.callTool({ name: "seed_run_case", arguments: args })).isError).toBe(true);
+    }
+    expect((await m.client.callTool({ name: "approve", arguments: {} })).isError).toBe(true);
+    expect(readdirSync(join(f.project, "runs"))).toEqual([]);
+    expect(existsSync(f.engineRoot)).toBe(false);
+  } finally { await m.client.close(); }
+});
+it("a persistent MCP connection reloads revoked approval and changed oracle evidence", async () => {
+  const f = await fixture(); f.config.study.tier = "A0";
+  f.config.grants = [{ grantId: "mcp-grant", studyId: "study", actor: { kind: "agent", name: "test-agent" }, operation: "run_case", inputRevisions: [{ artifact: "models/case.json", revision: f.config.cases.approved!.inputs[0]!.sha256 }], issuedAt: "2000-01-01T00:00:00Z", expires: "2099-01-01T00:00:00Z", approvedBy: { kind: "human", name: "owner" } }];
+  saveHostConfiguration(f.file, f.config); const m = await connectSeedMcp(f.file);
+  try {
+    expect((await m.client.callTool({ name: "seed_run_case", arguments: f.request })).isError).toBe(false);
+    f.config.grants[0]!.revoked = true; saveHostConfiguration(f.file, f.config);
+    const refused = await m.client.callTool({ name: "seed_run_case", arguments: { ...f.request, requestId: "no-grant" } });
+    expect(refused.isError).toBe(true); expect(refused.structuredContent).toMatchObject({ ok: false, errors: [{ code: "E_NOT_PERMITTED" }] });
+    f.config.study.tier = "A1"; saveHostConfiguration(f.file, f.config);
+    writeFileSync(f.config.oracles.evidenceFile, "{}");
+    expect((await m.client.callTool({ name: "seed_run_case", arguments: { ...f.request, requestId: "changed-evidence" } })).isError).toBe(true);
+    expect(rows(f.engineRoot).filter(x => x.event.phase === "outcome")).toHaveLength(3);
+  } finally { await m.client.close(); }
+});
+it("MCP request cancellation does not release a running engine or lose its outcome record", async () => {
+  const f = await fixture(1000); const m = await connectSeedMcp(f.file);
+  try {
+    const controller = new AbortController();
+    const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request }, undefined, { signal: controller.signal });
+    const settled = pending.then(() => false, () => true);
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(f.engineRoot, "lease")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
+    controller.abort(); expect(await settled).toBe(true);
+    expect(cli(f.file, { ...f.request, requestId: "after-cancel" }).reply.errors[0].code).toBe("E_BUDGET_EXCEEDED");
+    while (existsSync(join(f.engineRoot, "lease")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(false);
+    expect(rows(f.engineRoot).at(-1).event).toMatchObject({ phase: "outcome", event: { ok: true, state: "completed" } });
+  } finally { await m.client.close(); }
+});
+it("MCP stdin disconnect lets an admitted calculation finish and record its outcome", async () => {
+  const f = await fixture(700);
+  const child = spawn(process.execPath, [resolve(__dirname, "../dist/mcp/seed.js")], { env: { ...process.env, SEED_HOST_CONFIG: f.file }, stdio: ["pipe", "pipe", "pipe"] });
+  const exited = new Promise<number | null>((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
+  let stderr = ""; child.stderr.on("data", b => { stderr += b; });
+  const initialized = new Promise<void>((resolve, reject) => {
+    let buffer = ""; const timer = setTimeout(() => reject(Error("initialize timeout")), 10000);
+    const onData = (b: Buffer) => { buffer += b.toString(); if (buffer.includes("\n")) { clearTimeout(timer); child.stdout.off("data", onData); expect(JSON.parse(buffer.split("\n")[0]!).id).toBe(1); resolve(); } };
+    child.stdout.on("data", onData);
+  });
+  child.stdout.resume();
+  try {
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "disconnect-test", version: "1" } } }) + "\n");
+    await initialized;
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "seed_run_case", arguments: f.request } }) + "\n");
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(f.engineRoot, "lease")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
+    child.stdin.end();
+    expect(cli(f.file, { ...f.request, requestId: "after-disconnect" }).reply.errors[0].code).toBe("E_BUDGET_EXCEEDED");
+    const code = await Promise.race([exited, new Promise<never>((_, reject) => { const t = setTimeout(() => reject(Error("MCP did not exit after outcome")), 10000); t.unref(); })]);
+    expect(code).toBe(0); expect(stderr).toBe("");
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(false);
+    expect(rows(f.engineRoot).at(-1).event).toMatchObject({ phase: "outcome", event: { ok: true, state: "completed" } });
+  } finally { if (child.exitCode === null) { child.kill(); await exited; } }
+});
+it("SDK client shutdown cannot kill the admitted calculation supervisor", async () => {
+  const f = await fixture(4500); const m = await connectSeedMcp(f.file);
+  const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request }).then(() => undefined, () => undefined);
+  const deadline = Date.now() + 15000;
+  while (!existsSync(join(f.engineRoot, "lease")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+  expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
+  await m.client.close(); await pending;
+  while (existsSync(join(f.engineRoot, "lease")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 30));
+  expect(existsSync(join(f.engineRoot, "lease"))).toBe(false);
+  expect(rows(f.engineRoot).at(-1).event).toMatchObject({ phase: "outcome", event: { ok: true, state: "completed" } });
+});
+it("MCP and CLI coordinate through the same cross-process engine lease", async () => {
+  const f = await fixture(2000); const m = await connectSeedMcp(f.file);
+  try {
+    const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request });
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(f.engineRoot, "lease")) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
+    expect(cli(f.file, { ...f.request, requestId: "competing-cli" }).reply.errors[0].code).toBe("E_BUDGET_EXCEEDED");
+    expect((await pending).isError).toBe(false);
+  } finally { await m.client.close(); }
+});
 it("uses the validated project's configured runs folder", async () => {
   const f = await fixture(); const p = openProject(f.project);
   if (!p.ok) throw Error("fixture project failed");
