@@ -7,6 +7,9 @@ import { callAdapter } from "../src/core/adapterClient";
 import { sha256Hex } from "../src/core/canonical";
 import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantities, type IndexedOracle, type Observed, type OracleEntry } from "../src/core/oracle";
 import { evaluateGate } from "../src/core/policy";
+import { runFromHostFile, saveHostConfiguration } from "../src/core/fileRunHost";
+import { writeHostJson } from "../src/core/hostFiles";
+import { createProject } from "../src/core/projectStore";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
 import { RunManager, type Budget } from "../src/core/runManager";
@@ -116,6 +119,36 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     expect(set.blocked).toBe(false);
     const entry = entries.find(e => e.entry.tag === "good")!.entry;
     expect(await observe(entry, base, set)).toEqual(await cached(entry));
+  }, 600000);
+
+  it("runs a real case through persistent configuration and the public CLI", async () => {
+    const { entries } = loadOracleEntries(join(base, "entries"));
+    const set = await runOracleSet({ entries, adapter: { id: "raft", version: "0.1.0" }, appCommit, baseDir: base, run: e => cached(e) });
+    expect(set.blocked).toBe(false);
+    const entry = entries.find(e => e.entry.tag === "good")!.entry;
+    const hostRoot = mkdtempSync(join(tmpdir(), "seed-raft-host-")); dirs.push(hostRoot);
+    const project = join(hostRoot, "project"), state = join(hostRoot, "state"); mkdirSync(state);
+    expect(createProject(project, { name: "RAFT CLI acceptance", seedVersion: "0.1.0" }).ok).toBe(true);
+    for (const input of entry.inputs) { mkdirSync(dirname(join(project, input.path)), { recursive: true }); cpSync(join(base, input.path), join(project, input.path)); }
+    const evidence = join(hostRoot, "oracle-result.json"); writeHostJson(evidence, set);
+    const artifact = { path: entry.inputs[0]!.path, revision: { hash: entry.inputs[0]!.sha256, counter: 1 } };
+    const config = join(hostRoot, "host.json");
+    saveHostConfiguration(config, { schema: "seed.host/0.1", projectRoot: project, stateRoot: state, adapter: spec, actor, study,
+      cases: { approved: { artifact, inputs: entry.inputs, params: [], settings: { case: artifact.path } } },
+      runtime: { path: bundle, sha256: sha256Hex(readFileSync(bundle)) },
+      oracles: { repository: repo, entriesDir: join(base, "entries"), inputsRoot: base, evidenceFile: evidence, evidenceSha256: sha256Hex(readFileSync(evidence)) }, acceptedPins: set.pins });
+    const cli = spawnSync(process.execPath, [join(__dirname, "../dist/cli/seed.js"), "run"], { input: JSON.stringify({ requestId: "real-cli", caseId: "approved", budget }), encoding: "utf8", timeout: 120000,
+      env: { ...process.env, SEED_HOST_CONFIG: config, SEED_RAFT_HEADLESS: "intentionally-wrong-client-environment" } });
+    expect(cli.error).toBeUndefined(); expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    expect(cli.stdout.trim().split("\n")).toHaveLength(1);
+    const reply = JSON.parse(cli.stdout); expect(reply.state).toBe("completed");
+    const index = JSON.parse(readFileSync(join(project, "runs", reply.runId, "results.json"), "utf8"));
+    const q = index.quantities.find((q: any) => q.name === entry.expected.quantity);
+    const values = JSON.parse(readFileSync(join(project, q.data.path), "utf8")).values;
+    expect({ kind: "value", quantity: q.name, unit: q.unit, value: values.at(-1) }).toEqual(await cached(entry));
+    const log = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    expect(log.map(row => row.event.phase)).toEqual(["request", "decision", "outcome"]);
+    expect(log[1].event.event.decision.allow).toBe(true); expect(log[2].event.event.runId).toBe(reply.runId);
   }, 600000);
 
   it("describe reports the coverage of the good entries", async () => {

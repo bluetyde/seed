@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { killTree } from "./procTree";
 import { type TypedError, validate } from "./validate";
 
-export type AdapterSpec = { command: string; args: string[] };
+export type AdapterSpec = { command: string; args: string[]; /** Host-owned overrides, never request content. */ env?: Record<string, string> };
 export type CallOptions = { projectRoot: string; timeoutMs: number; signal?: AbortSignal };
 export type AdapterOutcome =
   | { ok: true; reply: unknown }          // reply already validated as seed.adapter-reply/0.1 and matched to the request
@@ -60,7 +60,7 @@ export function callAdapter(
 
     const child = spawn(spec.command, [...spec.args, verb], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, SEED_PROJECT_ROOT: opts.projectRoot },
+      env: { ...process.env, ...spec.env, SEED_PROJECT_ROOT: opts.projectRoot },
       windowsHide: true,
       detached: process.platform !== "win32",
     });
