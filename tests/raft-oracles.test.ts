@@ -7,6 +7,8 @@ import { callAdapter } from "../src/core/adapterClient";
 import { sha256Hex } from "../src/core/canonical";
 import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantities, type IndexedOracle, type Observed, type OracleEntry } from "../src/core/oracle";
 import { evaluateGate } from "../src/core/policy";
+import { RunDispatcher } from "../src/core/runDispatcher";
+import type { SetResult } from "../src/core/oracle";
 import { RunManager, type Budget } from "../src/core/runManager";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
@@ -22,7 +24,7 @@ const dirs: string[] = [];
 const saved = { h: process.env.SEED_RAFT_HEADLESS, o: process.env.SEED_RAFT_ORACLES };
 
 const appCommit = (() => {
-  const r = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const r = spawnSync("git", ["-c", "safe.directory=" + repo.replaceAll("\\", "/"), "-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : "unknown";
 })();
 
@@ -42,7 +44,7 @@ afterEach(() => {
 });
 
 /** Run one entry the way a host would: bad-input through the validate verb, good through the run manager. */
-async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
+async function observe(entry: OracleEntry, baseDir: string, gateSet?: SetResult): Promise<Observed> {
   const root = mkdtempSync(join(tmpdir(), "seed-raft-oracle-"));
   dirs.push(root);
   for (const d of ["models", "runs"]) mkdirSync(join(root, d), { recursive: true });
@@ -60,7 +62,13 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
     return first ? { kind: "refusal", code: first.code } : { kind: "verdict", verdict: "accepted" };
   }
   const mgr = new RunManager({ projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 100, callTimeoutMs: 30000 });
-  const out = await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
+  const out = gateSet ? await new RunDispatcher({
+    manager: { projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 100, callTimeoutMs: 30000 },
+    actor, engine: "raft-oracle-guarded-test", loadCase: async () => ({ artifact, inputs: entry.inputs, settings: { case: casePath }, params: [] }),
+    loadAuthority: async () => ({ context: { study }, currentPins: gateSet.pins, acceptedPins: gateSet.pins, oracleResult: gateSet }),
+    audit: async event => { expect(event.decision.allow).toBe(true); writeFileSync(join(root, "admission.json"), JSON.stringify(event)); },
+  }).start({ requestId: "guarded-real", caseId: "approved-case", budget }) :
+    await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
@@ -100,6 +108,14 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     expect(gate(set.blocked).allow).toBe(true);
     // what the oracles do not cover stays unverified
     expect(unverifiedQuantities(["power", "fuelTemp", "energy", "reactivityTotal"], set, entries)).toEqual(["reactivityTotal"]);
+  }, 600000);
+
+  it("dispatches a registered real case only after the real oracle set passes", async () => {
+    const { entries } = loadOracleEntries(join(base, "entries"));
+    const set = await runOracleSet({ entries, adapter: { id: "raft", version: "0.1.0" }, appCommit, baseDir: base, run: e => cached(e) });
+    expect(set.blocked).toBe(false);
+    const entry = entries.find(e => e.entry.tag === "good")!.entry;
+    expect(await observe(entry, base, set)).toEqual(await cached(entry));
   }, 600000);
 
   it("describe reports the coverage of the good entries", async () => {
