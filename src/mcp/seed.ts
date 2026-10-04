@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { supervisedRun } from "./supervisor";
+import { requestHostCancellation } from "../core/hostControl";
 
 export const MAX_MCP_BYTES = 1_048_576;
 const positiveInteger = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
@@ -19,7 +20,7 @@ export function createSeedMcpServer(hostConfig: string): McpServer {
   });
   server.registerTool("seed_run_case", {
     title: "Run an approved SEED case",
-    description: "Run one registered case through SEED's guarded host. Host policy, scoped approvals, input revisions and oracle/runtime pins are checked; admission is recorded before launch. Only requestId, caseId and a positive-integer budget are accepted. Refusal and calculation failure return isError with typed SEED errors. One active case per engine using shared host state. Budget admission does not enforce OS CPU/memory/disk limits. Synthetic RAFT results have limited validation coverage. No cancellation, recovery or approval action is supplied by this tool.",
+    description: "Run one registered case through SEED's guarded host. Host policy, scoped approvals, input revisions and oracle/runtime pins are checked; admission is recorded before launch. Only requestId, caseId and a positive-integer budget are accepted. Refusal and calculation failure return isError with typed SEED errors. One active case per engine using shared host state. Budget admission does not enforce OS CPU/memory/disk limits. Synthetic RAFT results have limited validation coverage. Use seed_cancel_calculation for an actual stop; cancelling the MCP request alone does not stop it. Recovery is a human CLI action; no approval tool exists.",
     inputSchema: requestSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async request => {
@@ -27,6 +28,15 @@ export function createSeedMcpServer(hostConfig: string): McpServer {
     const reply = { schema: "seed.mcp-reply/0.1", ...outcome };
     return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply,
       isError: !outcome.ok || outcome.state !== "completed" };
+  });
+  server.registerTool("seed_cancel_calculation", {
+    title: "Request calculation cancellation",
+    description: "Request actual cancellation of this host's active calculation by its original requestId. Fresh host policy and scoped cancellation approval are checked again by the calculation owner, which durably audits before calling the adapter. A cancellation-requested reply acknowledges the request, not a confirmed stop; the original run call supplies the terminal result. No PID, native job ID, path or actor is accepted. Abandoned owners require human CLI recovery.",
+    inputSchema: z.object({ requestId: z.string().min(1).max(256) }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async request => {
+    const reply = { schema: "seed.mcp-reply/0.1", ...requestHostCancellation(hostConfig, request) };
+    return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
   });
   return server;
 }

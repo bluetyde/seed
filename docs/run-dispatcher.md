@@ -14,7 +14,7 @@ The host's required `audit` callback records the decision before launch. An audi
 
 The project writer lock is held during admission and the run, so other cooperating project writers receive a conflict until it finishes. An in-process reservation covers admission and execution across dispatcher instances sharing a canonical engine identity. It releases on refusal or completion. FileRunHost adds an external shared-state engine lease for separate processes and projects; configurations must share the same state root. Existing project-store local-disk/check-then-use limits apply.
 
-`RunManager` stays a low-level primitive for oracle/bootstrap and lifecycle tests. GUI handlers must reuse the guarded host rather than construct a raw manager. The CLI now uses persisted host authority/grants and admission records. Cancellation, GUI wiring and crash recovery remain follow-ups. Resource requests are checked against policy; CPU/memory/disk enforcement is not supplied by this gate.
+`RunManager` stays a low-level primitive for oracle/bootstrap and lifecycle tests. GUI handlers must reuse the guarded host rather than construct a raw manager. The CLI now uses persisted host authority/grants and admission records. Owner-mediated cancellation and bounded human recovery now use the guarded host; see [supported cases](cancellation-recovery.md). GUI wiring and general crash-window recovery remain follow-ups. Resource requests are checked against policy; CPU/memory/disk enforcement is not supplied by this gate.
 
 ## Verification
 

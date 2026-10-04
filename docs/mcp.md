@@ -22,13 +22,13 @@ Replace all paths with actual installed locations. The `mcpServers` envelope is 
 
 ## Tool contract
 
-The single tool is `seed_run_case`. Discovery exposes its strict input schema and limitations. Supply the same request as the CLI:
+The calculation tool is `seed_run_case`; `seed_cancel_calculation` requests an actual stop through the live owner ([details](cancellation-recovery.md)). Discovery exposes its strict input schema and limitations. Supply the same request as the CLI:
 
 ```json
 {"requestId":"lesson-mcp-1","caseId":"approved-case","budget":{"maxWallSeconds":30,"maxCores":1,"maxMemoryMB":512,"maxDiskMB":512}}
 ```
 
-Actor, configuration path, executable, policy, grants, parameters, settings, input paths and oracle verdicts cannot be supplied by the client. Unknown fields, including nested budget fields, are refused. `requestId` is limited to 256 characters, case IDs to 64; budget values must be positive safe integers. Unknown tools are refused. There is no approval, configuration-writing or recovery tool.
+Actor, configuration path, executable, policy, grants, parameters, settings, input paths and oracle verdicts cannot be supplied by the client. Unknown fields, including nested budget fields, are refused. `requestId` is limited to 256 characters, case IDs to 64; budget values must be positive safe integers. Unknown tools are refused. There is no approval, configuration-writing or recovery tool; human recovery is available through the CLI for the supported abandoned-run case.
 
 Successful calls return text JSON plus identical structuredContent with `schema: seed.mcp-reply/0.1`, the run ID and terminal state. A refusal or failed calculation sets `isError: true`; host outcomes contain typed SEED errors. Protocol/schema errors rejected by the SDK use MCP's error response conventions and do not enter the host admission journal. Host refusals use its existing logging behavior; setup/lease failures before journal access cannot write an admission row.
 
@@ -40,7 +40,7 @@ Calls wait for the terminal host outcome. Set the client's call timeout to the s
 
 On stdin EOF, the server stops accepting requests; an admitted calculation finishes its host records before the process exits. The calculation supervisor survives an MCP client terminating its server after closing stdin. Killing the supervisor itself or terminating its entire process tree is different: it can leave an adapter/runner and abandoned lease. Human inspection/recovery is still required. Do not treat client transport close as proof the calculation stopped; clients may kill their child server rather than send EOF.
 
-The stdio buffer is bounded to 1 MiB. Oversized input closes the transport; malformed protocol data is reported on stderr without echoing client content. This buffer cap is not a throughput/rate limit or an OS resource limit. No GUI controls, HTTP authentication, public cancellation or complete study/report workflow are added here. All configurations for a runtime must share host state to coordinate ownership. RAFT remains limited to the validation domain documented by its app/oracles.
+The stdio buffer is bounded to 1 MiB. Oversized input closes the transport; malformed protocol data is reported on stderr without echoing client content. This buffer cap is not a throughput/rate limit or an OS resource limit. Actual calculation cancellation now uses the separate cancellation tool. No GUI controls, HTTP authentication or complete study/report workflow are added here. All configurations for a runtime must share host state to coordinate ownership. RAFT remains limited to the validation domain documented by its app/oracles.
 
 ## Verification
 
