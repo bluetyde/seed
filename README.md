@@ -1,6 +1,6 @@
 # SEED: System for Engineering and Experimental Design
 
-Planning skeleton created 2026-09-30. As of 2026-10-01 there is a runnable **host shell** (Electron) that opens the suite apps as tabs: see [docs/shell.md](docs/shell.md). Projects, adapters, runs and reports are not implemented.
+Planning skeleton created 2026-09-30. As of 2026-10-01 there is a runnable **host shell** (Electron) that opens the suite apps as tabs: see [docs/shell.md](docs/shell.md). Project storage, adapters and guarded headless runs now exist in the core; the shell does not yet expose a complete experiment workflow. See [guarded CLI setup](docs/host-cli.md).
 
 Start with [PLAN.md](PLAN.md), then [TODO.md](TODO.md). Suite decisions and cross-app contracts live in [the integration draft](../plans/nuclear-suite-integration.md).
 

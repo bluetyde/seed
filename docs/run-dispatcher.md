@@ -1,6 +1,6 @@
 # Guarded run dispatch (E2)
 
-`RunDispatcher` in `src/core/runDispatcher.ts` connects the existing policy gate and oracle verdicts to `RunManager.start`. It is a host library entry point, not yet a public CLI/MCP service.
+`RunDispatcher` in `src/core/runDispatcher.ts` connects the existing policy gate and oracle verdicts to `RunManager.start`. It is a host library entry point. The public CLI calls it through FileRunHost; see [host setup](host-cli.md). MCP remains planned.
 
 ## Authority boundary
 
@@ -12,9 +12,9 @@ The host's required `audit` callback records the decision before launch. An audi
 
 ## Ownership and limits
 
-The project writer lock is held during admission and the run, so other cooperating project writers receive a conflict until it finishes. An in-process reservation covers admission and execution across dispatcher instances sharing a canonical engine identity. It releases on refusal or completion. Separate host processes and different projects still need a shared engine lease before exposing concurrent public transports. Existing project-store local-disk/check-then-use limits apply.
+The project writer lock is held during admission and the run, so other cooperating project writers receive a conflict until it finishes. An in-process reservation covers admission and execution across dispatcher instances sharing a canonical engine identity. It releases on refusal or completion. FileRunHost adds an external shared-state engine lease for separate processes and projects; configurations must share the same state root. Existing project-store local-disk/check-then-use limits apply.
 
-`RunManager` stays a low-level primitive for oracle/bootstrap and lifecycle tests. Future GUI/CLI/MCP run handlers must use `RunDispatcher`, not construct a raw manager. No new transport or production GUI run button is wired in this slice. Cancellation, durable authority/grant storage, cross-host leases and recovery remain follow-ups. Resource requests are checked against policy; CPU/memory/disk enforcement is not supplied by this gate.
+`RunManager` stays a low-level primitive for oracle/bootstrap and lifecycle tests. GUI/MCP handlers must reuse the guarded host rather than construct a raw manager. The CLI now uses persisted host authority/grants and admission records. Cancellation, GUI/MCP wiring and crash recovery remain follow-ups. Resource requests are checked against policy; CPU/memory/disk enforcement is not supplied by this gate.
 
 ## Verification
 
