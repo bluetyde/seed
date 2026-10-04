@@ -39,3 +39,5 @@ The plan is complete when the open items above are closed with evidence (a comma
 ## Planned extension: managed runtimes
 
 [Plan 11](11-runtime-and-shared-acceptance.md) owns runtime provisioning, offline cache and process cleanup beyond the existing repository installer. App recipes declare compatibility and native checks; SEED executes transactions. Existing catalog wording that dependencies are not installed describes current behavior and must change only when implementation is verified. R1-R10 define the shared acceptance gate.
+
+User request, 2026-10-04: installation must allow core-only apps and optional add-ons, selectable during setup and manageable later. OpenMC's GEOUNED/FreeCAD CAD stack is the first example. SEED presents component choices and manages installation; apps declare required versus optional dependencies and gate only the affected features. See [component selection](11-runtime-and-shared-acceptance.md#optional-add-ons-and-component-selection). This is planned support, not current installer behavior.
