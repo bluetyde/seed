@@ -202,6 +202,26 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
         errors: [{ message: "owner is alive or its identity is ambiguous; recovery refused" }] });
       const owner = JSON.parse(readFileSync(join(engine, "lease", "owner.json"), "utf8"));
       process.kill(owner.pid, "SIGKILL"); await pending;
+      const registryPath = join(project, ".seed", "jobs", active.jobId + ".json");
+      const registryBytes = readFileSync(registryPath);
+      const otherJobPath = join(project, "runs", reply.runId, "native", "job.json");
+      const otherJobBytes = readFileSync(otherJobPath);
+      writeHostJson(registryPath, { runDir: `runs/${reply.runId}` });
+      writeHostJson(otherJobPath, { ...JSON.parse(otherJobBytes.toString()), jobId: active.jobId });
+      try {
+        expect((await recoverHostCalculation(config, { requestId: "real-crash" })).ok).toBe(false);
+        expect(isAlive(job.pid)).toBe(true); expect(isAlive(child.pid)).toBe(true);
+        expect(existsSync(join(engine, "lease"))).toBe(true);
+      } finally { writeFileSync(registryPath, registryBytes); writeFileSync(otherJobPath, otherJobBytes); }
+      // Project-writable metadata cannot substitute dead PIDs for the protected launch identities.
+      const jobPath = join(nativeDir!, "job.json"), childPath = join(nativeDir!, "child.json"), statusPath = join(nativeDir!, "status.json");
+      const savedStatus = readFileSync(statusPath);
+      writeHostJson(jobPath, { ...job, pid: null }); writeHostJson(childPath, { pid: 99999999 }); writeHostJson(statusPath, { status: "finished" });
+      try {
+        expect(await recoverHostCalculation(config, { requestId: "real-crash" })).toMatchObject({ ok: false,
+          errors: [{ message: "adapter stop not confirmed; lease retained for inspection" }] });
+        expect(existsSync(join(engine, "lease"))).toBe(true);
+      } finally { writeHostJson(jobPath, job); writeHostJson(childPath, child); writeFileSync(statusPath, savedStatus); }
       expect(await runFromHostFile(config, { requestId: "blocked-after-crash", caseId: "approved", budget })).toMatchObject({ ok: false,
         errors: [{ code: "E_BUDGET_EXCEEDED", message: expect.stringContaining("E_ENGINE_BUSY") }] });
       const recovery = spawnSync(process.execPath, [join(__dirname, "../dist/cli/seed.js"), "recover"], {
@@ -218,6 +238,57 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       // Only this test's bound job; ensure a failed assertion cannot leave its runner behind.
       if (active?.jobId) await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "acceptance-cleanup", actor: host.actor, jobId: active.jobId }, { projectRoot: project, timeoutMs: 30000 });
       await crashed.client.close();
+    }
+
+    // A second crash lets the real native calculation finish before the human collects it.
+    longCase.steps = 200_000; longCase.sampleEvery = 10_000;
+    writeHostJson(join(project, longPath), longCase);
+    const finishedHash = sha256Hex(readFileSync(join(project, longPath)));
+    host.cases.long.artifact.revision.hash = finishedHash;
+    host.cases.long.inputs.find((i: any) => i.path === longPath).sha256 = finishedHash;
+    saveHostConfiguration(config, host);
+    const finishing = await connectSeedMcp(config);
+    const abandoned = finishing.client.callTool({ name: "seed_run_case", arguments: { requestId: "real-finished-crash", caseId: "long", budget } }, undefined, { timeout: 360000 }).then(() => undefined, () => undefined);
+    active = undefined;
+    try {
+      const deadline = Date.now() + 90000;
+      while (Date.now() < deadline) {
+        const f = join(engine, "lease", "active.json");
+        if (existsSync(f)) active = JSON.parse(readFileSync(f, "utf8"));
+        if (active?.jobId) break;
+        await new Promise(r => setTimeout(r, 10));
+      }
+      expect(active?.jobId).toBeTruthy();
+      const owner = JSON.parse(readFileSync(join(engine, "lease", "owner.json"), "utf8"));
+      process.kill(owner.pid, "SIGKILL"); await abandoned;
+      nativeDir = join(project, "runs", active.runId, "native");
+      while (Date.now() < deadline) {
+        const statusFile = join(nativeDir, "status.json");
+        if (existsSync(statusFile) && JSON.parse(readFileSync(statusFile, "utf8")).status === "finished") {
+          const job = JSON.parse(readFileSync(join(nativeDir, "job.json"), "utf8"));
+          const child = JSON.parse(readFileSync(join(nativeDir, "child.json"), "utf8"));
+          if (!isAlive(job.pid) && !isAlive(child.pid)) break;
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+      const recordPath = join(project, "runs", active.runId, "run-record.json");
+      expect(JSON.parse(readFileSync(recordPath, "utf8")).state).toBe("running");
+      // Corrupt native output must retain the running record and external lease.
+      const resultsPath = join(nativeDir, "out", "raft", "results.json");
+      const original = readFileSync(resultsPath);
+      writeFileSync(resultsPath, "{}");
+      expect((await recoverHostCalculation(config, { requestId: "real-finished-crash" })).ok).toBe(false);
+      expect(existsSync(join(engine, "lease"))).toBe(true);
+      expect(JSON.parse(readFileSync(recordPath, "utf8")).state).toBe("running");
+      writeFileSync(resultsPath, original);
+      expect(await recoverHostCalculation(config, { requestId: "real-finished-crash" })).toMatchObject({ ok: true, state: "recovered-completed", runId: active.runId });
+      const finished = JSON.parse(readFileSync(recordPath, "utf8"));
+      expect(finished.state).toBe("completed"); expect(finished.outputs.length).toBeGreaterThan(0);
+      for (const output of finished.outputs) expect(sha256Hex(readFileSync(join(project, output.path)))).toBe(output.sha256);
+      expect(existsSync(join(engine, "lease"))).toBe(false);
+    } finally {
+      if (active?.jobId) await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "finished-cleanup", actor: host.actor, jobId: active.jobId }, { projectRoot: project, timeoutMs: 30000 });
+      await finishing.client.close();
     }
   }, 600000);
 

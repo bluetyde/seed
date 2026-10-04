@@ -507,11 +507,20 @@ async function run(request, root, reply, fail) {
 
   let child;
   try {
-    child = spawn(process.execPath, [path.join(__dirname, "job.cjs"), absRunDir, caseAbs, bundle, token], { detached: true, stdio: "ignore", windowsHide: true });
+    child = spawn(process.execPath, [path.join(__dirname, "job.cjs"), absRunDir, caseAbs, bundle, token], { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true });
   } catch (err) {
     return rollback(null, typed("E_APP_FAILED", "", "could not start the job: " + (err && err.message)));
   }
   child.unref();
+  const nativeIdentity = new Promise(resolve => {
+    const timer = setTimeout(() => resolve(null), 10000);
+    child.once("message", message => {
+      clearTimeout(timer);
+      resolve(message && message.token === token && Number.isSafeInteger(message.runnerPid) && message.runnerPid > 1 ? message.runnerPid : null);
+    });
+    child.once("error", () => { clearTimeout(timer); resolve(null); });
+    child.once("exit", () => { clearTimeout(timer); resolve(null); });
+  });
   if (!Number.isInteger(child.pid)) return rollback(null, typed("E_APP_FAILED", "", "the job did not start"));
   try {
     fs.writeFileSync(jobIndexPath(dir, jobId), json({ runDir: request.runDir }), { flag: "wx" });
@@ -519,7 +528,9 @@ async function run(request, root, reply, fail) {
   } catch (err) {
     return rollback(child, typed("E_INTERNAL", "", "could not register the job, so it was stopped: " + (err && err.code ? err.code : err)));
   }
-  reply({ ok: true, result: { jobId, runDir: request.runDir, lifecycle: "running" } });
+  const runnerPid = await nativeIdentity;
+  if (!runnerPid) return rollback(child, typed("E_APP_FAILED", "", "native runner identity was not confirmed over launch IPC"));
+  reply({ ok: true, result: { jobId, runDir: request.runDir, lifecycle: "running", nativeProcesses: [child.pid, runnerPid] } });
 }
 
 function status(request, root, reply, fail) {
@@ -550,10 +561,21 @@ function ownsProcess(j, s) {
 async function cancel(request, root, reply, fail) {
   const j = findJob(root, request.jobId);
   if (!j) return fail(typed("E_APP_FAILED", "/jobId", "job not found: " + request.jobId));
+  const launch = request.extensions && request.extensions["seed.launch"];
+  if (launch) {
+    const child = readJson(path.join(j.nativeDir, "child.json"));
+    const pids = launch.nativeProcesses;
+    if (launch.runDir !== j.runDir || (pids !== undefined && (!Array.isArray(pids) || pids.length !== 2 ||
+      pids.some(pid => !Number.isSafeInteger(pid) || pid < 2) || j.job.pid !== pids[0] || !child || child.pid !== pids[1]))) {
+      return fail(typed("E_NOT_OWNED", "/extensions/seed.launch", "job differs from protected launch binding"));
+    }
+  }
   const s = jobState(j.nativeDir, j.job);
   if (s.lifecycle !== "running") {
     // already over (or died): nothing to stop, and nothing was cancelled by this call
-    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: s.lifecycle, cancelled: false } });
+    const child = readJson(path.join(j.nativeDir, "child.json"));
+    const nativeStopped = !s.alive && !!child && Number.isInteger(child.pid) && child.pid > 1 && !isAlive(child.pid);
+    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: s.lifecycle, cancelled: false, nativeStopped } });
   }
   if (!ownsProcess(j, s)) return fail(typed("E_NOT_OWNED", "/jobId", "the process behind this job is not owned by this run"));
   const child = readJson(path.join(j.nativeDir, "child.json"));

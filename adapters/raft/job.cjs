@@ -89,6 +89,7 @@ try {
 }
 try {
   atomicWrite(path.join(nativeDir, "child.json"), json({ pid: child.pid }));
+  if (process.send) process.send({ token, runnerPid: child.pid }, () => { if (process.connected) process.disconnect(); });
 } catch (err) {
   abort("could not record the runner process id: " + (err && err.code));
 }

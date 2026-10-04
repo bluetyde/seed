@@ -25,7 +25,7 @@ export type RunManagerOptions = {
   pollMs?: number;
   callTimeoutMs?: number;
   /** Trusted host records launch intent and the adapter-issued native identity outside project files. */
-  onLaunch?: (identity: { requestId: string; runId: string; jobId?: string }) => void;
+  onLaunch?: (identity: { requestId: string; runId: string; jobId?: string; nativeProcesses?: number[] }) => void;
 };
 
 export type StartRequest = {
@@ -769,12 +769,12 @@ export class RunManager {
       }
 
       const runReply = runOutcome.reply as Record<string, unknown>;
-      const runResult = runReply.result as { jobId: string; runDir: string; lifecycle: string };
+      const runResult = runReply.result as { jobId: string; runDir: string; lifecycle: string; nativeProcesses?: number[] };
 
       record.jobId = runResult.jobId;
       record.startedAt = this.now().toISOString();
       transition("running", "adapter started job");
-      this.onLaunch?.({ requestId: req.requestId, runId, jobId: runResult.jobId });
+      this.onLaunch?.({ requestId: req.requestId, runId, jobId: runResult.jobId, ...(runResult.nativeProcesses ? { nativeProcesses: runResult.nativeProcesses } : {}) });
 
       // 8. Poll loop
       const startTime = performance.now();
@@ -985,6 +985,25 @@ export class RunManager {
     };
   }
 
+  /** Trusted recovery caller supplies an already bound record and guards its final write under its project lock. */
+  async collectBoundRecovery(record: Record<string, unknown>, actor: StartRequest["actor"], beforeCommit: () => void): Promise<RunOutcome> {
+    const runId = record.runId as string;
+    if (!/^r-[A-Za-z0-9_-]+$/.test(runId) || record.state !== "running" || !validate("run-record", record).ok) throw Error("invalid recovery record");
+    const runRelDir = `${this.runsFolder}/${runId}`, runAbsDir = join(this.projectRoot, runRelDir);
+    const copy = structuredClone(record);
+    return this.collectAndFinalize(copy, runAbsDir, runRelDir, {
+      requestId: "recovery-collect", actor, artifact: { path: "dummy", revision: { hash: "0".repeat(64), counter: 1 } },
+      inputs: copy.inputs as StartRequest["inputs"], budget: copy.budget as Budget,
+    }, (to, reason) => {
+      beforeCommit();
+      if (to !== "completed") throw Error("recovered outputs incomplete; lease retained for inspection");
+      copy.state = to; copy.finishedAt = this.now().toISOString();
+      if (!validate("run-record", copy).ok) throw Error("recovered record invalid");
+      appendLine(join(runAbsDir, "log", "transitions.jsonl"), JSON.stringify({ time: copy.finishedAt, from: record.state, to, reason: `human recovery: ${reason}` }));
+      writeFileAtomic(join(runAbsDir, "run-record.json"), JSON.stringify(copy, null, 2) + "\n");
+    });
+  }
+
   private async collectAndFinalize(
     record: Record<string, unknown>,
     runAbsDir: string,
@@ -1029,6 +1048,10 @@ export class RunManager {
       resultsIndex: string;
       resultsSha256: string;
     };
+
+    if (collectResult.jobId !== record.jobId || collectResult.lifecycle !== "completed") {
+      return markCollectFailed([{ code: "E_OUTPUT_INCOMPLETE", field: "/jobId", message: "collected result does not match the completed bound job", source: "seed" }], "collect job identity mismatch");
+    }
 
     const resolvedIndex = resolveInside(this.projectRoot, collectResult.resultsIndex);
     if (resolvedIndex.ok && !this.insideRun(runAbsDir, resolvedIndex.value)) {
