@@ -89,20 +89,20 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  it("loads 24 entries, all pinned and valid", () => {
+  it("loads 33 entries, all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
-    expect(r.entries).toHaveLength(24);
-    expect(r.entries.filter((i) => i.entry.tag === "good")).toHaveLength(16);
-    expect(r.entries.filter((i) => i.entry.tag === "bad-input")).toHaveLength(7);
-    expect(r.entries.filter((i) => i.entry.tag === "known-limit")).toHaveLength(1);
+    expect(r.entries).toHaveLength(33);
+    expect(r.entries.filter((i) => i.entry.tag === "good")).toHaveLength(22);
+    expect(r.entries.filter((i) => i.entry.tag === "bad-input")).toHaveLength(9);
+    expect(r.entries.filter((i) => i.entry.tag === "known-limit")).toHaveLength(2);
   });
 
   it("describe reports the coverage of the good entries", async () => {
     const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "req-d", actor }, { projectRoot: tmpdir(), timeoutMs: 60000 });
     if (!o.ok) throw new Error(JSON.stringify(o.errors));
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
-    expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(["energy_balance_residual", "heat_flux_outer", "temperature_peak", "temperature_surface"]);
+    expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(["energy_balance_residual", "energy_deposited", "heat_flux_outer", "temperature_peak", "temperature_peak_max", "temperature_surface"]);
   });
 
   it("the adapter passes every entry: set passes, inputs verified, not blocked", async () => {
@@ -113,7 +113,7 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
     expect(set.inputsVerified).toBe(true);
     expect(set.blocked).toBe(false);
     // what the oracles do not cover stays unverified
-    expect(unverifiedQuantities(["temperature_peak", "temperature_surface", "heat_flux_outer", "energy_balance_residual", "temperature_fuel_surface", "temperature_clad_inner", "temperature_radial"], set, entries)).toEqual(["temperature_fuel_surface", "temperature_clad_inner", "temperature_radial"]);
+    expect(unverifiedQuantities(["temperature_peak", "temperature_surface", "heat_flux_outer", "energy_balance_residual", "temperature_fuel_surface", "temperature_clad_inner", "temperature_radial", "temperature_peak_max", "energy_deposited", "temperature_peak_history", "temperature_outer_wall_history", "time_of_peak", "energy_balance_gap"], set, entries)).toEqual(["temperature_fuel_surface", "temperature_clad_inner", "temperature_radial", "temperature_peak_history", "temperature_outer_wall_history", "time_of_peak", "energy_balance_gap"]);
   }, 1_800_000);
   it("cancel through the adapter stops the real solver in the WSL distro, not only the Node processes", async () => {
     const root = mkdtempSync(join(tmpdir(), "seed-feed-cancel-")); dirs.push(root);

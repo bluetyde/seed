@@ -38,6 +38,17 @@ const QUANTITIES = [
   { name: "heat_flux_outer", unit: "W/m2" },
   { name: "energy_balance_residual", unit: "1" },
 ];
+// A transient run (feed.results/0.2) has these instead: time series carry their time axis in "t", scalars are one value.
+// temperature_peak_max is the hottest cell-centre value over the whole run; energy_balance_gap is the largest relative gap
+// between the energy deposited and stored plus rejected, which includes the first-order error of the time stepping.
+const TRANSIENT_QUANTITIES = [
+  { name: "temperature_peak_history", unit: "K", series: true },
+  { name: "temperature_outer_wall_history", unit: "K", series: true },
+  { name: "temperature_peak_max", unit: "K" },
+  { name: "time_of_peak", unit: "s" },
+  { name: "energy_deposited", unit: "J/m" },
+  { name: "energy_balance_gap", unit: "1" },
+];
 const OUTPUT_FILES = ["case.json", "derived.json", "feed-manifest.json", "results.json", "run.json"];
 const PARAMETERS = [
   { id: "power.linearHeatRate", type: "number", unit: "W/m", min: 1, max: 60000 },
@@ -406,9 +417,9 @@ async function describe(reply, fail) {
       app: { id: "feed", name: "Fuel Performance Studio (FEED)", version: d.engine.version },
       engine: { name: "feed-headless", version: d.engine.version },
       formats: [{ id: d.caseFormat.format, version: String(d.caseFormat.version) }],
-      capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "thermal-only"],
+      capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "thermal-only", "transient-pulse"],
       parameters: PARAMETERS,
-      quantities: QUANTITIES.map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
+      quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
       oracleCoverage: oracleCoverage(),
     },
   });
@@ -703,7 +714,9 @@ function collect(request, root, reply, fail) {
   const results = JSON.parse(bytesOf["results.json"].toString("utf8"));
   const derived = JSON.parse(bytesOf["derived.json"].toString("utf8"));
   const record = JSON.parse(bytesOf["run.json"].toString("utf8"));
-  if (!results || results.schema !== "feed.results/0.1" || !Array.isArray(results.radial) || results.radial.length === 0 || !results.summary || !Array.isArray(results.checks)) return incomplete("results.json is not a FEED result");
+  const isTransient = !!results && results.schema === "feed.results/0.2" && results.kind === "transient";
+  const wellFormed = !!results && !!results.summary && Array.isArray(results.checks) && (isTransient ? Array.isArray(results.times) && results.times.length >= 2 && !!results.series : results.schema === "feed.results/0.1" && Array.isArray(results.radial) && results.radial.length > 0);
+  if (!wellFormed) return incomplete("results.json is not a FEED result");
   if (!record || record.state !== "completed") return incomplete("run.json does not record a completed solver run");
 
   // A result whose own checks failed, or that used a property law outside its stated range, is not a result.
@@ -716,17 +729,34 @@ function collect(request, root, reply, fail) {
   }
   if (failing.length > 0) return incomplete("the run's own checks failed: " + failing.map((c) => String(c.id)).join(", "));
   const finite = (x) => typeof x === "number" && Number.isFinite(x);
-  for (const p of results.radial) if (!p || !finite(p.r) || !finite(p.T)) return incomplete("radial samples are missing or not finite", "/quantities/temperature_radial");
+  if (!isTransient) for (const p of results.radial) if (!p || !finite(p.r) || !finite(p.T)) return incomplete("radial samples are missing or not finite", "/quantities/temperature_radial");
   const balance = results.checks.find((c) => c.id === "energyBalance");
   const sm = results.summary;
-  const scalars = {
-    temperature_peak: sm.maxT,
-    temperature_fuel_surface: sm.fuelSurfaceCellT,
-    temperature_clad_inner: sm.claddingInnerCellT,
-    temperature_surface: sm.claddingOuterWallT,
-    heat_flux_outer: derived.heatFluxOuter,
-    energy_balance_residual: balance ? balance.value : null,
-  };
+  let scalars;
+  if (isTransient) {
+    const n = results.times.length;
+    const ser = results.series;
+    const times = results.times;
+    if (times[0] !== 0 || times.some((t, i) => !finite(t) || (i > 0 && !(t > times[i - 1])))) return incomplete("the output times are not finite and increasing from 0", "/quantities/temperature_peak_history");
+    for (const key of ["time", "power", "deposited", "peakT", "claddingOuterWallT"]) {
+      if (!Array.isArray(ser[key]) || ser[key].length !== n || ser[key].some((x) => !finite(x))) return incomplete("the series " + key + " is missing, the wrong length or not finite", "/quantities/" + key);
+    }
+    scalars = {
+      temperature_peak_max: sm.maxT,
+      time_of_peak: sm.timeOfMaxT,
+      energy_deposited: ser.deposited[n - 1],
+      energy_balance_gap: balance ? balance.value : null,
+    };
+  } else {
+    scalars = {
+      temperature_peak: sm.maxT,
+      temperature_fuel_surface: sm.fuelSurfaceCellT,
+      temperature_clad_inner: sm.claddingInnerCellT,
+      temperature_surface: sm.claddingOuterWallT,
+      heat_flux_outer: derived.heatFluxOuter,
+      energy_balance_residual: balance ? balance.value : null,
+    };
+  }
   for (const [name, v] of Object.entries(scalars)) if (!finite(v)) return incomplete("the value for " + name + " is missing or not finite", "/quantities/" + name);
 
   // The series folder is written below: it must be a real folder inside the run folder, not a link set up beforehand.
@@ -740,10 +770,13 @@ function collect(request, root, reply, fail) {
   const runId = path.basename(request.runDir);
   const inputRevisions = [...new Set(job.inputs.map((i) => i.sha256))];
   const quantities = [];
-  for (const q of QUANTITIES) {
-    const body = q.radial
-      ? { quantity: q.name, unit: q.unit, r: results.radial.map((p) => p.r), values: results.radial.map((p) => p.T), region: results.radial.map((p) => p.region), note: "cell-centre values; r in metres from the pin axis" }
-      : { quantity: q.name, unit: q.unit, values: [scalars[q.name]] };
+  const seriesOf = { temperature_peak_history: "peakT", temperature_outer_wall_history: "claddingOuterWallT" };
+  for (const q of isTransient ? TRANSIENT_QUANTITIES : QUANTITIES) {
+    const body = q.series
+      ? { quantity: q.name, unit: q.unit, t: results.times, values: results.series[seriesOf[q.name]], note: "temperature_peak_history is the hottest cell centre at each output time; the outer wall is the patch value; t in seconds" }
+      : q.radial
+        ? { quantity: q.name, unit: q.unit, r: results.radial.map((p) => p.r), values: results.radial.map((p) => p.T), region: results.radial.map((p) => p.region), note: "cell-centre values; r in metres from the pin axis" }
+        : { quantity: q.name, unit: q.unit, values: [scalars[q.name]] };
     const text = json(body);
     atomicWrite(path.join(nativeDir, "series", q.name + ".json"), text);
     quantities.push({
@@ -754,6 +787,7 @@ function collect(request, root, reply, fail) {
       data: { path: request.runDir + "/native/series/" + q.name + ".json", sha256: sha256(text) },
       verification: "unverified",
       ...(q.radial ? { coordinates: { system: "radial", axes: [{ name: "r", unit: "m" }] } } : {}),
+      ...(q.series ? { coordinates: { system: "time", axes: [{ name: "t", unit: "s" }] } } : {}),
     });
   }
   const index = {
@@ -763,18 +797,19 @@ function collect(request, root, reply, fail) {
     adapter: ADAPTER,
     engine: { name: "feed-headless", version: String(manifest.version === 1 ? "0.1.0" : manifest.version) },
     inputHashes: job.inputs.map((i) => ({ path: i.path, sha256: i.sha256 })),
-    nativeStatus: { status: "finished", detail: "FEED run completed (" + results.radial.length + " cells, solver exit " + (record.exitCode === undefined ? "n/a" : record.exitCode) + "). " + THERMAL_ONLY },
+    nativeStatus: { status: "finished", detail: "FEED run completed (" + (isTransient ? results.times.length + " output times" : results.radial.length + " cells") + ", solver exit " + (record.exitCode === undefined ? "n/a" : record.exitCode) + "). " + THERMAL_ONLY },
     quantities,
     extensions: {
       feed: {
         thermalOnly: THERMAL_ONLY,
+        kind: isTransient ? "transient" : "steady",
         solver: String(record.solver || "").slice(0, 120),
         caseSha256: manifest.caseSha256,
         resultsSha256: manifest.files.find((f) => f.path === "results.json").sha256,
         checks: results.checks.map((c) => ({ id: String(c.id), verdict: String(c.verdict) })),
         domain: results.domain.verdict,
         warnings: Array.isArray(derived.warnings) ? derived.warnings.map((w) => String(w.code)) : [],
-        quantityNotes: "temperature_peak, temperature_fuel_surface and temperature_clad_inner are cell-centre values of the solver mesh; temperature_surface is the converged outer-wall patch value; energy_balance_residual is relative (flux through the cladding wall against the input linear heat rate).",
+        quantityNotes: isTransient ? "temperature_peak_max is the hottest cell-centre value over the whole run (the interior of a short pulse is adiabatic); the power history is an input, not a result; the time step is first order, so the checks include the independent solution and the step-halving estimate; energy_balance_gap includes the first-order error of the time stepping." : "temperature_peak, temperature_fuel_surface and temperature_clad_inner are cell-centre values of the solver mesh; temperature_surface is the converged outer-wall patch value; energy_balance_residual is relative (flux through the cladding wall against the input linear heat rate).",
       },
     },
   };
