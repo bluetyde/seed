@@ -15,10 +15,22 @@ The persisted `seed.conclusion-draft/0.1` record contains:
 
 The filename hashes the canonical proposal identity excluding generated draft ID/time/hash. Identical retries do not change provenance. Drafts do not alter the finalized study or original report, issue approval, accept a claim, or launch calculations. Citations establish traceability; they do not prove the claim. Current input staleness and scientific coverage must be rechecked and displayed when reviewing.
 
-## Planned: human review receipt
+## Desktop authoring and human review
 
-Human review is not implemented yet. No CLI/MCP acceptance action exists. The desktop must display the exact draft and evidence limits before a separate explicit review confirmation. Trusted setup must supply reviewer identity independently of an agent's configured actor.
+The Welcome lesson card offers a single-claim draft text box for the selected saved report. It automatically cites that report's run. Multiple claims and oracle citations remain available through the proposal CLI. The host-configured study actor is recorded as proposer; accepting reviewer identity is separate. Drafts can be selected in pages of ten through **Review conclusion drafts**. The native confirmation displays question, assumptions, proposer, exact claims/citations, source head, current STALE state and UNVERIFIED quantities. Cancel is the default. **Accept these claims and limits** explicitly acknowledges those displayed limits; **Reject draft** records rejection without an accepted report. No CLI/MCP acceptance action exists.
 
-The future `seed.conclusion-review/0.1` receipt will bind project/study IDs, source report/head and draft identity/hash; host-resolved human reviewer/time; decision (`accepted` or `rejected`); displayed current input hashes, stale/verification limits and explicit acknowledgments; and, on acceptance, derived study-head/report-version identity. The protected record hash covers all fields. A project lock must revalidate those identities and current policy before recording the decision. An accepted receipt alone must never relabel unverified physics as verified.
+Trusted setup selects `SEED_REVIEWER_CONFIG`, an absolute regular JSON file outside the project. It has exactly this shape, with IDs matching the study/project:
 
-Acceptance creates a new derived immutable study with one final human conclusion and a new report receipt/tab. The original remains unchanged. Retry after publication failure must use the same accepted version and receipt; correction starts a new derived version. Rejection produces no accepted report. This schema description is a design contract, not evidence that a review has occurred.
+```json
+{"schema":"seed.reviewer/0.1","projectId":"project-id","studyId":"study-id","actor":{"kind":"human","name":"Reviewer name"}}
+```
+
+Protect this file and the other external host state using the trusted setup's filesystem permissions. Moving a file outside the project does not itself establish reviewer identity. The renderer supplies neither reviewer identity nor an acceptance decision; the main process resolves the native dialog response. The same configured agent is never promoted to a human by opening this dialog.
+
+The implemented `seed.conclusion-review/0.1` receipt binds project/study IDs, source report/head and draft identity/hash; host-resolved human reviewer/time; decision (`accepted` or `rejected`); exact display hash and acknowledged current input hashes, stale/pin/verification limits; exact claims and proposing actor. Its hash covers the canonical record excluding `hash`. A project lock revalidates identity, evidence, current inputs and current policy before a new decision. An accepted receipt never relabels unverified physics as verified.
+
+Acceptance creates a derived immutable study with the verified original prefix and one final human conclusion. The new report opens in its own tab; the original remains unchanged. The accepted evidence embeds the review receipt and derived head. A protected publication record links review hash to report ID and pending/published phase. A staging plan binds every copied snapshot and document hash. Partial known staging files may be rebuilt from checked source bytes; unexpected files or links refuse. The accepted report receipt covers the full bundle, including Markdown and snapshots, during registration, recovery and display.
+
+Retry after a committed acceptance finishes that historical version without a second decision, even if current inputs changed. The accepted receipt's original limits and reviewer remain unchanged. A missing already-registered bundle must be restored as exact bytes; recovery refuses to assign a replacement ID. Published accepted reports can be reopened from their original report's draft chooser after restart. Rejection is immutable for that draft; a revision requires a new draft.
+
+Accepted reports are v2 derivatives of the source v1 report. Revised drafts can create sibling v2 reports with separate review/draft identities. Chaining corrections from an already-finalized accepted study, broader version numbering, reviewer setup UI and cross-platform sign-off remain future work. Automated Electron acceptance supplies test responses to the native dialog; it verifies routing and refusal behavior, not a real person's scientific acceptance.

@@ -5,6 +5,7 @@ import { supervisedRun } from "../mcp/supervisor";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { lessonHistory, saveLessonIntent } from "../core/lessonHistory";
+import { proposeReportConclusion } from "../core/conclusionDraft";
 
 /** Desktop client of the same guarded host. No renderer-supplied authority or paths. */
 export class Lesson {
@@ -15,6 +16,16 @@ export class Lesson {
   private lastStatus = "";
   private preserveMessage = false;
   private offset = 0;
+  notice(message: string): void { this.state.message = message; this.preserveMessage = true; this.changed(); }
+  async propose(text: unknown, reportId: unknown): Promise<void> {
+    if (this.operating || !this.config || !this.state.reportId || reportId !== this.state.reportId) return;
+    this.operating = true;
+    try {
+      const result = await proposeReportConclusion(this.config, this.state.reportId, text);
+      this.notice(result.ok ? "Conclusion draft saved. It has not been accepted. Use Review conclusion drafts." : result.errors.map(e => e.message).join("; "));
+    } catch (error) { this.notice(String(error)); }
+    finally { this.operating = false; }
+  }
   page(offset: unknown): void { if (Number.isSafeInteger(offset) && (offset as number) >= 0 && (offset as number) < 1000 && (offset as number) % 50 === 0) { this.offset = offset as number; this.changed(); } }
   select(requestId: unknown): void {
     if (this.operating || typeof requestId !== "string" || !this.config) return;

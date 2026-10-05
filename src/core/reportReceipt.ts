@@ -8,16 +8,24 @@ import { openProject } from "./projectStore";
 
 const pendingName = (root: string, requestId: string) => "pending-" + sha256Hex(root + "\n" + requestId) + ".json";
 export const reportReceiptFolder = (state: string, root: string, projectId: string) => safeChild(state, join("reports", sha256Hex(projectId + "\n" + root)), true);
-export function prepareReport(state: string, projectRoot: string, projectId: string, studyId: string, requestId: string, runId: string, bundle: string, hashes: string[]): void {
+export function prepareReport(state: string, projectRoot: string, projectId: string, studyId: string, requestId: string, runId: string, bundle: string, hashes: string[], lineage?: { version: number; sourceReportId: string; extraFiles?: { path: string; sha256: string }[] }): string {
   const receipts = reportReceiptFolder(state, projectRoot, projectId); mkdirSync(receipts, { recursive: true });
   const reportId = randomBytes(16).toString("hex");
   const files = ["report.html", "study.jsonl", "evidence.json"].map((name, i) => {
     return { path: join(bundle, name).replaceAll("\\", "/"), sha256: hashes[i] };
   });
+  for (const f of lineage?.extraFiles ?? []) files.push({ path: join(bundle, f.path).replaceAll("\\", "/"), sha256: f.sha256 });
   const pending = safeChild(receipts, pendingName(projectRoot, requestId));
-  if (existsSync(pending)) throw Error("pending report publication requires inspection before retry");
+  if (existsSync(pending)) {
+    const prior = readHostJson(pending);
+    if (lineage && prior.version === lineage.version && prior.sourceReportId === lineage.sourceReportId &&
+      prior.projectRoot === projectRoot && prior.projectId === projectId && prior.studyId === studyId && prior.requestId === requestId && prior.runId === runId &&
+      /^[0-9a-f]{32}$/.test(prior.reportId) && JSON.stringify(prior.files) === JSON.stringify(files)) return prior.reportId;
+    throw Error("pending report publication requires inspection before retry");
+  }
   writeHostJson(pending, { schema: "seed.report-receipt/0.1", reportId, version: 1,
-    projectRoot, projectId, studyId, requestId, runId, files });
+    projectRoot, projectId, studyId, requestId, runId, files, ...(lineage ? { version: lineage.version, sourceReportId: lineage.sourceReportId } : {}) });
+  return reportId;
 }
 
 export function finishReport(state: string, projectRoot: string, projectId: string, studyId: string, requestId: string, runId: string): string | undefined {
@@ -28,7 +36,7 @@ export function finishReport(state: string, projectRoot: string, projectId: stri
   if (!existsSync(pending)) return undefined;
   const receipt = readHostJson(pending);
   if (receipt.projectRoot !== projectRoot || receipt.projectId !== projectId || receipt.studyId !== studyId || receipt.requestId !== requestId || receipt.runId !== runId ||
-    !/^[0-9a-f]{32}$/.test(receipt.reportId) || !Array.isArray(receipt.files) || receipt.files.length !== 3) throw Error("pending report receipt mismatch");
+    !/^[0-9a-f]{32}$/.test(receipt.reportId) || !Array.isArray(receipt.files) || receipt.files.length < 3 || receipt.files.length > 1000 || (receipt.version === 1 && receipt.files.length !== 3)) throw Error("pending report receipt mismatch");
   for (const entry of receipt.files) {
     const file = safeChild(projectRoot, entry.path); regularFile(file);
     if (sha256Hex(readFileSync(file)) !== entry.sha256) throw Error("pending published report changed; refusing registration");
@@ -48,16 +56,17 @@ export function readRegisteredReport(config: string, reportId: unknown): { html:
   let receipts = reportReceiptFolder(state, root, project.value.manifest.projectId as string);
   if (!existsSync(receipts) || !existsSync(safeChild(receipts, reportId + ".json"))) receipts = safeChild(state, "reports", true);
   const receipt = readHostJson(safeChild(receipts, reportId + ".json"));
-  if (!project.ok || receipt.schema !== "seed.report-receipt/0.1" || receipt.reportId !== reportId || receipt.version !== 1 ||
+  if (!project.ok || receipt.schema !== "seed.report-receipt/0.1" || receipt.reportId !== reportId || ![1, 2].includes(receipt.version) ||
+    (receipt.version === 2 && !/^[0-9a-f]{32}$/.test(receipt.sourceReportId)) ||
     receipt.projectRoot !== root || receipt.projectId !== project.value.manifest.projectId || typeof receipt.studyId !== "string" ||
-    !Array.isArray(receipt.files) || receipt.files.length !== 3) throw Error("invalid report receipt or project scope");
+    !Array.isArray(receipt.files) || receipt.files.length < 3 || receipt.files.length > 1000 || (receipt.version === 1 && receipt.files.length !== 3)) throw Error("invalid report receipt or project scope");
   let html: Buffer | undefined;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < receipt.files.length; i++) {
     const entry = receipt.files[i], name = ["report.html", "study.jsonl", "evidence.json"][i];
-    if (typeof entry.path !== "string" || !entry.path.endsWith("/" + name) || !/^[0-9a-f]{64}$/.test(entry.sha256)) throw Error("invalid report receipt files");
+    if (typeof entry.path !== "string" || (i < 3 && !entry.path.endsWith("/" + name)) || !/^[0-9a-f]{64}$/.test(entry.sha256)) throw Error("invalid report receipt files");
     const file = safeChild(root, entry.path); regularFile(file); const bytes = readFileSync(file);
     if (sha256Hex(bytes) !== entry.sha256) throw Error("saved report evidence changed; refusing display");
     if (i === 0) html = bytes;
   }
-  return { html: html!, title: `Report: ${receipt.studyId} (v1)` };
+  return { html: html!, title: `Report: ${receipt.studyId} (v${receipt.version})` };
 }

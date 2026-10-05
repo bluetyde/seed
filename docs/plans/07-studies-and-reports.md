@@ -62,6 +62,6 @@ Create a project, attach a model, save a revision, import or run, compare named 
 
 The first guarded single-case RAFT report is available from CLI, MCP and the desktop welcome lesson panel. It reconstructs hash-chained steps from trusted admission evidence, copies checked input/output snapshots and preserves verification/stale labels. The desktop runs only registered cases with host-selected budget and actor, requests actual cancellation and saves an immutable report. See [workflow setup](../study-report.md).
 
-Live multi-run append, draft/accepted conclusions, comparison, execution replay, desktop history/reconnect remain planned. Guarded report tabs are implemented in Plan11. The initial lesson panel does not meet the complete student path or E3 exit criteria.
+Live multi-run append, comparison and execution replay remain planned. Report tabs and shared desktop history/reconnect are implemented. Plan13 now implements drafts, native human decisions and accepted report derivatives; manual sign-off and corrections chained from accepted studies remain. The initial lesson panel does not meet the complete student path or E3 exit criteria.
 
 Next implementation sequence: [report tabs](11-report-tabs.md), [lesson reconnection](12-lesson-reconnection.md), then [human conclusions](13-human-conclusions.md). Each has separate acceptance checks. Successful report saves should open in new SEED tabs.
