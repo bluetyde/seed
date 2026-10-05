@@ -31,26 +31,32 @@ export type DispatcherOptions = {
   loadAuthority: () => Promise<DispatchAuthority>;
   /** Must durably record the decision before resolving. Failure blocks launch. */
   audit: (event: DispatchAudit) => Promise<void>;
+  /** Host diagnostics: the full cause of an internal failure, which the caller's reply never contains. */
+  onInternalError?: (stage: string, cause: unknown) => void;
 };
 
 // One process hosts the dispatcher. Separate hosts need a shared engine lease before transports ship.
 const occupied = new Set<string>();
 
 /**
- * What went wrong, for the caller, without host paths: the error name or code and a short first line of its
- * message with absolute paths replaced. The caller learns the stage and the kind of failure.
+ * The kind of failure, for the caller: an allowlisted error classification and nothing from the message. Messages can
+ * hold host paths, server names or values; the host sees the whole cause through `onInternalError` instead.
  */
+const ERRNO_CODE = /^E[A-Z0-9]{2,12}$/;
+const STANDARD_NAMES = new Set([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "ReferenceError",
+  "EvalError",
+  "URIError",
+]);
 export function describeCause(e: unknown): string {
-  const err = e as { code?: unknown; name?: unknown; message?: unknown };
-  const kind = typeof err?.code === "string" ? err.code : typeof err?.name === "string" ? err.name : "Error";
-  const text = typeof err?.message === "string" ? err.message : "";
-  const clean = text
-    .split("\n")[0]!
-    .replace(/[A-Za-z]:[^\s'"]*/g, "<path>")
-    .replace(/(^|[\s'"(])\/[^\s'"]*/g, "$1<path>")
-    .replace(/[\u0000-\u001f\u007f]/g, "")
-    .slice(0, 160);
-  return clean ? `${kind}: ${clean}` : kind;
+  const err = e as { code?: unknown; name?: unknown };
+  if (typeof err?.code === "string" && ERRNO_CODE.test(err.code)) return err.code;
+  if (typeof err?.name === "string" && STANDARD_NAMES.has(err.name)) return err.name;
+  return "Error";
 }
 
 function refusal(message: string, code = "E_NOT_PERMITTED"): RunOutcome {
@@ -202,6 +208,11 @@ export class RunDispatcher {
       });
       return locked.ok ? locked.value : { ok: false, errors: locked.errors };
     } catch (e) {
+      try {
+        o.onInternalError?.(stage, e);
+      } catch {
+        // diagnostics must never change the refusal the caller gets
+      }
       return refusal(`run not started: failed while ${stage} (${describeCause(e)})`, "E_INTERNAL");
     } finally {
       occupied.delete(o.engine);
