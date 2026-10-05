@@ -62,6 +62,15 @@
       el("p", { class: "sub" }, "System for Engineering and Experimental Design. Open an app in a tab. Each app keeps its own saved settings, and the host starts and stops its server for you."),
     ];
     const cards = el("div", { class: "cards" });
+    const lesson = s.lesson;
+    const lessonButtons = el("div", { class: "btnrow" });
+    for (const caseId of lesson.cases) lessonButtons.append(el("button", { class: "btn", type: "button", disabled: lesson.busy, "data-lesson-case": caseId,
+      onclick: () => window.host.runLesson(caseId) }, `Run ${caseId}`));
+    if (lesson.cancellable) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.cancelLesson() }, "Cancel calculation"));
+    if (lesson.canSave && !lesson.busy) lessonButtons.append(el("button", { class: "btn", type: "button", onclick: () => window.host.saveLesson() }, "Save study report"));
+    out.push(el("section", { class: "card", "data-lesson": "" }, el("h2", {}, "Calculation lesson"),
+      el("p", { class: "note" }, "Runs approved cases with the configured study budget. Results keep their verification labels."),
+      el("p", { role: "status", "data-lesson-status": "" }, lesson.message), lessonButtons));
     for (const a of s.apps) cards.append(card(a, s.installs.find((i) => i.id === a.id)));
     out.splice(2, 0, el("div", { class: "toolrow" }, el("button", { class: "btn secondary", type: "button", "data-check-all": "", onclick: () => window.host.checkUpdates() }, "Check all for updates"),
       el("span", { class: "path" }, `New installs go to ${s.installRoot}`), el("button", { class: "btn secondary", type: "button", onclick: () => window.host.chooseInstallRoot() }, "Change…")));

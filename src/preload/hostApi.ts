@@ -2,6 +2,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 const api: HostApi = {
+  runLesson: (caseId) => ipcRenderer.send("lesson:run", caseId),
+  cancelLesson: () => ipcRenderer.send("lesson:cancel"),
+  saveLesson: () => ipcRenderer.send("lesson:save"),
   getState: () => ipcRenderer.invoke("state:get"),
   onState: (cb) => { ipcRenderer.on("state", (_e, s: HostState) => cb(s)); },
   openApp: (appId) => ipcRenderer.send("tab:openApp", appId),
