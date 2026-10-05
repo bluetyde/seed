@@ -1,6 +1,6 @@
 # Adapter: NODAL Studio (second real adapter, E2)
 
-2026-10-05. `adapters/nodal/cli.cjs` and `job.cjs` implement the seven-verb protocol (transport: CLI per verb, [plan 03](plans/03-adapters-and-transport.md)) over NODAL's reference solver, run through its command-line runner `python -m nodal_studio.run` and the machine-readable modes added for this (`--describe`, `--validate`, `--json`; `docs/headless.md` in the NODAL repo, branch `claude/seed-headless`). Modelled on [the RAFT adapter](adapter-raft.md). Tests: `tests/nodal-adapter.test.ts`, `tests/nodal-oracles.test.ts`.
+2026-10-05. `adapters/nodal/cli.cjs` and `outcome.cjs` (on the shared wrapper and flows, no `job.cjs` of its own) implement the seven-verb protocol (transport: CLI per verb, [plan 03](plans/03-adapters-and-transport.md)) over NODAL's reference solver, run through its command-line runner `python -m nodal_studio.run` and the machine-readable modes added for this (`--describe`, `--validate`, `--json`; `docs/headless.md` in the NODAL repo, branch `claude/seed-headless`). Modelled on [the RAFT adapter](adapter-raft.md). Tests: `tests/nodal-adapter.test.ts`, `tests/nodal-oracles.test.ts`.
 
 NODAL is a 1D thermal-hydraulic loop solver in educational scope (RELAP5-format models, homogeneous equilibrium two-phase). Nothing here says anything about a real plant; every result index carries `verification: "unverified"` until an oracle verdict says otherwise.
 
@@ -49,4 +49,4 @@ NODAL owns its entries (D3): `oracles/seed/` in the NODAL repo, with `tools/gen_
 - Rejected commands in the runner's messages come back as `W_NODAL_*` warnings carrying the app's code and text.
 - Collect refuses results whose channels differ from the model's outputs, or whose history does not start at time 0.
 - A linked `native/series` or `native/out` folder is refused; the job never writes through it.
-- Not covered by tests (no stub runner): trip with folder issues in `job.cjs`, and a validate result with only warnings.
+- Not covered by tests (no stub runner): trip with folder issues in `outcome.cjs`, and a validate result with only warnings.

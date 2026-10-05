@@ -4,7 +4,7 @@ Status 2026-10-05: built on branch `claude/pra-adapter`, **not merged**. The SNE
 
 ## Shape
 
-`adapters/pra/cli.cjs` (one process per verb) and `adapters/pra/job.cjs` (detached wrapper with heartbeat, token and `status.json`, like NODAL, OpenMC and FEED). The runner is `node dist/node/cli/headless.js` from a SNEED checkout built with `npm run build:cli`; it starts SCRAM inside WSL itself.
+`adapters/pra/cli.cjs` (one process per verb), on the shared job wrapper and flows ([adapters-shared.md](adapters-shared.md)). The runner is `node dist/node/cli/headless.js` from a SNEED checkout built with `npm run build:cli`; it starts SCRAM inside WSL itself.
 
 Host environment, never a project file or request: `SEED_PRA_REPO` (absolute path of the built checkout), optional `SEED_PRA_NODE`, optional `SEED_PRA_ORACLES` (absolute path of `oracles/seed/entries`, for `describe` coverage). A missing or unbuilt checkout is `E_SETUP_REQUIRED` naming the variable or `npm run build:cli`; a missing SCRAM runtime is warning `W_SOLVER_MISSING` on `describe` and refuses `run`.
 
