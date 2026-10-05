@@ -35,7 +35,7 @@ The solver (OpenFOAM Foundation 9 + OFFBEAT, in the WSL distro `feed-solver`) is
 | `heat_flux_outer` | W/m2 | `q'/(2 pi Rco)` |
 | `energy_balance_residual` | 1 | relative, flux through the cladding wall against the input linear heat rate |
 
-All are `verification: "unverified"` until an oracle set covers them. The FEED oracle set (21 entries, closed-form expected values, tolerances from the mesh-refinement bound fixed before any run) covers `temperature_peak`, `temperature_surface`, `heat_flux_outer` and `energy_balance_residual`; `temperature_fuel_surface`, `temperature_clad_inner` and `temperature_radial` stay unverified.
+All are `verification: "unverified"` until an oracle set covers them. The FEED oracle set (24 entries, closed-form expected values, tolerances from the mesh-refinement bound fixed before any run) covers `temperature_peak`, `temperature_surface`, `heat_flux_outer` and `energy_balance_residual`; `temperature_fuel_surface`, `temperature_clad_inner` and `temperature_radial` stay unverified.
 
 ## Known gaps
 
