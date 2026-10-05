@@ -44,6 +44,7 @@ interface HostInstall {
 }
 
 interface HostState {
+  lesson: HostLesson;
   installs: HostInstall[];
   installRoot: string;
   tabs: HostTab[];
@@ -58,6 +59,9 @@ type MenuAction =
   | "nextTab" | "prevTab" | "editRegistry" | "reloadRegistry" | "about" | "chooseInstallRoot" | "checkUpdates";
 
 interface HostApi {
+  runLesson(caseId: string): void;
+  cancelLesson(): void;
+  saveLesson(): void;
   getState(): Promise<HostState>;
   onState(cb: (s: HostState) => void): void;
   openApp(appId: string): void;
@@ -82,3 +86,5 @@ interface HostApi {
 interface Window {
   host: HostApi;
 }
+
+interface HostLesson { cases: string[]; busy: boolean; cancellable?: boolean; canSave?: boolean; message: string }

@@ -17,6 +17,7 @@ import { createProject, openProject } from "../src/core/projectStore";
 import { makeHeader } from "./helpers/studyFixtures";
 import { verifyStudyLog } from "../src/core/semantic";
 import { exportStudyReport } from "../src/core/studyReportHost";
+import { Lesson } from "../src/main/lesson";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
@@ -238,6 +239,32 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
         cpSync(dirname(join(project, exported.report.html)), join(process.env.SEED_STUDY_DEMO_OUTPUT, "mcp-study"), { recursive: true });
       }
     } finally { await m.client.close(); }
+
+    const desktop = new Lesson(config, headerFile, () => {}, require("../dist/mcp/supervisor.js").supervisedRun);
+    await desktop.run("approved");
+    expect(desktop.snapshot()).toMatchObject({ busy: false, canSave: true, message: "Calculation completed." });
+    await desktop.save();
+    expect(desktop.snapshot().message).toContain("Report saved:");
+    expect(desktop.snapshot().canSave).toBe(false);
+
+    if (process.env.SEED_GUI_ACCEPTANCE === "1") {
+      const { _electron } = await import("@playwright/test");
+      const registry = join(hostRoot, "gui-apps.json"), catalog = join(hostRoot, "gui-catalog.json");
+      writeHostJson(registry, { apps: [] }); writeHostJson(catalog, { repos: [] });
+      const gui = await _electron.launch({ args: [join(__dirname, "..")], env: { ...process.env,
+        SEED_HOST_CONFIG: config, SEED_STUDY_HEADER: headerFile, SEED_CATALOG: catalog,
+        EXPERIMENT_STUDIO_APPS: registry, EXPERIMENT_STUDIO_USER_DATA: join(hostRoot, "gui-user") } });
+      try {
+        let page = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html"));
+        for (let n = 0; !page && n < 100; n++) { await new Promise(r => setTimeout(r, 100)); page = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html")); }
+        if (!page) throw Error("lesson page missing");
+        await page.locator('[data-lesson-case="approved"]').click();
+        await page.getByRole("button", { name: "Save study report" }).waitFor({ timeout: 60000 });
+        await page.getByRole("button", { name: "Save study report" }).click();
+        await page.waitForFunction(() => document.querySelector("[data-lesson-status]")?.textContent?.includes("Report saved:"), { timeout: 30000 });
+        expect(await page.locator("[data-lesson-status]").textContent()).toContain("No scientific conclusion has been accepted.");
+      } finally { await gui.close(); }
+    }
 
     // Lifecycle acceptance only: lengthen a registered synthetic case, without claiming new physics oracle coverage.
     const host = JSON.parse(readFileSync(config, "utf8"));

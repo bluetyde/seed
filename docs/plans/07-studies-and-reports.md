@@ -57,3 +57,9 @@ Create a project, attach a model, save a revision, import or run, compare named 
 - Plot library for the report and views.
 - Whether a conclusion needs a second human sign-off at A2 and above.
 - Study templates for teaching (a student starts from "compare two redundancy designs").
+
+## Implementation checkpoint (2026-10-04)
+
+The first guarded single-case RAFT report is available from CLI, MCP and the desktop welcome lesson panel. It reconstructs hash-chained steps from trusted admission evidence, copies checked input/output snapshots and preserves verification/stale labels. The desktop runs only registered cases with host-selected budget and actor, requests actual cancellation and saves an immutable report. See [workflow setup](../study-report.md).
+
+Live multi-run append, draft/accepted conclusions, comparison, execution replay, desktop history/reconnect and report viewing remain planned. The initial lesson panel does not meet the complete student path or E3 exit criteria.

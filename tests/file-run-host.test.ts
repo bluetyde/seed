@@ -12,7 +12,28 @@ import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/o
 import { readRequest, runCli } from "../src/cli/seed";
 import { connectSeedMcp } from "./helpers/mcp-client";
 import { recoverHostCalculation, requestHostCancellation } from "../src/core/hostControl";
+import { Lesson } from "../src/main/lesson";
 const dirs: string[] = [];
+it("desktop lesson uses host case/budget and blocks substituted cases and duplicate clicks", async () => {
+  const f = await fixture();
+  let complete: ((v: any) => void) | undefined;
+  const calls: any[] = [];
+  const lesson = new Lesson(f.file, undefined, () => {}, async (_file, request) => {
+    calls.push(request); return await new Promise(resolve => { complete = resolve; });
+  });
+  await lesson.run({ caseId: "approved", actor: { kind: "human" } });
+  await lesson.run("unknown");
+  expect(calls).toHaveLength(0);
+  const running = lesson.run("approved");
+  await lesson.run("approved");
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ caseId: "approved", budget: f.budget });
+  expect(Object.keys(calls[0]).sort()).toEqual(["budget", "caseId", "requestId"]);
+  expect(lesson.snapshot().busy).toBe(true);
+  complete!({ ok: false, errors: [{ message: "policy refused" }] }); await running;
+  expect(lesson.snapshot()).toMatchObject({ busy: false, canSave: false, message: "policy refused" });
+  await lesson.save(); expect(calls).toHaveLength(1);
+});
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 async function fixture(delayMs = 10) {
   const root = mkdtempSync(join(tmpdir(), "seed file host spaces ")); dirs.push(root);
@@ -100,7 +121,7 @@ it("human recovery stops a calculation after its supervisor dies, preserving run
     while (Date.now() < deadline) {
       const run = readdirSync(join(f.project, "runs")).find(n => n.startsWith("r-"));
       if (run && existsSync(join(f.project, "runs", run, "run-record.json"))) record = JSON.parse(readFileSync(join(f.project, "runs", run, "run-record.json"), "utf8"));
-      if (record?.jobId) break; await new Promise(r => setTimeout(r, 20));
+      if (record?.jobId && readHostJson(join(f.engineRoot, "lease", "active.json")).jobId === record.jobId) break; await new Promise(r => setTimeout(r, 20));
     }
     expect(record?.jobId).toBeTruthy();
     const owner = readHostJson(join(f.engineRoot, "lease", "owner.json"));

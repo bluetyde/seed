@@ -10,7 +10,7 @@ export function supervisedRun(hostConfig: string, request: DispatchRequest): Pro
     let replied = false;
     const failure = () => { if (!replied) { replied = true; resolve({ ok: false, errors: [{ code: "E_INTERNAL", field: "", message: "run supervisor disconnected without a reply; inspect host records before retrying", source: "seed" }] }); } };
     const child = fork(join(__dirname, "supervisor.js"), [], { detached: true, windowsHide: true,
-      stdio: ["ignore", "ignore", "ignore", "ipc"], env: { ...process.env, SEED_HOST_CONFIG: hostConfig } });
+      stdio: ["ignore", "ignore", "ignore", "ipc"], env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", SEED_HOST_CONFIG: hostConfig } });
     child.once("error", failure); child.once("exit", failure);
     child.once("message", value => { if (!replied) { replied = true; resolve(value as RunOutcome); } });
     child.send(request, error => { if (error) failure(); });

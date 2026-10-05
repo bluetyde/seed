@@ -15,6 +15,13 @@ const entry = (id: string, name: string, extra: string[] = []) => ({
 });
 
 let host: ElectronApplication | undefined;
+test("lesson panel safely explains missing setup and exposes no configuration writer", async () => {
+  await launch([]);
+  const page = await pageWhere(p => p.url().endsWith("/renderer/welcome.html"));
+  await expect(page.locator("[data-lesson]")).toContainText("Calculation lesson");
+  await expect(page.locator("[data-lesson-status]")).toContainText("Set up a trusted lesson");
+  await expect(page.locator("[data-lesson-case]")).toHaveCount(0);
+});
 
 let installRoot = "";
 async function launch(apps: unknown[], catalogRepos: unknown[] = []): Promise<Page> {
@@ -64,7 +71,7 @@ test("starts with only the Welcome tab and lists the registered apps", async () 
   await expect(bar.locator(".tab")).toHaveCount(1);
   await expect(bar.locator(".tab")).toContainText("Welcome");
   const welcome = await pageWhere((p) => p.url().endsWith("/renderer/welcome.html"));
-  await expect(welcome.locator(".card")).toHaveCount(2);
+  await expect(welcome.locator("[data-app]")).toHaveCount(2);
   await shot("welcome.png");
 });
 

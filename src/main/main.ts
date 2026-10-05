@@ -12,6 +12,7 @@ import { InstallStore } from "./store";
 import * as os from "node:os";
 import { ProcessManager } from "./processes";
 import { TabModel } from "./tabs";
+import { Lesson } from "./lesson";
 
 const MENU_H = 32;
 const TAB_H = 36;
@@ -50,12 +51,14 @@ const tabs = new TabModel();
 const runtime = new Map<string, TabRuntime>();
 const processes = new ProcessManager();
 const childWindows = new Map<string, Set<BrowserWindow>>();
+const lesson = new Lesson(process.env.SEED_HOST_CONFIG, process.env.SEED_STUDY_HEADER, () => refresh());
 
 // ---- state shown in the bar and the welcome page ----
 
 function snapshot(): HostState {
   const status = (id: string): TabStatus => runtime.get(id)?.status ?? "idle";
   return {
+    lesson: lesson.snapshot(),
     tabs: tabs.tabs.map((t) => {
       const rt = runtime.get(t.id);
       const a = registry().find((x) => x.id === t.appId);
@@ -375,6 +378,9 @@ app.whenReady().then(() => {
   processes.onExit = (appId, code) => setError(`app:${appId}`, `${registry().find((a) => a.id === appId)?.name ?? appId} stopped by itself (exit code ${code ?? "unknown"}).`, processes.output(appId));
 
   ipcMain.handle("state:get", (e) => (checkSender(e) ? snapshot() : undefined));
+  ipcMain.on("lesson:run", (e, id: unknown) => { if (e.sender === pageView.webContents) void lesson.run(id); });
+  ipcMain.on("lesson:cancel", (e) => { if (e.sender === pageView.webContents) lesson.cancel(); });
+  ipcMain.on("lesson:save", (e) => { if (e.sender === pageView.webContents) void lesson.save(); });
   ipcMain.on("tab:openApp", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void openApp(id); });
   ipcMain.on("tab:new", (e) => { if (checkSender(e)) menuAction("newTab"); });
   ipcMain.on("tab:activate", (e, id: unknown) => { if (checkSender(e) && typeof id === "string" && tabs.activate(id)) refresh(); });
