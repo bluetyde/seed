@@ -1,16 +1,20 @@
 "use strict";
-// Job wrapper for the SNEED (PRA) adapter: runs SNEED's headless runner (dist/node/cli/headless.js) as a child, keeps a heartbeat, and writes
-// native/status.json when the child ends. It is started detached by cli.cjs (verb "run") and stopped by "cancel".
-// The runner starts SCRAM inside WSL, outside this process tree: killing the Node runner does not stop SCRAM. So before the wrapper stops
-// itself for any reason it asks the runner to cancel (the runner kills the processes carrying this run's owner tag and checks none is left).
-// Usage: node job.cjs <absRunDir> <token> <runSpecJson> <cancelSpecJson>
-// A spec is {command, args, env?} chosen by cli.cjs from the host configuration, never from the request text.
+// The one job wrapper of every SEED adapter: runs an app's headless runner as a child, keeps a heartbeat, and writes native/status.json when the
+// child ends. It is started detached by the adapter's `run` verb (adapters/shared/flow.cjs startJob) and stopped by `cancel`.
+//
+// A runner may keep its real work outside this process tree (SCRAM or OpenMC inside WSL, FEED's solver in its distro): killing the runner
+// process does not stop that work. So before the wrapper stops itself for any reason it asks the app's own `cancel` verb (the cancel spec)
+// to stop the native run; then it kills the runner tree.
+//
+// Usage: node job.cjs <absRunDir> <token> <runSpecJson> <cancelSpecJson | null> [outcomeModule]
+// A spec is {command, args, env?, cwd?} with an absolute command, chosen by the adapter from the host configuration, never from the request.
+// outcomeModule (optional absolute path) maps the runner's final reply to a status; the default is ./outcome.cjs.
 
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 
-const [absRunDir, token, runSpecJson, cancelSpecJson] = process.argv.slice(2);
+const [absRunDir, token, runSpecJson, cancelSpecJson, outcomeArg] = process.argv.slice(2);
 const nativeDir = path.join(absRunDir, "native");
 const outDir = path.join(nativeDir, "out");
 const MAX_CAPTURE = 1024 * 1024;
@@ -31,29 +35,35 @@ function parseSpec(text) {
   if (!spec || typeof spec.command !== "string" || !path.isAbsolute(spec.command) || !Array.isArray(spec.args) || spec.args.some((a) => typeof a !== "string")) {
     throw new Error("bad launch spec");
   }
+  if (spec.cwd !== undefined && (typeof spec.cwd !== "string" || !path.isAbsolute(spec.cwd))) throw new Error("bad launch spec cwd");
   return spec;
 }
 let runSpec;
-let cancelSpec;
+let cancelSpec = null;
+let outcome;
 try {
   runSpec = parseSpec(runSpecJson);
-  cancelSpec = parseSpec(cancelSpecJson);
+  if (cancelSpecJson && cancelSpecJson !== "null") cancelSpec = parseSpec(cancelSpecJson);
+  outcome = require(outcomeArg && path.isAbsolute(outcomeArg) ? outcomeArg : path.join(__dirname, "outcome.cjs"));
+  if (typeof outcome !== "function") throw new Error("the outcome module does not export a function");
 } catch (err) {
-  process.stderr.write("bad launch spec: " + (err && err.message) + "\n");
+  process.stderr.write("bad job arguments: " + (err && err.message) + "\n");
   process.exit(1);
 }
+const specEnv = (spec) => (spec.env ? { ...process.env, ...spec.env } : process.env);
 
-/** Ask the runner to cancel its run (it kills SCRAM inside WSL). Best effort, bounded: the caller goes on either way. */
+/** Ask the app's own cancel to stop its native run. Best effort, bounded: the caller goes on either way. */
 function cancelNative() {
+  if (!cancelSpec) return "no native cancel configured";
   try {
-    const r = spawnSync(cancelSpec.command, cancelSpec.args, { env: cancelSpec.env ? { ...process.env, ...cancelSpec.env } : process.env, encoding: "utf8", windowsHide: true, timeout: 45000 });
+    const r = spawnSync(cancelSpec.command, cancelSpec.args, { env: specEnv(cancelSpec), cwd: cancelSpec.cwd, encoding: "utf8", windowsHide: true, timeout: 45000 });
     return r.status === 0 ? "native run cancelled" : "native cancel did not confirm (exit " + r.status + ")";
   } catch {
     return "native cancel could not run";
   }
 }
 
-/** Stop the launcher process (the Node runner) and everything under it, and say whether it is gone. */
+/** Stop the runner process and everything under it, and say whether it is gone. */
 function stopRunner() {
   if (!child || !Number.isInteger(child.pid) || child.exitCode !== null) return "no runner running";
   const pid = child.pid;
@@ -80,13 +90,13 @@ function stopRunner() {
   }
 }
 
-/** Stop the native run and the launcher (if started) and leave. What became of each is written where it can be found, best effort. */
+/** Stop the native run and the runner (if started) and leave. What became of each is written where it can be found, best effort. */
 function abort(reason) {
   if (timer) clearInterval(timer);
   const native = child ? cancelNative() : "no native run started";
-  const outcome = stopRunner();
+  const stopped = stopRunner();
   try {
-    atomicWrite(path.join(absRunDir, "native", "job-error.txt"), String(reason).slice(0, 1700) + " (" + native + "; " + outcome + ")" + String.fromCharCode(10));
+    atomicWrite(path.join(absRunDir, "native", "job-error.txt"), String(reason).slice(0, 1700) + " (" + native + "; " + stopped + ")" + String.fromCharCode(10));
   } catch {
     // nowhere left to write: the exit status is the only report
   }
@@ -143,13 +153,9 @@ function finish(status, detail) {
 }
 
 try {
-  child = spawn(runSpec.command, runSpec.args, {
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-    env: runSpec.env ? { ...process.env, ...runSpec.env } : process.env,
-  });
+  child = spawn(runSpec.command, runSpec.args, { cwd: runSpec.cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: specEnv(runSpec) });
 } catch (err) {
-  finish("failed", "could not start the SNEED runner: " + (err && err.message));
+  finish("failed", "could not start the runner: " + (err && err.message));
 }
 try {
   atomicWrite(path.join(nativeDir, "child.json"), json({ pid: child.pid }));
@@ -166,10 +172,12 @@ child.stdout.on("data", (d) => {
 child.stderr.on("data", (d) => {
   if (stderr.length < MAX_CAPTURE) stderr += d.toString("utf8");
 });
-child.on("error", (err) => finish("failed", "SNEED runner launch error: " + err.message));
+child.on("error", (err) => finish("failed", "runner launch error: " + err.message));
 child.on("close", (code, signal) => {
   try {
-    atomicWrite(path.join(nativeDir, "log.txt"), "exit " + code + " signal " + signal + "\n--- stdout\n" + stdout.slice(0, 20000) + "\n--- stderr\n" + stderr.slice(0, 20000) + "\n");
+    // never write through an existing link or hard link: replace the name itself
+    fs.rmSync(path.join(nativeDir, "log.txt"), { force: true });
+    fs.writeFileSync(path.join(nativeDir, "log.txt"), "exit " + code + " signal " + signal + "\n--- stdout\n" + stdout.slice(0, 20000) + "\n--- stderr\n" + stderr.slice(0, 20000) + "\n");
   } catch (err) {
     process.stderr.write("could not write log.txt: " + (err && err.code) + "\n");
   }
@@ -179,10 +187,11 @@ child.on("close", (code, signal) => {
   } catch {
     reply = null;
   }
-  if (reply && reply.ok === true && reply.status === "completed" && code === 0) return finish("finished");
-  if (reply && reply.ok === true && reply.status === "cancelled") return finish("cancelled", "the runner reported the run cancelled");
-  // truncated, failed, or completed-but-incomplete: never a result
-  if (reply && reply.ok === true && reply.status) return finish("failed", "the run ended " + reply.status + (reply.reason ? ": " + String(reply.reason).slice(0, 600) : ""));
-  if (reply && Array.isArray(reply.errors) && reply.errors[0]) return finish("failed", "the runner reported " + reply.errors[0].code + ": " + String(reply.errors[0].message).slice(-600));
-  return finish("failed", "the runner exited with " + (signal || code) + (stderr ? ": " + stderr.trim().slice(-300) : ""));
+  let result;
+  try {
+    result = outcome({ reply, code, signal, stdout, stderr });
+  } catch (err) {
+    result = { status: "failed", detail: "the outcome mapping failed: " + (err && err.message) };
+  }
+  finish(result.status, result.detail);
 });
