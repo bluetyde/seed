@@ -39,7 +39,7 @@ All are `verification: "unverified"` until an oracle set covers them. The FEED o
 
 ## Known gaps
 
-- A cancel that arrives in the instant between the runner starting and the solver run being registered finds no active solver run and kills only the Node processes; the solver would then end at the runner's time limit. Not yet tested.
+- No cancel race remains by construction: FEED's runner writes `active-run.json` in the same synchronous step as `RunManager.start()`, before the manager's deferred pump can launch anything, and the run script honours a cancel flag that exists before it starts (FEED test `wslLifecycle`: "a cancel flag set before the script starts"). A solver therefore cannot exist without a record the cancel verb can find. Keep that ordering if the runner is edited.
 - Windows only for the real solver (WSL). The stub tests run anywhere.
 - Mesh is part of the case; there is no refinement study through SEED yet.
 
@@ -58,4 +58,4 @@ Two auditors (security-boundary-verifier, silent-failure-hunter) reviewed the ad
 | A result with no check verdicts or no domain verdict passed and was labelled `in-domain` | both are required, else `E_OUTPUT_INCOMPLETE` |
 | A reservation without a process id was returned as a running job | `E_REQUEST_CONFLICT`, retry |
 
-Known remaining gap: if the runner dies in the instant after its WSL call starts a solver but before `active-run.json` is written, that solver ends at its time limit (the run script's own timeout). Not reproducible with the current timings; no test.
+Re-checked afterwards: the gap suspected here (runner dies after starting a solver but before the run is recorded) cannot occur, because the record is written before anything is launched; see Known gaps.

@@ -140,6 +140,81 @@
           ]
         }
       ]
+    },
+    {
+      "id": "feed",
+      "name": "Fuel Performance Studio (FEED)",
+      "url": "https://github.com/bluetyde/feed.git",
+      "branch": "main",
+      "folder": "feed",
+      "private": true,
+      "notes": "Private repository: sign in to GitHub once on this computer (Git Credential Manager or gh auth login). Thermal fuel-pin calculations only. The solver (OpenFOAM + OFFBEAT) runs in the WSL distro feed-solver on Windows; SEED does not install it. Build it with solver/setup-feed-solver.sh and solver/build-offbeat.sh (see the FEED README).",
+      "candidates": [],
+      "prerequisites": [
+        {
+          "id": "git",
+          "label": "Git",
+          "command": "git",
+          "args": [
+            "--version"
+          ],
+          "fix": "Install Git for your operating system and make it available on PATH.",
+          "when": "install"
+        },
+        {
+          "id": "node",
+          "label": "Node.js 24 or newer",
+          "command": "node",
+          "args": [
+            "-e",
+            "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)"
+          ],
+          "fix": "Install Node.js 24 or newer from nodejs.org.",
+          "when": "install"
+        },
+        {
+          "id": "feed-solver",
+          "label": "The feed-solver WSL distribution with OFFBEAT",
+          "command": "wsl.exe",
+          "args": [
+            "-d",
+            "feed-solver",
+            "-u",
+            "feed",
+            "--exec",
+            "true"
+          ],
+          "fix": "Create the distro as described in the FEED README (solver folder). Without it FEED can validate cases but not run them.",
+          "when": "run"
+        }
+      ],
+      "steps": [
+        {
+          "label": "Install dependencies",
+          "cwd": ".",
+          "command": "npm",
+          "args": [
+            "ci",
+            "--ignore-scripts"
+          ],
+          "watch": [
+            "package-lock.json"
+          ]
+        },
+        {
+          "label": "Build",
+          "cwd": ".",
+          "command": "npm",
+          "args": [
+            "run",
+            "build"
+          ],
+          "watch": [
+            "package.json",
+            "tsconfig.build.json"
+          ]
+        }
+      ]
     }
   ]
 }
