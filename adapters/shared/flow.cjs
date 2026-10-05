@@ -72,16 +72,16 @@ async function startJob({ root, request, absRunDir, record: extra, runSpec, canc
   const nativeDir = path.join(absRunDir, "native");
   const jobJsonPath = path.join(nativeDir, "job.json");
   const jobId = jobIdFor(request.requestId);
+  const dir = jobsDir(root, true);
+  if (!dir) return fail(typed("E_PATH_TRAVERSAL", "/.seed/jobs", "the job registry folder is a link or leaves the project"));
+  const indexPath = jobIndexPath(dir, jobId);
+  // One request id belongs to one run folder: refuse a start that would reuse it elsewhere, before anything is created in the other folder.
+  const bound = readJson(indexPath);
+  if (bound && bound.runDir !== request.runDir) return fail(typed("E_REQUEST_CONFLICT", "/requestId", "this request id is already bound to another run folder"));
   fs.mkdirSync(nativeDir, { recursive: true });
   if (!containedBelow(absRunDir, nativeDir) || fs.lstatSync(nativeDir).isSymbolicLink()) {
     return fail(typed("E_PATH_TRAVERSAL", "/runDir", "the native state folder is a link or leaves the run folder"));
   }
-  const dir = jobsDir(root, true);
-  if (!dir) return fail(typed("E_PATH_TRAVERSAL", "/.seed/jobs", "the job registry folder is a link or leaves the project"));
-  const indexPath = jobIndexPath(dir, jobId);
-  // One request id belongs to one run folder: refuse a start that would reuse it elsewhere, before anything is created or started.
-  const bound = readJson(indexPath);
-  if (bound && bound.runDir !== request.runDir) return fail(typed("E_REQUEST_CONFLICT", "/requestId", "this request id is already bound to another run folder"));
 
   // Reserve the run folder exclusively before anything is started: a concurrent start of the same request sees the reservation, and another
   // request is refused. The record is completed (with the process id) after the start.
