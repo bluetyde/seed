@@ -41,3 +41,12 @@ NODAL owns its entries (D3): `oracles/seed/` in the NODAL repo, with `tools/gen_
 - Python start-up costs about a second per call; fine for these runs.
 - On Windows there is no job object: a wrapper killed from outside leaves its runner until `cancel`.
 - The adapter duplicates the RAFT and FEED adapters' infrastructure (about 400 lines); a shared module is a follow-up.
+
+## Review fixes (Codex, 2026-10-05)
+
+- A request id already bound to another run folder is refused (`E_REQUEST_CONFLICT`) before anything is reserved; the first job keeps its registry entry.
+- Cancel after the wrapper died stops the surviving runner only when its command line provably belongs to this run (exact arguments); otherwise `E_NOT_OWNED`. The reply reports `nativeStopped`.
+- Rejected commands in the runner's messages come back as `W_NODAL_*` warnings carrying the app's code and text.
+- Collect refuses results whose channels differ from the model's outputs, or whose history does not start at time 0.
+- A linked `native/series` or `native/out` folder is refused; the job never writes through it.
+- Not covered by tests (no stub runner): trip with folder issues in `job.cjs`, and a validate result with only warnings.
