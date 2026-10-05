@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import * as hostFiles from "../src/core/hostFiles";
@@ -285,12 +285,17 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     expect(await proposeConclusion(config, draftRequest)).toMatchObject({ ok: false });
     writeFileSync(draftPath, draftBytes);
     const reviewerFile = join(hostRoot, "reviewer.json");
-    writeHostJson(reviewerFile, { schema: "seed.reviewer/0.1", projectId: receipt.projectId, studyId: receipt.studyId, actor: { kind: "human", name: "Test reviewer" } });
+    writeHostJson(reviewerFile, { schema: "seed.reviewer/0.2", osUser: userInfo().username, projectId: receipt.projectId, studyId: receipt.studyId, actor: { kind: "human", name: "Test reviewer" } });
     expect(() => inspectConclusion(config, undefined, draft.draftId)).toThrow(/REVIEWER/);
     const reviewerBytes = readFileSync(reviewerFile);
     writeHostJson(reviewerFile, { ...JSON.parse(reviewerBytes.toString()), actor: { kind: "agent", name: "forged reviewer" } });
     expect(() => inspectConclusion(config, reviewerFile, draft.draftId)).toThrow(/reviewer/);
     writeHostJson(reviewerFile, { ...JSON.parse(reviewerBytes.toString()), projectId: "foreign-project" });
+    expect(() => inspectConclusion(config, reviewerFile, draft.draftId)).toThrow(/reviewer/);
+    writeHostJson(reviewerFile, { ...JSON.parse(reviewerBytes.toString()), osUser: "someone-else" });
+    expect(() => inspectConclusion(config, reviewerFile, draft.draftId)).toThrow(/another operating-system account/);
+    const { osUser: _dropped, ...withoutAccount } = JSON.parse(reviewerBytes.toString());
+    writeHostJson(reviewerFile, withoutAccount);
     expect(() => inspectConclusion(config, reviewerFile, draft.draftId)).toThrow(/reviewer/);
     writeFileSync(reviewerFile, reviewerBytes);
     const reviewSnapshot = inspectConclusion(config, reviewerFile, draft.draftId);
