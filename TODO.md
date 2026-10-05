@@ -75,7 +75,7 @@ The v0.1 contract is documented and partly implemented. Checkboxes below track t
 
 Exit: open vs run, revisions, material preservation and status semantics documented; [A1], [A3], [A4], [A5], [A6] pass against the fake adapter. Tasks are Next items 1 to 8.
 
-- [ ] E0 exit review: implementation R1 is complete; close the missing oracle, tier-approval and second-writer acceptance cases, review that new code, and obtain the user's contract sign-off.
+- [~] E0 exit review: implementation R1 is complete and the gates, store and second-writer cases are built and Codex-reviewed. **2026-10-05: the user accepted contracts v0.1 provisionally** (not final: wait for the second real adapter, NODAL; changes need a new version and migration; see the status note at the top of docs/contracts.md). Remaining: final contract sign-off after NODAL, an independent design review of the contract against the other apps' plans (optional), the formal E0 exit review.
 
 ## E1: project launcher ([plan 01](docs/plans/01-shell-and-installer.md), [02](docs/plans/02-project-and-materials.md), [04](docs/plans/04-runs-and-scheduling.md))
 
