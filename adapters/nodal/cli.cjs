@@ -426,15 +426,19 @@ async function validate(request, root, reply, fail) {
   }
   const res = await runPython(cfg, [art.abs, "--validate"]);
   const out = parseJson(res.stdout);
+  let refused = false;
   if (res.code === 0 && out && out.ok === true) {
     problems.push(...mapIssues(out.warnings));
   } else if (res.code === 2 && out && out.ok === false) {
+    refused = true;
     const mapped = mapIssues(out.errors);
     // A refusal without a usable reason is still a refusal: never let it pass as valid.
     problems.push(...(mapped.length > 0 ? mapped : [typed("E_APP_FAILED", "", "the runner refused the model without giving a reason", "app-content")]), ...mapIssues(out.warnings));
   } else {
     return fail(appFailed("the NODAL runner could not validate the model", res));
   }
+  // The runner's refusal decides, not the codes it happens to list (a list of only W_ codes is still a refusal).
+  if (refused && !problems.some((p) => p.code.startsWith("E_"))) problems.push(typed("E_APP_FAILED", "", "the runner refused the model; its reasons were only warnings", "app-content"));
   reply({ ok: true, result: { valid: !problems.some((p) => p.code.startsWith("E_")), problems } });
 }
 
@@ -490,13 +494,18 @@ async function run(request, root, reply, fail) {
   }
   const dir = jobsDir(root, true);
   if (!dir) return fail(typed("E_PATH_TRAVERSAL", "/.seed/jobs", "the job registry folder is a link or leaves the project"));
+  // One request id belongs to one run folder: refuse a start that would reuse it elsewhere, before anything is created or started.
+  const bound = readJson(jobIndexPath(dir, jobId));
+  if (bound && bound.runDir !== request.runDir) return fail(typed("E_REQUEST_CONFLICT", "/requestId", "this request id is already bound to another run folder"));
 
   // Reserve the run folder exclusively before anything is started: a concurrent start of the same request sees the
   // reservation, and another request is refused. The record is completed (with the process id) after the start.
   const token = crypto.randomBytes(16).toString("hex");
   const record = { jobId, requestId: request.requestId, pid: null, token, model: modelPath, recordDt: settings.recordDt, commands: settings.commands, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) };
+  const created = { job: false, index: false };
   try {
     fs.writeFileSync(jobJsonPath, json(record), { flag: "wx" });
+    created.job = true;
   } catch (err) {
     if (!err || err.code !== "EEXIST") throw err;
     const existing = readJson(jobJsonPath);
@@ -515,7 +524,8 @@ async function run(request, root, reply, fail) {
         // the failure being reported matters more
       }
     }
-    for (const f of [jobJsonPath, jobIndexPath(dir, jobId)]) {
+    for (const f of [created.job ? jobJsonPath : null, created.index ? jobIndexPath(dir, jobId) : null]) {
+      if (f === null) continue;
       try {
         fs.rmSync(f, { force: true });
       } catch {
@@ -550,6 +560,7 @@ async function run(request, root, reply, fail) {
   if (!Number.isInteger(child.pid)) return rollback(null, typed("E_APP_FAILED", "", "the job did not start"));
   try {
     fs.writeFileSync(jobIndexPath(dir, jobId), json({ runDir: request.runDir }), { flag: "wx" });
+    created.index = true;
     atomicWrite(jobJsonPath, json({ ...record, pid: child.pid }));
   } catch (err) {
     return rollback(child, typed("E_INTERNAL", "", "could not register the job, so it was stopped: " + (err && err.code ? err.code : err)));
@@ -575,13 +586,47 @@ function status(request, root, reply, fail) {
   });
 }
 
-/** The pid in job.json comes from a project file: it is only trusted when the process really is this job's wrapper. */
+/** The arguments of a command line: quoted parts stay whole, anything else splits at spaces. */
+function argvOf(cl) {
+  const out = [];
+  let cur = "";
+  let quoted = false;
+  let any = false;
+  for (const ch of cl) {
+    if (ch === '"') {
+      quoted = !quoted;
+      any = true;
+    } else if (ch === " " && !quoted) {
+      if (any) out.push(cur);
+      cur = "";
+      any = false;
+    } else {
+      cur += ch;
+      any = true;
+    }
+  }
+  if (any) out.push(cur);
+  return out;
+}
+const normPath = (x) => (win ? x.split(BACKSLASH).join("/").toLowerCase() : x);
+
+/** The pid in job.json comes from a project file: it is only trusted when the process really is this job's wrapper:
+ *  this adapter's job.cjs, started with exactly this run folder as an argument (a run folder that merely starts with the same text does not match). */
 function ownsProcess(j, s) {
   if (!s.tokenOk || !Number.isInteger(j.job.pid)) return false;
   const cl = commandLine(j.job.pid);
   if (cl === null) return false;
-  const norm = (x) => (win ? x.split(BACKSLASH).join("/").toLowerCase() : x);
-  return norm(cl).includes("job.cjs") && norm(cl).includes(norm(j.absRunDir));
+  const args = argvOf(cl).map(normPath);
+  return args.includes(normPath(path.join(__dirname, "job.cjs"))) && args.includes(normPath(j.absRunDir));
+}
+
+/** A runner process left behind by a dead wrapper: it is ours only when it runs nodal_studio.run on this run folder's own files. */
+function ownsRunner(j, pid) {
+  const cl = commandLine(pid);
+  if (cl === null) return false;
+  const args = argvOf(cl).map(normPath);
+  const model = normPath(path.join(j.absRunDir, "inputs", j.job.model));
+  return args.includes("nodal_studio.run") && args.includes(model);
 }
 
 async function cancel(request, root, reply, fail) {
@@ -598,9 +643,16 @@ async function cancel(request, root, reply, fail) {
   }
   const s = jobState(j.nativeDir, j.job);
   if (s.lifecycle !== "running") {
-    // already over (or died): nothing to stop, and nothing was cancelled by this call
+    // Already over (or died): nothing was cancelled by this call. But a wrapper that died can leave its runner running: stop it when it
+    // provably is ours, and say plainly when it cannot be shown to be.
     const child = readJson(path.join(j.nativeDir, "child.json"));
-    const nativeStopped = !s.alive && !!child && Number.isInteger(child.pid) && child.pid > 1 && !isAlive(child.pid);
+    const childPid = child && Number.isInteger(child.pid) && child.pid > 1 ? child.pid : null;
+    let nativeStopped = !s.alive && (childPid === null || !isAlive(childPid));
+    if (childPid !== null && isAlive(childPid)) {
+      if (!ownsRunner(j, childPid)) return fail(typed("E_NOT_OWNED", "/jobId", "a process from this job is still running and cannot be shown to be this run's runner"));
+      await killTree(childPid);
+      nativeStopped = await waitDead(childPid, 5000);
+    }
     return reply({ ok: true, result: { jobId: request.jobId, lifecycle: s.lifecycle, cancelled: false, nativeStopped } });
   }
   if (!ownsProcess(j, s)) return fail(typed("E_NOT_OWNED", "/jobId", "the process behind this job is not owned by this run"));
@@ -667,8 +719,21 @@ function collect(request, root, reply, fail) {
   if (typeof endTime !== "number" || results.completion.endTime !== endTime || time[time.length - 1] !== endTime || !Number.isInteger(results.completion.steps) || results.completion.steps < 1) {
     return incomplete("the run did not reach the end of the model's time-step schedule");
   }
+  if (time[0] !== 0) return incomplete("the recorded history does not start at the initial state (t = 0)");
   const channels = Array.isArray(results.channels) ? results.channels : [];
+  const outputs = Array.isArray(snapshotModel.outputs) ? snapshotModel.outputs : [];
   if (channels.length === 0 || channels.length > MAX_CHANNELS) return incomplete("results.json has no recorded channels (the model names no outputs) or too many");
+  // The results must hold exactly the outputs the model asked for, in order, with the same quantity and location.
+  if (channels.length !== outputs.length || channels.some((ch, k) => !ch || !outputs[k] || ch.name !== outputs[k].name || ch.quantity !== outputs[k].quantity || ch.location !== outputs[k].location)) {
+    return incomplete("the recorded channels are not the outputs the model asked for");
+  }
+  const seriesDir = path.join(nativeDir, "series");
+  try {
+    fs.mkdirSync(seriesDir, { recursive: true });
+    if (fs.lstatSync(seriesDir).isSymbolicLink() || !containedBelow(found.abs, seriesDir)) return incomplete("the series folder is a link or leaves the run folder");
+  } catch (err) {
+    return fail(typed("E_INTERNAL", "", "cannot prepare the series folder: " + (err && err.code ? err.code : err)));
+  }
   const names = new Set();
   const runId = path.basename(request.runDir);
   const inputRevisions = [...new Set(job.inputs.map((i) => i.sha256))];
@@ -702,10 +767,16 @@ function collect(request, root, reply, fail) {
   }
 
   const messages = Array.isArray(results.messages) ? results.messages : [];
+  // Every message NODAL marks as a warning is passed on (a rejected command is one, with an E_ code): the original code and text stay in the
+  // message, and the SEED code is always a W_ code.
   const warnings = messages
-    .filter((m) => m && typeof m.code === "string" && m.code.startsWith("W_"))
+    .filter((m) => m && m.level === "warning")
     .slice(0, 20)
-    .map((m) => typed(m.code, "", m.text || m.code, "app-content"));
+    .map((m) => {
+      const raw = typeof m.code === "string" && m.code ? m.code : "NODAL_WARNING";
+      const code = raw.startsWith("W_") ? raw : "W_NODAL_" + raw.replace(/^E_/, "").replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
+      return typed(code, "", raw + ": " + (m.text || raw), "app-content");
+    });
   const index = {
     schema: "seed.results-index/0.1",
     runId,
@@ -722,7 +793,7 @@ function collect(request, root, reply, fail) {
         language: results.engine.language,
         settings: results.settings,
         recording: results.recording,
-        messages: messages.slice(0, 20).map((m) => ({ level: m && m.level, code: m && m.code })),
+        messages: messages.slice(0, 20).map((m) => ({ level: m && m.level, code: m && m.code, text: m && typeof m.text === "string" ? m.text.slice(0, 300) : undefined })),
       },
     },
   };

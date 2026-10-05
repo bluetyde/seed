@@ -8,7 +8,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const [absRunDir, modelAbs, python, repo, token, extraJson] = process.argv.slice(2);
 const nativeDir = path.join(absRunDir, "native");
@@ -26,18 +26,39 @@ const heartbeatPath = path.join(nativeDir, "heartbeat.json");
 let child = null;
 let timer = null;
 
-/** Stop the runner (if started) and leave. The reason is written where it can be found, best effort. */
+/** Stop the runner and everything under it (the Windows virtualenv launcher starts the interpreter as a child), and say whether it is gone. */
+function stopRunner() {
+  if (!child || !Number.isInteger(child.pid) || child.exitCode !== null) return "no runner running";
+  const pid = child.pid;
+  try {
+    if (process.platform === "win32") {
+      const root = (process.env.SystemRoot || process.env.windir || "C:/Windows").split(String.fromCharCode(92)).join("/");
+      spawnSync(root + "/System32/taskkill.exe", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore", timeout: 15000 });
+    } else {
+      process.kill(-process.pid, "SIGKILL"); // this wrapper leads its own process group: the runner and its children share it
+    }
+  } catch {
+    // reported below by checking whether the runner is gone
+  }
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      if (err && err.code === "ESRCH") return "runner stopped";
+      return "runner state unknown";
+    }
+    if (Date.now() >= deadline) return "runner STILL RUNNING (pid " + pid + ")";
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+}
+
+/** Stop the runner (if started) and leave. The reason and what became of the runner are written where they can be found, best effort. */
 function abort(reason) {
   if (timer) clearInterval(timer);
-  if (child && child.exitCode === null) {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // already gone
-    }
-  }
+  const outcome = stopRunner();
   try {
-    fs.writeFileSync(path.join(absRunDir, "native", "job-error.txt"), String(reason).slice(0, 2000) + "\n");
+    atomicWrite(path.join(absRunDir, "native", "job-error.txt"), String(reason).slice(0, 1800) + " (" + outcome + ")" + String.fromCharCode(10));
   } catch {
     // nowhere left to write: the exit status is the only report
   }
@@ -63,6 +84,16 @@ try {
   }
 } catch (err) {
   process.stderr.write("cannot use the run folder: " + (err && err.code) + "\n");
+  process.exit(1);
+}
+
+try {
+  // native/out receives the runner's files: it must be absent or a real folder inside native, never a link.
+  if (fs.existsSync(outDir) || fs.lstatSync(outDir, { throwIfNoEntry: false })) {
+    if (fs.lstatSync(outDir).isSymbolicLink()) throw new Error("native/out is a link");
+  }
+} catch (err) {
+  process.stderr.write("cannot use the output folder: " + (err && err.message) + String.fromCharCode(10));
   process.exit(1);
 }
 
@@ -121,7 +152,7 @@ child.stderr.on("data", (d) => {
 child.on("error", (err) => finish("failed", "NODAL runner error: " + err.message));
 child.on("close", (code, signal) => {
   try {
-    fs.writeFileSync(path.join(nativeDir, "log.txt"), "exit " + code + " signal " + signal + "\n--- stdout\n" + stdout.slice(0, 20000) + "\n--- stderr\n" + stderr.slice(0, 20000) + "\n");
+    atomicWrite(path.join(nativeDir, "log.txt"), "exit " + code + " signal " + signal + "\n--- stdout\n" + stdout.slice(0, 20000) + "\n--- stderr\n" + stderr.slice(0, 20000) + "\n");
   } catch (err) {
     process.stderr.write("could not write log.txt: " + (err && err.code) + "\n");
   }
@@ -136,6 +167,8 @@ child.on("close", (code, signal) => {
     if (code === 0 && folderIssues.length === 0) return finish("finished");
     return finish("failed", "the run folder did not validate: " + (folderIssues[0] ? folderIssues[0].code : "exit " + code));
   }
+  // A run folder that did not validate is a failure whatever the status says.
+  if (reply && reply.ok === true && folderIssues.length > 0) return finish("failed", "the run folder did not validate: " + folderIssues[0].code);
   // The model's own stop-advancement trip ends a run on purpose; it is reported as a trip, never as a result.
   if (reply && reply.ok === true && reply.status === "terminated-by-trip") return finish("tripped", "the run stopped on its stop-advancement trip");
   if (reply && reply.ok === true && reply.status) return finish("failed", "the run ended " + reply.status + (reply.reason ? ": " + reply.reason : ""));

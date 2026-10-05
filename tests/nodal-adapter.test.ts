@@ -344,7 +344,7 @@ describe.skipIf(!haveNodal)("NODAL adapter against the real runner", () => {
           const text = JSON.stringify(res);
           writeFileSync(join(dir, "results.json"), text);
           m.files.find((f: { path: string }) => f.path === "results.json").sha256 = sha256Hex(text);
-        }, "duplicated"],
+        }, "not the outputs the model asked for"],
         ["a channel shorter than the time series (re-hashed)", (dir, m, res) => {
           const k = Object.keys(res.data)[0]!;
           res.data[k] = res.data[k].slice(1);
