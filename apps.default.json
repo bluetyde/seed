@@ -63,6 +63,23 @@
         ],
         "cwd": "{install}/web"
       }
+    },
+    {
+      "id": "feed",
+      "catalog": "feed",
+      "name": "Fuel Performance Studio",
+      "healthPath": "/api/ping",
+      "urlPath": "/",
+      "start": {
+        "command": "node",
+        "args": [
+          "dist/server/server.js"
+        ],
+        "cwd": "{install}",
+        "env": {
+          "FEED_PORT": "{port}"
+        }
+      }
     }
   ]
 }
