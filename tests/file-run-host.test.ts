@@ -124,8 +124,10 @@ async function fixture(delayMs = 10) {
   return { root, project, state, repo, config, file, budget, engineRoot, request: { requestId: "cli1", caseId: "approved", budget } };
 }
 function rows(root: string) { return readFileSync(join(root, "admissions.jsonl"), "utf8").trim().split("\n").map(s => JSON.parse(s)); }
-function cli(file: string, input: unknown, args = ["run"]) {
-  const r = spawnSync(process.execPath, [resolve(__dirname, "../dist/cli/seed.js"), ...args], { input: JSON.stringify(input), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_HOST_CONFIG: file } });
+function cli(file: string, input: unknown, args = ["run"], entry = "seed") {
+  // the human-only verbs run through the separate admin entry and its own configuration variable
+  const env = entry === "admin" ? { ...process.env, SEED_ADMIN_HOST_CONFIG: file } : { ...process.env, SEED_HOST_CONFIG: file };
+  const r = spawnSync(process.execPath, [resolve(__dirname, "../dist/cli/" + entry + ".js"), ...args], { input: JSON.stringify(input), encoding: "utf8", timeout: 30000, env });
   expect(r.error).toBeUndefined(); expect(r.stderr).toBe("");
   expect(r.stdout.trim().split("\n")).toHaveLength(1); return { ...r, reply: JSON.parse(r.stdout) };
 }
@@ -187,12 +189,12 @@ it("human recovery stops a calculation after its supervisor dies, preserving run
     process.kill(owner.pid, "SIGKILL"); await pending;
     const originalJob = record.jobId; record.jobId = "job-unrelated";
     writeHostJson(join(f.project, "runs", record.runId, "run-record.json"), record);
-    const refused = cli(f.file, { requestId: f.request.requestId }, ["recover"]);
+    const refused = cli(f.file, { requestId: f.request.requestId }, ["recover"], "admin");
     expect(refused.status).toBe(2); expect(refused.reply.errors[0].message).toMatch(/authoritative job identity/);
     expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
     expect(rows(f.engineRoot).some(x => x.event.phase === "recovery-request")).toBe(false);
     record.jobId = originalJob; writeHostJson(join(f.project, "runs", record.runId, "run-record.json"), record);
-    const recovered = cli(f.file, { requestId: f.request.requestId }, ["recover"]);
+    const recovered = cli(f.file, { requestId: f.request.requestId }, ["recover"], "admin");
     expect(recovered.status, JSON.stringify(recovered.reply)).toBe(0);
     expect(recovered.reply.state).toBe("recovered-cancelled");
     expect(existsSync(join(f.engineRoot, "lease"))).toBe(false);
@@ -423,4 +425,34 @@ it("journal tampering is detected rather than replaced", () => {
   appendAdmission(root, { value: "before" }); const path = join(root, "admissions.jsonl");
   const tampered = readFileSync(path, "utf8").replace("before", "after"); writeFileSync(path, tampered);
   expect(() => appendAdmission(root, { value: "new" })).toThrow(/hash chain/); expect(readFileSync(path, "utf8")).toBe(tampered);
+});
+
+// Review hardening 2026-10-05: reservation maintenance is a separate human admin entry, not a verb of the agent CLI.
+it("the agent CLI has no release verb; the admin CLI needs its own human configuration", async () => {
+  const f = await fixture(), p = openProject(f.project); if (!p.ok) throw Error("fixture missing");
+  const folder = join(f.state, "desktop-intents", sha256Hex(p.value.manifest.projectId + "\n" + f.project)), reservation = join(folder, "reservation");
+  mkdirSync(reservation, { recursive: true }); writeHostJson(join(reservation, "owner.json"), { pid: 99999999, token: "dead-fixture" });
+  const { Readable } = await import("node:stream");
+  const { runCli } = await import("../src/cli/seed");
+  const { runAdminCli } = await import("../src/cli/admin");
+  const empty = () => Readable.from(["{}"]);
+  // the agent CLI does not know the verb, even with a human configuration
+  f.config.actor = { kind: "human", name: "maintainer" }; saveHostConfiguration(f.file, f.config);
+  const viaAgentCli = await runCli(["release-intent-reservation"], empty(), f.file);
+  expect(viaAgentCli.code).toBe(2); expect((viaAgentCli.reply as any).errors[0].code).toBe("E_VERB_UNKNOWN");
+  expect(existsSync(reservation)).toBe(true);
+  const recoverViaAgentCli = await runCli(["recover"], Readable.from([JSON.stringify({ requestId: "x" })]), f.file);
+  expect((recoverViaAgentCli.reply as any).errors[0].code).toBe("E_VERB_UNKNOWN");
+  // the admin CLI refuses unknown verbs and a missing configuration
+  expect(((await runAdminCli(["run"], empty(), f.file)).reply as any).errors[0].code).toBe("E_VERB_UNKNOWN");
+  expect(((await runAdminCli(["release-intent-reservation"], empty(), undefined)).reply as any).errors[0].code).toBe("E_SETUP_REQUIRED");
+  // an agent identity in the admin configuration is refused and nothing is released
+  f.config.actor = { kind: "agent", name: "bot", model: "m" }; saveHostConfiguration(f.file, f.config);
+  const asAgent = await runAdminCli(["release-intent-reservation"], empty(), f.file);
+  expect(asAgent.code).toBe(2); expect(existsSync(reservation)).toBe(true);
+  // a human configuration releases the dead owner's reservation
+  f.config.actor = { kind: "human", name: "maintainer" }; saveHostConfiguration(f.file, f.config);
+  const done = await runAdminCli(["release-intent-reservation"], empty(), f.file);
+  expect(done).toMatchObject({ code: 0, reply: { ok: true, state: "intent-reservation-released" } });
+  expect(existsSync(reservation)).toBe(false);
 });
