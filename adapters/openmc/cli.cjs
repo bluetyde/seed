@@ -320,7 +320,7 @@ async function validate(request, root, reply, fail) {
   try {
     projectRt = rt(cfg, art.abs);
   } catch (err) {
-    return fail(setupError(err.message));
+    return fail(typed("E_PATH_UNMAPPABLE", "", err.message));
   }
   const res = await runSpec(launchSpec(cfg, ["validate", projectRt]), 120000);
   const out = parseLast(res.stdout);
@@ -403,7 +403,7 @@ async function run(request, root, reply, fail) {
     projectRt = rt(cfg, projectAbs);
     outRt = rt(cfg, path.join(absRunDir, "native", "out"));
   } catch (err) {
-    return fail(setupError(err.message));
+    return fail(typed("E_PATH_UNMAPPABLE", "", err.message));
   }
   const pre = await runSpec(launchSpec(cfg, ["validate", projectRt]), 120000);
   const preOut = parseLast(pre.stdout);

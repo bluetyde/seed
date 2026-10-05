@@ -102,6 +102,12 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 - [~] 2026-10-04: real RAFT bounded run and guarded report export through CLI and MCP; external human header, hash-chained evidence-derived study steps, audited run record hash, scoped admission/oracle evidence, offline input/output copies and HTML/Markdown reports. [Setup and limits](docs/study-report.md). 2026-10-04: desktop welcome lesson panel now runs registered cases, requests guarded cancellation and saves reports through the same host; actual Electron-to-RAFT run/save acceptance passes. Remaining: manual human sign-off, accepted-study corrections and E2 exit review; shared desktop reconnect/history now implemented, native history/recovery remains adapter-specific; general recovered-run export/replay remains planned.
 - [ ] E2 exit review: **[codex]** (R4).
 
+- [ ] 2026-10-05 **Contracts follow-ups** (decisions in [contracts-v0.2-candidates.md](docs/contracts-v0.2-candidates.md), text in [contracts.md section 12](docs/contracts.md)): final sign-off of v0.1 (the user has not said yes yet); v0.2 schema work for items 1 to 4 and 7 (validate takes the run's inputs and settings, oracle entries carry settings, standard result data shapes with units, input roles) with a migration; `describe.oraclePin` revisited for v0.3.
+- [ ] 2026-10-05 Host checks run settings against `describe.parameters` (type, bounds, enum) so adapters need not each re-implement it (contracts.md 12.4).
+- [ ] 2026-10-05 Host-side enforcement of `maxDiskMB` (watch the run folder's size and cancel over the limit) and, later, `maxMemoryMB`; both are advisory today (contracts.md 12.3).
+- [ ] 2026-10-05 OpenMC adapter: oracle entries (an independent analytic case with tolerances fixed first); mesh and dose tallies; use `E_SCRIPT_MISMATCH` instead of `E_STALE_REVISION` for a script that differs from the regeneration.
+- [ ] 2026-10-05 Cross-app links, not started: OpenMC heating into FEED, NODAL coolant into FEED.
+
 ## Next desktop lesson work (in order)
 
 - [x] 2026-10-04 [Plan 11: report tabs](docs/plans/11-report-tabs.md): auto-open successful exports in isolated SEED tabs; trusted report receipts, safe offline viewing and independent tab lifecycle.
