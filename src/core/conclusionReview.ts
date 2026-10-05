@@ -5,8 +5,10 @@ import {
   readdirSync,
   realpathSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
+import { userInfo } from "node:os";
 import { isAbsolute, join, dirname, relative } from "node:path";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { claimsOf } from "./conclusionDraft";
@@ -88,6 +90,31 @@ export function listConclusionDrafts(file: string, reportId: string) {
     .sort((a, b) => b.time.localeCompare(a.time));
 }
 
+/**
+ * A reviewer file names a person, but a file cannot prove who is at the keyboard. Two cheap checks make it harder to
+ * misuse: the file names the operating-system account allowed to use it (a copy made for another account fails),
+ * and on POSIX it must belong to the running account and not be writable by group or others. The native
+ * confirmation dialog is what a person actually answers. Returns the first problem, or null.
+ */
+export function reviewerSetupProblem(
+  reviewer: { osUser?: unknown },
+  file: { uid: number; mode: number },
+  running: { username: string; uid?: number; platform?: string },
+): string | null {
+  const platform = running.platform ?? process.platform;
+  const norm = (s: string) => (platform === "win32" ? s.toLowerCase() : s);
+  if (typeof reviewer.osUser !== "string" || !reviewer.osUser.trim() || reviewer.osUser.length > 256)
+    return "reviewer setup must name the operating-system account (osUser)";
+  if (norm(reviewer.osUser) !== norm(running.username))
+    return "reviewer setup belongs to another operating-system account";
+  if (platform !== "win32") {
+    if (running.uid === undefined || file.uid !== running.uid)
+      return "reviewer setup file is not owned by the running account";
+    if ((file.mode & 0o022) !== 0) return "reviewer setup file is writable by group or others";
+  }
+  return null;
+}
+
 /** Trusted setup selects the reviewer; the renderer never supplies their identity. */
 export function inspectConclusion(file: string, reviewerFile: string | undefined, draftId: string) {
   const h = context(file),
@@ -101,8 +128,8 @@ export function inspectConclusion(file: string, reviewerFile: string | undefined
   const reviewerBytes = readFileSync(reviewerFile),
     reviewer = JSON.parse(reviewerBytes.toString());
   if (
-    Object.keys(reviewer).sort().join() !== "actor,projectId,schema,studyId" ||
-    reviewer.schema !== "seed.reviewer/0.1" ||
+    Object.keys(reviewer).sort().join() !== "actor,osUser,projectId,schema,studyId" ||
+    reviewer.schema !== "seed.reviewer/0.2" ||
     reviewer.projectId !== d.projectId ||
     reviewer.studyId !== d.studyId ||
     !reviewer.actor ||
@@ -113,6 +140,13 @@ export function inspectConclusion(file: string, reviewerFile: string | undefined
     reviewer.actor.name.length > 256
   )
     throw Error("invalid scoped human reviewer setup");
+  const setupStat = statSync(reviewerFile);
+  const setupProblem = reviewerSetupProblem(
+    reviewer,
+    { uid: setupStat.uid, mode: setupStat.mode },
+    { username: userInfo().username, uid: process.getuid?.() },
+  );
+  if (setupProblem) throw Error(setupProblem);
   readRegisteredReport(file, d.reportId);
   if (!Array.isArray(d.sourceFiles) || d.sourceFiles.length !== 3) throw Error("invalid draft source files");
   const bytes = d.sourceFiles.map((f: any) => {
