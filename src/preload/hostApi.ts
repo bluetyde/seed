@@ -2,6 +2,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 const api: HostApi = {
+  selectLesson: id => ipcRenderer.send("lesson:select", id),
+  lessonHistoryPage: offset => ipcRenderer.send("lesson:historyPage", offset),
   openLessonReport: () => ipcRenderer.send("lesson:openReport"),
   runLesson: (caseId) => ipcRenderer.send("lesson:run", caseId),
   cancelLesson: () => ipcRenderer.send("lesson:cancel"),

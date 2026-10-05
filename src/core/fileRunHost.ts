@@ -110,6 +110,12 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           audit: async event => { unchanged(); audit("decision", event); },
         });
         let busy = false; let lastNonce = ""; let lastFailure = ""; let attempt: Promise<unknown> | undefined; let controlError: unknown;
+        const heartbeat = setInterval(() => {
+          try {
+            if (readHostJson(join(lease, "owner.json")).token === owner.token) writeHostJson(join(lease, "heartbeat.json"),
+              { token: owner.token, pid: owner.pid, requestId: (request as any)?.requestId, configHash, time: Date.now() });
+          } catch { /* observation becomes stale; no change to calculation ownership */ }
+        }, 1000);
         const timer = setInterval(() => {
           if (busy || !existsSync(join(lease, "cancel.json"))) return;
           try {
@@ -142,7 +148,7 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           if (outcome.ok && ["failed", "interrupted"].includes(outcome.state)) writeHostJson(join(lease, "owner.json"), { ...owner, retain: true });
           await attempt; if (controlError) throw controlError;
         }
-        finally { clearInterval(timer); }
+        finally { clearInterval(timer); clearInterval(heartbeat); }
         dispatched = outcome;
         let replayOf: string | undefined;
         if (outcome.ok && outcome.replayed) {

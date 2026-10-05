@@ -59,6 +59,8 @@ type MenuAction =
   | "nextTab" | "prevTab" | "editRegistry" | "reloadRegistry" | "about" | "chooseInstallRoot" | "checkUpdates";
 
 interface HostApi {
+  selectLesson(requestId: string): void;
+  lessonHistoryPage(offset: number): void;
   openLessonReport(): void;
   runLesson(caseId: string): void;
   cancelLesson(): void;
@@ -88,4 +90,5 @@ interface Window {
   host: HostApi;
 }
 
-interface HostLesson { cases: string[]; busy: boolean; cancellable?: boolean; canSave?: boolean; reportId?: string; message: string }
+interface HostLesson { cases: string[]; busy: boolean; blocked?: boolean; history?: HostLessonHistory[]; historyOffset?: number; historyTotal?: number; cancellable?: boolean; canSave?: boolean; reportId?: string; message: string }
+interface HostLessonHistory { requestId: string; adapterId?: string; caseId: string; time: string; status: string; canSave?: boolean; cancellable?: boolean; reportId?: string; reportError?: string }
