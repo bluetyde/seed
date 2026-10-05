@@ -18,7 +18,7 @@ project Python. So:
 
 ## Where things run
 
-- Regeneration: Windows host (Node + Playwright + Edge/Chromium, as the browser tests).
+- Regeneration: SEED's own Electron (hidden window, network blocked); no extra Chromium and no Playwright at runtime. Verified byte-identical to Edge/Playwright (Chromium 152 vs 154). A missing Electron is `E_SETUP_REQUIRED`, never a skipped check.
 - Transport: OpenMC and nuclear data live in WSL (`Ubuntu`, env `openmc-mcnp`, data `/root/nuclear_data`), as Studio itself runs.
   The job wrapper starts the run there; ownership and cancel must prove the WSL process is this job's (FEED's solver is the nearest
   precedent: `adapters/feed`).
@@ -34,4 +34,3 @@ source in a void or a thin absorber) with tolerances fixed before any run.
 
 1. WSL job identity and kill: FEED's answer is that the app owns a runner with its own `run` and `cancel` verbs that handle the distro (manifest written last, hashed files, process-group flag file). Proposed here too: a headless runner in the OpenMC repo, `python -m openmc_studio.headless run MODEL.py --out DIR --seed N --json` plus `cancel`, run inside WSL by the job wrapper, writing a hashed manifest and a results extract from the statepoint. The adapter then repeats the FEED cancel sequence (stop the solver first, then prove ownership of the Windows-side processes).
 2. Which tallies and score types the first slice supports.
-3. Whether Edge/Playwright is a hard requirement of `validate` on a machine, or SEED bundles a Chromium for it (a missing browser must give a setup error, not a skipped check).
