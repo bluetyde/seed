@@ -35,6 +35,24 @@ export type DispatcherOptions = {
 
 // One process hosts the dispatcher. Separate hosts need a shared engine lease before transports ship.
 const occupied = new Set<string>();
+
+/**
+ * What went wrong, for the caller, without host paths: the error name or code and a short first line of its
+ * message with absolute paths replaced. The caller learns the stage and the kind of failure.
+ */
+export function describeCause(e: unknown): string {
+  const err = e as { code?: unknown; name?: unknown; message?: unknown };
+  const kind = typeof err?.code === "string" ? err.code : typeof err?.name === "string" ? err.name : "Error";
+  const text = typeof err?.message === "string" ? err.message : "";
+  const clean = text
+    .split("\n")[0]!
+    .replace(/[A-Za-z]:[^\s'"]*/g, "<path>")
+    .replace(/(^|[\s'"(])\/[^\s'"]*/g, "$1<path>")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .slice(0, 160);
+  return clean ? `${kind}: ${clean}` : kind;
+}
+
 function refusal(message: string, code = "E_NOT_PERMITTED"): RunOutcome {
   return { ok: false, errors: [{ code, field: "", message, source: "seed" }] };
 }
@@ -93,10 +111,13 @@ export class RunDispatcher {
     // Reserve before awaiting loaders or audit, so two dispatchers cannot both pass the gate.
     if (occupied.has(o.engine)) return refusal("one active case per engine", "E_BUDGET_EXCEEDED");
     occupied.add(o.engine);
+    let stage = "loading the registered case";
     try {
       const locked = await withProjectLockAsync(o.manager.projectRoot, async (): Promise<RunOutcome> => {
         const registered = structuredClone(await o.loadCase(request.caseId));
+        stage = "loading the host authority";
         const authority = await o.loadAuthority();
+        stage = "evaluating the gate";
         // Preserve the trusted clock callback; all mutable policy/pin data gets a private snapshot.
         const now = authority.context.now;
         const a = structuredClone({ ...authority, context: { ...authority.context, now: undefined } });
@@ -145,6 +166,7 @@ export class RunDispatcher {
           },
           { ...a.context, now, pinsChanged, oracleBlocked },
         );
+        stage = "recording the gate decision";
         await o.audit(
           structuredClone({
             requestId: request.requestId,
@@ -155,6 +177,7 @@ export class RunDispatcher {
           }),
         );
         if (!decision.allow) return { ok: false, errors: decision.errors };
+        stage = "starting the run";
         return this.#manager.start({
           requestId: request.requestId,
           actor: structuredClone(o.actor),
@@ -178,8 +201,8 @@ export class RunDispatcher {
         });
       });
       return locked.ok ? locked.value : { ok: false, errors: locked.errors };
-    } catch {
-      return refusal("could not load authority, record the gate decision, or dispatch the run", "E_INTERNAL");
+    } catch (e) {
+      return refusal(`run not started: failed while ${stage} (${describeCause(e)})`, "E_INTERNAL");
     } finally {
       occupied.delete(o.engine);
     }
