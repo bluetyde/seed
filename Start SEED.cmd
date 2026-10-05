@@ -10,15 +10,25 @@ node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)
 if errorlevel 1 goto prerequisites
 if not exist "node_modules\.bin\tsc.cmd" goto setup
 if not exist "node_modules\.bin\electron.cmd" goto setup
+node "scripts\deps-stamp.cjs" check
+if errorlevel 1 goto setup_changed
 goto launch
+
+:setup_changed
+echo SEED's dependency list changed since the last install, or the last install was not recorded.
+echo Installing from the lockfile keeps the installed packages matching SEED's code.
+goto setup_ask
 
 :setup
 echo SEED needs to install its dependencies before the first launch.
+:setup_ask
 echo This uses the package lockfile and may need an Internet connection.
 set "seed_install="
 set /p "seed_install=Install now? [Y/N]: "
 if /i not "%seed_install%"=="Y" goto declined
 call npm.cmd ci --include=dev --no-audit --no-fund
+if errorlevel 1 goto install_error
+node "scripts\deps-stamp.cjs" write
 if errorlevel 1 goto install_error
 
 :launch
@@ -38,7 +48,7 @@ goto failed
 
 :start_error
 echo SEED could not start or exited with an error. Review the output above.
-echo If dependencies changed after an update, run npm ci --include=dev in this folder.
+echo If SEED still fails after an update, run npm ci --include=dev in this folder.
 goto failed
 
 :declined
