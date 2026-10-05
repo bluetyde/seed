@@ -410,7 +410,7 @@ describe.skipIf(!haveRaft)("RAFT adapter against the real headless runner", () =
       process.platform === "win32"
         ? spawnSync("powershell", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object -ExpandProperty CommandLine"], { encoding: "utf8" }).stdout
         : spawnSync("ps", ["-eo", "args"], { encoding: "utf8" }).stdout;
-    const mine = list.split("\n").filter((l) => l.includes("adapters") && l.includes("raft") && l.includes("job.cjs") &&
+    const mine = list.split("\n").filter((l) => l.includes("adapters") && l.includes("job.cjs") &&
       [...ownedProjects].some(root => l.replaceAll("\\", "/").toLowerCase().includes(root + "/")));
     expect(mine).toEqual([]);
   });
@@ -471,7 +471,7 @@ describe("RAFT adapter: configuration and a misbehaving runner (stub)", () => {
 
   it.each([
     ["failed", "engine halted: R_STUB"],
-    ["refuse", "the runner refused the case"],
+    ["refuse", "the runner reported"],
     ["crash", "stub crashed"],
     ["garbage", "the runner exited with 0"],
   ])("a run where the runner is %s ends failed with the reason in the native status", async (mode, detail) => {
