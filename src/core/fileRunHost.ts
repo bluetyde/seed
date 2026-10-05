@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import Ajv2020 from "ajv/dist/2020";
@@ -203,6 +203,25 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           audit: async event => {
             unchanged();
             audit("decision", event);
+          },
+          // The caller's reply carries only a stage and a failure class; the full cause stays here, in the host's
+          // state folder, which clients cannot reach.
+          onInternalError: (stage, cause) => {
+            try {
+              const e = cause as { code?: unknown; name?: unknown; message?: unknown };
+              appendFileSync(
+                join(engineRoot, "diagnostics.jsonl"),
+                JSON.stringify({
+                  time: new Date().toISOString(),
+                  project: p.value.manifest.projectId,
+                  stage,
+                  kind: String(e?.code ?? e?.name ?? "Error").slice(0, 80),
+                  message: String(e?.message ?? cause).slice(0, 1000),
+                }) + "\n",
+              );
+            } catch {
+              // diagnostics are best effort: a failure to write one must not change the refusal
+            }
           },
         });
         let busy = false;
