@@ -231,6 +231,16 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       expect(readdirSync(join(p.root, "runs")).some(r => existsSync(join(p.root, "runs", r, "native", "job.json")))).toBe(false);
     }, 300000);
 
+    it("the run verb itself refuses an invalid model before reserving anything (not only the validate verb)", async () => {
+      const p = praProject("pra-cycle");
+      mkdirSync(join(p.root, "runs", "direct", "inputs", "models"), { recursive: true });
+      writeFileSync(join(p.root, "runs", "direct", "inputs", p.modelPath), readFileSync(join(p.root, p.modelPath)));
+      const r = okReply(await ask(p.root, { verb: "run", requestId: "req-direct-invalid", snapshot: { inputs: p.inputs }, runDir: "runs/direct", budget, settings: p.settings }));
+      expect(r.ok).toBe(false);
+      expect(r.errors[0]).toMatchObject({ code: "E_CYCLE", source: "app-content" });
+      expect(existsSync(join(p.root, "runs", "direct", "native", "job.json"))).toBe(false);
+    }, 300000);
+
     it("cancel stops SCRAM inside WSL through the runner and the Windows processes, and collects nothing", async () => {
       const p = praProject("pra-vote-exact", m => slowTree(m));
       const mgr = manager(p.root);
@@ -247,6 +257,8 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       expect(isAlive(child.pid)).toBe(false);
       expect(existsSync(join(p.root, "runs", runId, "results.json"))).toBe(false);
       expect(existsSync(join(native, "out", "pra", "results.json"))).toBe(false);
+      // The runner itself was asked to cancel (it leaves its request in the output folder): SCRAM in WSL is not stopped by killing Windows processes.
+      expect(existsSync(join(native, "out", "cancel.requested"))).toBe(true);
     }, 300000);
 
     it("collect refuses a run whose files, snapshot or result do not hold up", async () => {
