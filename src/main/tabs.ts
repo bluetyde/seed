@@ -1,16 +1,22 @@
 // The tab model: which tabs are open and which is active. Pure data, no Electron, so it is unit-tested directly.
 // There is at most one tab per app and one Welcome tab (the page the + button opens).
 
-export type TabKind = "welcome" | "app";
+export type TabKind = "welcome" | "app" | "report";
 
 export interface Tab {
   id: string;
   kind: TabKind;
   appId?: string;
+  reportId?: string;
   title: string;
 }
 
 export class TabModel {
+  openReport(reportId: string, title: string): Tab {
+    const existing = this.tabs.find(t => t.kind === "report" && t.reportId === reportId);
+    if (existing) { this.activeId = existing.id; return existing; }
+    return this.add({ id: `report:${reportId}`, kind: "report", reportId, title });
+  }
   tabs: Tab[] = [];
   activeId: string | undefined;
 

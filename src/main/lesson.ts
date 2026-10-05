@@ -10,7 +10,16 @@ export class Lesson {
   private state: HostLesson = { cases: [], busy: false, message: "Set up a trusted lesson configuration to run a calculation here." };
   private requestId?: string;
   constructor(private config: string | undefined, private header: string | undefined, private changed: () => void,
-    private runCase = supervisedRun) {}
+    private runCase = supervisedRun, private openReport: (id: string) => Promise<void> = async () => {}) {}
+  async openSaved(): Promise<void> {
+    if (!this.state.reportId) return;
+    try {
+      await this.openReport(this.state.reportId);
+      if (this.state.message.startsWith("Report saved, but could not open:")) this.state.message = "Report opened. No scientific conclusion has been accepted.";
+    }
+    catch (e) { this.state.message = `Report saved, but could not open: ${e instanceof Error ? e.message : String(e)}. Use Open report to retry.`; }
+    this.changed();
+  }
   snapshot(): HostLesson {
     try {
       this.state.cases = this.config ? Object.keys(validateHostConfiguration(readHostJson(this.config)).cases) : [];
@@ -44,7 +53,7 @@ export class Lesson {
     try {
       const reply = await exportStudyReport(this.config, this.header, { requestId: this.requestId });
       this.state.message = reply.ok ? `Report saved: ${reply.report.html}\nNo scientific conclusion has been accepted.` : reply.errors.map(e => e.message).join("\n");
-      if (reply.ok) this.state.canSave = false;
+      if (reply.ok) { this.state.canSave = false; this.state.reportId = reply.reportId; await this.openSaved(); }
     } finally { this.state.busy = false; this.changed(); }
   }
 }

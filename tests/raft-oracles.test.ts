@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ import { makeHeader } from "./helpers/studyFixtures";
 import { verifyStudyLog } from "../src/core/semantic";
 import { exportStudyReport } from "../src/core/studyReportHost";
 import { Lesson } from "../src/main/lesson";
+import { readRegisteredReport } from "../src/core/reportReceipt";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
@@ -246,6 +247,27 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     await desktop.save();
     expect(desktop.snapshot().message).toContain("Report saved:");
     expect(desktop.snapshot().canSave).toBe(false);
+    const desktopId = desktop.snapshot().reportId!;
+    const viewed = readRegisteredReport(config, desktopId);
+    expect(viewed.html.toString()).toContain("UNVERIFIED");
+    expect(() => readRegisteredReport(config, "../report.html")).toThrow();
+    const receipts = join(state, "reports");
+    const receipt = JSON.parse(readFileSync(join(receipts, desktopId + ".json"), "utf8"));
+    for (const file of receipt.files) {
+      const path = join(project, file.path), bytes = readFileSync(path);
+      writeFileSync(path, Buffer.concat([bytes, Buffer.from(" altered")]));
+      expect(() => readRegisteredReport(config, desktopId)).toThrow(/changed/);
+      writeFileSync(path, bytes);
+    }
+    const pendingReceipt = join(receipts, "pending-" + sha256Hex(project + "\n" + receipt.requestId) + ".json");
+    renameSync(join(receipts, desktopId + ".json"), pendingReceipt);
+    const pendingHtml = join(project, receipt.files[0].path), originalHtml = readFileSync(pendingHtml);
+    writeFileSync(pendingHtml, "edited after publication");
+    expect((await exportStudyReport(config, headerFile, { requestId: receipt.requestId })).ok).toBe(false);
+    expect(existsSync(pendingReceipt)).toBe(true);
+    writeFileSync(pendingHtml, originalHtml);
+    expect(await exportStudyReport(config, headerFile, { requestId: receipt.requestId })).toMatchObject({ ok: true, reportId: desktopId });
+    expect(existsSync(pendingReceipt)).toBe(false);
 
     if (process.env.SEED_GUI_ACCEPTANCE === "1") {
       const { _electron } = await import("@playwright/test");
@@ -261,8 +283,38 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
         await page.locator('[data-lesson-case="approved"]').click();
         await page.getByRole("button", { name: "Save study report" }).waitFor({ timeout: 60000 });
         await page.getByRole("button", { name: "Save study report" }).click();
-        await page.waitForFunction(() => document.querySelector("[data-lesson-status]")?.textContent?.includes("Report saved:"), { timeout: 30000 });
+        let reportPage = gui.windows().find(p => p.url().startsWith("seed-report://"));
+        for (let n = 0; !reportPage && n < 100; n++) { await new Promise(r => setTimeout(r, 100)); reportPage = gui.windows().find(p => p.url().startsWith("seed-report://")); }
+        if (!reportPage) throw Error("saved report tab missing");
+        expect(await reportPage.locator("body").textContent()).toContain("UNVERIFIED");
+        expect(await reportPage.evaluate(() => typeof (window as any).host)).toBe("undefined");
+        expect(await reportPage.evaluate(() => fetch("https://example.invalid/report-test").then(() => false, () => true))).toBe(true);
+        const bar = gui.windows().find(p => p.url().endsWith("/renderer/index.html"))!;
+        await bar.locator('[data-tab="welcome"]').click();
+        expect(await page.locator("[data-lesson-status]").textContent()).toContain("Report saved:");
         expect(await page.locator("[data-lesson-status]").textContent()).toContain("No scientific conclusion has been accepted.");
+        const guiId = (await page.evaluate(() => window.host.getState())).lesson.reportId!;
+        const guiReceipt = JSON.parse(readFileSync(join(state, "reports", guiId + ".json"), "utf8"));
+        const guiHtmlPath = join(project, guiReceipt.files[0].path), guiHtmlBytes = readFileSync(guiHtmlPath);
+        writeFileSync(guiHtmlPath, "corrupt report");
+        await page.getByRole("button", { name: "Open report", exact: true }).click();
+        await page.waitForFunction(() => document.querySelector("[data-lesson-status]")?.textContent?.includes("could not open"));
+        expect((await page.evaluate(() => window.host.getState())).lesson.reportId).toBe(guiId);
+        writeFileSync(guiHtmlPath, guiHtmlBytes);
+        await page.getByRole("button", { name: "Open report", exact: true }).click();
+        expect(gui.windows().filter(p => p.url().startsWith("seed-report://"))).toHaveLength(1);
+        await bar.locator('[data-tab="welcome"]').click();
+        await page.locator('[data-lesson-case="approved"]').click();
+        await page.getByRole("button", { name: "Save study report" }).waitFor({ timeout: 60000 });
+        await page.getByRole("button", { name: "Save study report" }).click();
+        for (let n = 0; n < 100 && gui.windows().filter(p => p.url().startsWith("seed-report://")).length < 2; n++) await new Promise(r => setTimeout(r, 100));
+        expect(gui.windows().filter(p => p.url().startsWith("seed-report://"))).toHaveLength(2);
+        const openId = new URL(reportPage.url()).hostname;
+        await bar.locator(`[data-close="report:${openId}"]`).click();
+        await bar.locator('[data-tab="welcome"]').click();
+        await page.getByRole("button", { name: "Open report", exact: true }).click();
+        for (let n = 0; n < 100 && !gui.windows().some(p => p.url().startsWith("seed-report://")); n++) await new Promise(r => setTimeout(r, 100));
+        expect(gui.windows().filter(p => p.url().startsWith("seed-report://"))).toHaveLength(1);
       } finally { await gui.close(); }
     }
 
