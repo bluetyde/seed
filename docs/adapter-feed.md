@@ -42,3 +42,20 @@ All are `verification: "unverified"` until an oracle set covers them. The FEED o
 - A cancel that arrives in the instant between the runner starting and the solver run being registered finds no active solver run and kills only the Node processes; the solver would then end at the runner's time limit. Not yet tested.
 - Windows only for the real solver (WSL). The stub tests run anywhere.
 - Mesh is part of the case; there is no refinement study through SEED yet.
+
+## Codex review (2026-10-05)
+
+Two auditors (security-boundary-verifier, silent-failure-hunter) reviewed the adapter. Ten distinct findings, all confirmed by reading the code; all fixed on this branch.
+
+| Finding | Fix |
+|---|---|
+| `native/series` or an existing `native/log.txt` could be a link, so collect or the wrapper wrote outside the run folder | collect refuses a linked or escaping series folder; the wrapper removes `log.txt` before writing it |
+| Ownership by substring: `runs/r-10` passed for `runs/r-1`; the token was only compared between two project files | the process command line must hold this adapter's `job.cjs`, the run folder and this job's token as whole arguments |
+| A second launch with an already used request id deleted the first job's registry entry | the index is reserved before spawning; rollback removes only what this invocation created; the clash is `E_REQUEST_CONFLICT` |
+| `ok:true, cancelled:false` from the runner was taken as "solver stopped" | with nothing registered, the wrapper and runner are killed and the runner is asked again; that answer must be confirmed too |
+| Cancel of a failed or died job inferred `nativeStopped` from two pids | the runner is asked to stop the solver; `nativeStopped` needs its confirmation |
+| Rollback removed the records even when the process could not be shown dead | records are kept and the failure says so |
+| A result with no check verdicts or no domain verdict passed and was labelled `in-domain` | both are required, else `E_OUTPUT_INCOMPLETE` |
+| A reservation without a process id was returned as a running job | `E_REQUEST_CONFLICT`, retry |
+
+Known remaining gap: if the runner dies in the instant after its WSL call starts a solver but before `active-run.json` is written, that solver ends at its time limit (the run script's own timeout). Not reproducible with the current timings; no test.

@@ -107,7 +107,9 @@ child.stderr.on("data", (d) => {
 child.on("error", (err) => finish("failed", "FEED runner error: " + err.message));
 child.on("close", (code, signal) => {
   try {
-    fs.writeFileSync(path.join(nativeDir, "log.txt"), "exit " + code + " signal " + signal + "\n--- stdout\n" + stdout.slice(0, 20000) + "\n--- stderr\n" + stderr.slice(0, 20000) + "\n");
+    // never write through an existing link or hard link: replace the name itself
+    fs.rmSync(path.join(nativeDir, "log.txt"), { force: true });
+    fs.writeFileSync(path.join(nativeDir, "log.txt"),  "exit " + code + " signal " + signal + "\n--- stdout\n" + stdout.slice(0, 20000) + "\n--- stderr\n" + stderr.slice(0, 20000) + "\n");
   } catch (err) {
     process.stderr.write("could not write log.txt: " + (err && err.code) + "\n");
   }
