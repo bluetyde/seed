@@ -332,6 +332,19 @@ describe.skipIf(!haveNodal)("NODAL adapter against the real runner", () => {
           const entry = m.files.find((f: { path: string }) => f.path === "results.json");
           entry.sha256 = sha256Hex(text);
         }, "end of the model's time-step schedule"],
+        ["a short series with the end time still claimed (re-hashed)", (dir, m, res) => {
+          res.time = res.time.slice(0, 3);
+          for (const k of Object.keys(res.data)) res.data[k] = res.data[k].slice(0, 3);
+          const text = JSON.stringify(res);
+          writeFileSync(join(dir, "results.json"), text);
+          m.files.find((f: { path: string }) => f.path === "results.json").sha256 = sha256Hex(text);
+        }, "end of the model's time-step schedule"],
+        ["two channels with one name (re-hashed)", (dir, m, res) => {
+          res.channels.push({ ...res.channels[0] });
+          const text = JSON.stringify(res);
+          writeFileSync(join(dir, "results.json"), text);
+          m.files.find((f: { path: string }) => f.path === "results.json").sha256 = sha256Hex(text);
+        }, "duplicated"],
         ["a channel shorter than the time series (re-hashed)", (dir, m, res) => {
           const k = Object.keys(res.data)[0]!;
           res.data[k] = res.data[k].slice(1);
@@ -356,6 +369,18 @@ describe.skipIf(!haveNodal)("NODAL adapter against the real runner", () => {
         expect(r.errors[0]?.message, what).toContain(message);
       }
     }, 240000);
+
+    it("collect refuses a run whose snapshot copy of the model was changed after it ran", async () => {
+      const p = nodalProject("rising-pipe");
+      const out = await manager(p.root).start({ requestId: "req-swap", actor, artifact: p.artifact, inputs: p.inputs, budget, settings: p.settings });
+      if (!out.ok) throw new Error("refused");
+      const snap = join(p.root, "runs", out.runId, "inputs", p.modelPath);
+      writeFileSync(snap, readFileSync(snap, "utf8") + " ");
+      const jobId = read(join(p.root, "runs", out.runId, "native", "job.json")).jobId;
+      const r = okReply(await ask(p.root, { verb: "collect", jobId, runDir: `runs/${out.runId}` }));
+      expect(r.ok).toBe(false);
+      expect(r.errors[0]?.message).toContain("snapshot changed");
+    }, 120000);
 
     it("collect and status bind the job to its run folder, and the same request is idempotent", async () => {
       const a = nodalProject("rising-pipe");
