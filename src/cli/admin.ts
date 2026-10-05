@@ -1,4 +1,5 @@
 import type { Readable } from "node:stream";
+import { recoverHostCalculation } from "../core/hostControl";
 import { releaseLessonReservation } from "../core/lessonHistory";
 import { readRequest } from "./seed";
 
@@ -7,7 +8,7 @@ import { readRequest } from "./seed";
  * It reads its own configuration variable, SEED_ADMIN_HOST_CONFIG, so an agent's SEED_HOST_CONFIG never reaches it,
  * and the operation itself still requires the configured actor to be a human.
  */
-export const ADMIN_VERBS = ["release-intent-reservation"];
+export const ADMIN_VERBS = ["release-intent-reservation", "recover"];
 
 export async function runAdminCli(
   argv: string[],
@@ -23,10 +24,16 @@ export async function runAdminCli(
     },
   });
   if (argv.length !== 1 || !ADMIN_VERBS.includes(argv[0]!)) {
-    return failure(`usage: node dist/cli/admin.js ${ADMIN_VERBS.join("|")}; request JSON on stdin`, "E_VERB_UNKNOWN");
+    return failure(
+      `usage: node dist/cli/admin.js ${ADMIN_VERBS.join("|")}; request JSON on stdin`,
+      "E_VERB_UNKNOWN",
+    );
   }
   if (!hostConfig) {
-    return failure("set SEED_ADMIN_HOST_CONFIG to a host configuration whose actor is a human", "E_SETUP_REQUIRED");
+    return failure(
+      "set SEED_ADMIN_HOST_CONFIG to a host configuration whose actor is a human",
+      "E_SETUP_REQUIRED",
+    );
   }
   let request: unknown;
   try {
@@ -34,7 +41,10 @@ export async function runAdminCli(
   } catch (e) {
     return failure(e instanceof Error ? e.message : "invalid input");
   }
-  const outcome = releaseLessonReservation(hostConfig, request);
+  const outcome =
+    argv[0] === "recover"
+      ? await recoverHostCalculation(hostConfig, request)
+      : releaseLessonReservation(hostConfig, request);
   return { code: outcome.ok ? 0 : 2, reply: { schema: "seed.cli-reply/0.1", ...outcome } };
 }
 

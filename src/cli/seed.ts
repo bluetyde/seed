@@ -1,6 +1,6 @@
 import type { Readable } from "node:stream";
 import { runFromHostFile } from "../core/fileRunHost";
-import { recoverHostCalculation, requestHostCancellation } from "../core/hostControl";
+import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { proposeConclusion } from "../core/conclusionDraft";
 
@@ -55,9 +55,9 @@ export async function runCli(
       errors: [{ code, field: "", message, source: "seed" }],
     },
   });
-  if (argv.length !== 1 || !["run", "cancel", "recover", "report", "draft-conclusion"].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "cancel", "report", "draft-conclusion"].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|cancel|recover|report|draft-conclusion; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|cancel|report|draft-conclusion; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   if (!hostConfig) return failure("set SEED_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
@@ -74,9 +74,7 @@ export async function runCli(
         ? await exportStudyReport(hostConfig, process.env.SEED_STUDY_HEADER, request)
         : argv[0] === "cancel"
           ? requestHostCancellation(hostConfig, request)
-          : argv[0] === "recover"
-            ? await recoverHostCalculation(hostConfig, request)
-            : await runFromHostFile(hostConfig, request);
+          : await runFromHostFile(hostConfig, request);
   return {
     code: !outcome.ok ? 2 : argv[0] !== "run" || outcome.state === "completed" ? 0 : 1,
     reply: { schema: "seed.cli-reply/0.1", ...outcome },
