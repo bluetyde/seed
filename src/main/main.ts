@@ -406,6 +406,8 @@ app.whenReady().then(() => {
   ipcMain.on("lesson:cancel", (e) => { if (e.sender === pageView.webContents) lesson.cancel(); });
   ipcMain.on("lesson:save", (e) => { if (e.sender === pageView.webContents) void lesson.save(); });
   ipcMain.on("lesson:openReport", (e) => { if (e.sender === pageView.webContents) void lesson.openSaved(); });
+  ipcMain.on("lesson:select", (e, id: unknown) => { if (e.sender === pageView.webContents) lesson.select(id); });
+  ipcMain.on("lesson:historyPage", (e, offset: unknown) => { if (e.sender === pageView.webContents) lesson.page(offset); });
   ipcMain.on("tab:openApp", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void openApp(id); });
   ipcMain.on("tab:new", (e) => { if (checkSender(e)) menuAction("newTab"); });
   ipcMain.on("tab:activate", (e, id: unknown) => { if (checkSender(e) && typeof id === "string" && tabs.activate(id)) refresh(); });
@@ -429,6 +431,8 @@ app.whenReady().then(() => {
 
   tabs.openWelcome();
   refresh();
+  const observation = setInterval(() => { if (!quitting && !win.isDestroyed() && tabs.activeId === "welcome" && !win.isMinimized()) refresh(); }, 2000);
+  app.once("will-quit", () => clearInterval(observation));
 });
 
 app.on("activate", () => {

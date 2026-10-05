@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import { runFromHostFile } from "../core/fileRunHost";
 import { recoverHostCalculation, requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
+import { releaseLessonReservation } from "../core/lessonHistory";
 
 export const MAX_CLI_BYTES = 1_048_576;
 export function readRequest(stream: Readable, timeoutMs = 10000): Promise<unknown> {
@@ -24,11 +25,11 @@ export function readRequest(stream: Readable, timeoutMs = 10000): Promise<unknow
 }
 export async function runCli(argv: string[], stream: Readable, hostConfig = process.env.SEED_HOST_CONFIG): Promise<{ code: number; reply: unknown }> {
   const failure = (message: string, code = "E_SCHEMA_INVALID") => ({ code: 2, reply: { schema: "seed.cli-reply/0.1", ok: false, errors: [{ code, field: "", message, source: "seed" }] } });
-  if (argv.length !== 1 || !["run", "cancel", "recover", "report"].includes(argv[0]!)) return failure("usage: node dist/cli/seed.js run|cancel|recover|report; request JSON on stdin; no approval or configuration verbs", "E_VERB_UNKNOWN");
+  if (argv.length !== 1 || !["run", "cancel", "recover", "report", "release-intent-reservation"].includes(argv[0]!)) return failure("usage: node dist/cli/seed.js run|cancel|recover|report|release-intent-reservation; request JSON on stdin; no approval or configuration verbs", "E_VERB_UNKNOWN");
   if (!hostConfig) return failure("set SEED_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
   let request: unknown;
   try { request = await readRequest(stream); } catch (e) { return failure(e instanceof Error ? e.message : "invalid input"); }
-  const outcome = argv[0] === "report" ? await exportStudyReport(hostConfig, process.env.SEED_STUDY_HEADER, request) : argv[0] === "cancel" ? requestHostCancellation(hostConfig, request) : argv[0] === "recover" ? await recoverHostCalculation(hostConfig, request) : await runFromHostFile(hostConfig, request);
+  const outcome = argv[0] === "release-intent-reservation" ? releaseLessonReservation(hostConfig, request) : argv[0] === "report" ? await exportStudyReport(hostConfig, process.env.SEED_STUDY_HEADER, request) : argv[0] === "cancel" ? requestHostCancellation(hostConfig, request) : argv[0] === "recover" ? await recoverHostCalculation(hostConfig, request) : await runFromHostFile(hostConfig, request);
   return { code: !outcome.ok ? 2 : argv[0] !== "run" || outcome.state === "completed" ? 0 : 1, reply: { schema: "seed.cli-reply/0.1", ...outcome } };
 }
 if (require.main === module) {

@@ -11,14 +11,14 @@ import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantit
 import { evaluateGate } from "../src/core/policy";
 import { runFromHostFile, saveHostConfiguration } from "../src/core/fileRunHost";
 import { writeHostJson } from "../src/core/hostFiles";
-import { recoverHostCalculation } from "../src/core/hostControl";
+import { recoverHostCalculation, requestHostCancellation } from "../src/core/hostControl";
 import { isAlive } from "../src/core/procTree";
 import { createProject, openProject } from "../src/core/projectStore";
 import { makeHeader } from "./helpers/studyFixtures";
 import { verifyStudyLog } from "../src/core/semantic";
 import { exportStudyReport } from "../src/core/studyReportHost";
 import { Lesson } from "../src/main/lesson";
-import { readRegisteredReport } from "../src/core/reportReceipt";
+import { readRegisteredReport, reportReceiptFolder } from "../src/core/reportReceipt";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
@@ -251,7 +251,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const viewed = readRegisteredReport(config, desktopId);
     expect(viewed.html.toString()).toContain("UNVERIFIED");
     expect(() => readRegisteredReport(config, "../report.html")).toThrow();
-    const receipts = join(state, "reports");
+    const receipts = reportReceiptFolder(state, project, opened.value.manifest.projectId);
     const receipt = JSON.parse(readFileSync(join(receipts, desktopId + ".json"), "utf8"));
     for (const file of receipt.files) {
       const path = join(project, file.path), bytes = readFileSync(path);
@@ -273,9 +273,10 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       const { _electron } = await import("@playwright/test");
       const registry = join(hostRoot, "gui-apps.json"), catalog = join(hostRoot, "gui-catalog.json");
       writeHostJson(registry, { apps: [] }); writeHostJson(catalog, { repos: [] });
-      const gui = await _electron.launch({ args: [join(__dirname, "..")], env: { ...process.env,
+      const launchGui = () => _electron.launch({ args: [join(__dirname, "..")], env: { ...process.env,
         SEED_HOST_CONFIG: config, SEED_STUDY_HEADER: headerFile, SEED_CATALOG: catalog,
         EXPERIMENT_STUDIO_APPS: registry, EXPERIMENT_STUDIO_USER_DATA: join(hostRoot, "gui-user") } });
+      let gui = await launchGui();
       try {
         let page = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html"));
         for (let n = 0; !page && n < 100; n++) { await new Promise(r => setTimeout(r, 100)); page = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html")); }
@@ -294,7 +295,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
         expect(await page.locator("[data-lesson-status]").textContent()).toContain("Report saved:");
         expect(await page.locator("[data-lesson-status]").textContent()).toContain("No scientific conclusion has been accepted.");
         const guiId = (await page.evaluate(() => window.host.getState())).lesson.reportId!;
-        const guiReceipt = JSON.parse(readFileSync(join(state, "reports", guiId + ".json"), "utf8"));
+        const guiReceipt = JSON.parse(readFileSync(join(receipts, guiId + ".json"), "utf8"));
         const guiHtmlPath = join(project, guiReceipt.files[0].path), guiHtmlBytes = readFileSync(guiHtmlPath);
         writeFileSync(guiHtmlPath, "corrupt report");
         await page.getByRole("button", { name: "Open report", exact: true }).click();
@@ -315,6 +316,17 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
         await page.getByRole("button", { name: "Open report", exact: true }).click();
         for (let n = 0; n < 100 && !gui.windows().some(p => p.url().startsWith("seed-report://")); n++) await new Promise(r => setTimeout(r, 100));
         expect(gui.windows().filter(p => p.url().startsWith("seed-report://"))).toHaveLength(1);
+        const admissionPath = join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), beforeRestart = readFileSync(admissionPath, "utf8");
+        await gui.close(); gui = await launchGui();
+        page = undefined;
+        for (let n = 0; !page && n < 100; n++) { await new Promise(r => setTimeout(r, 100)); page = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html")); }
+        if (!page) throw Error("restarted lesson page missing");
+        await page.locator("[data-lesson-history]").waitFor();
+        expect(await page.locator("[data-lesson-history]").textContent()).toContain("completed");
+        await page.getByRole("button", { name: "Open report", exact: true }).click();
+        for (let n = 0; n < 100 && !gui.windows().some(p => p.url().startsWith("seed-report://")); n++) await new Promise(r => setTimeout(r, 100));
+        expect(gui.windows().filter(p => p.url().startsWith("seed-report://"))).toHaveLength(1);
+        expect(readFileSync(admissionPath, "utf8")).toBe(beforeRestart);
       } finally { await gui.close(); }
     }
 
@@ -329,6 +341,38 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     host.cases.long = { artifact: { path: longPath, revision: { hash: longHash, counter: 1 } },
       inputs: [...entry.inputs.filter(i => i.path !== artifact.path), { path: longPath, sha256: longHash }], params: [], settings: { case: longPath } };
     saveHostConfiguration(config, host);
+    if (process.env.SEED_GUI_ACCEPTANCE === "1") {
+      const { _electron } = await import("@playwright/test");
+      const launch = () => _electron.launch({ args: [join(__dirname, "..")], env: { ...process.env, SEED_HOST_CONFIG: config, SEED_STUDY_HEADER: headerFile,
+        SEED_CATALOG: join(hostRoot, "gui-catalog.json"), EXPERIMENT_STUDIO_APPS: join(hostRoot, "gui-apps.json"), EXPERIMENT_STUDIO_USER_DATA: join(hostRoot, "reconnect-user") } });
+      let gui = await launch();
+      const welcome = async () => {
+        for (let n = 0; n < 100; n++) { const page = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html")); if (page) return page; await new Promise(r => setTimeout(r, 100)); }
+        throw Error("reconnection welcome missing");
+      };
+      try {
+        let page = await welcome(); await page.locator('[data-lesson-case="long"]').click();
+        const enginePath = join(state, "engines", sha256Hex(bundle)), activePath = join(enginePath, "lease/active.json");
+        let binding: any;
+        for (let n = 0; n < 1500; n++) { if (existsSync(activePath)) binding = JSON.parse(readFileSync(activePath, "utf8")); if (binding?.jobId) break; await new Promise(r => setTimeout(r, 20)); }
+        expect(binding?.jobId).toBeTruthy(); const id = binding.requestId;
+        const original = JSON.parse(readFileSync(join(enginePath, "lease/owner.json"), "utf8")); expect(isAlive(original.pid)).toBe(true);
+        await gui.close(); gui = await launch(); page = await welcome();
+        await page.waitForFunction(id => window.host.getState().then(s => s.lesson.history?.some(i => i.requestId === id && ["running", "completed"].includes(i.status))), id, { timeout: 30000 });
+        const observed = (await page.evaluate(() => window.host.getState())).lesson.history?.find(i => i.requestId === id);
+        if (observed?.status === "running" && await page.getByRole("button", { name: "Cancel calculation", exact: true }).isVisible()) await page.getByRole("button", { name: "Cancel calculation", exact: true }).click();
+        await page.waitForFunction(id => window.host.getState().then(s => s.lesson.history?.some(i => i.requestId === id && ["cancelled", "completed"].includes(i.status))), id, { timeout: 30000 });
+        expect(hostFiles.readAdmissions(enginePath).filter((r: any) => r.event.phase === "request" && r.event.event.request?.requestId === id)).toHaveLength(1);
+      } finally {
+        await gui.close();
+        const activePath = join(state, "engines", sha256Hex(bundle), "lease/active.json");
+        if (existsSync(activePath)) {
+          const activeRequest = JSON.parse(readFileSync(activePath, "utf8")).requestId;
+          if (typeof activeRequest === "string" && activeRequest.startsWith("desktop-")) requestHostCancellation(config, { requestId: activeRequest });
+          for (let n = 0; n < 100 && existsSync(activePath); n++) await new Promise(r => setTimeout(r, 100));
+        }
+      }
+    }
     const crashed = await connectSeedMcp(config);
     const pending = crashed.client.callTool({ name: "seed_run_case", arguments: { requestId: "real-crash", caseId: "long", budget } }, undefined, { timeout: 360000 }).then(() => undefined, () => undefined);
     const engine = join(state, "engines", sha256Hex(bundle));

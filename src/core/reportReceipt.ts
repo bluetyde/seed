@@ -7,8 +7,9 @@ import { validateHostConfiguration } from "./fileRunHost";
 import { openProject } from "./projectStore";
 
 const pendingName = (root: string, requestId: string) => "pending-" + sha256Hex(root + "\n" + requestId) + ".json";
+export const reportReceiptFolder = (state: string, root: string, projectId: string) => safeChild(state, join("reports", sha256Hex(projectId + "\n" + root)), true);
 export function prepareReport(state: string, projectRoot: string, projectId: string, studyId: string, requestId: string, runId: string, bundle: string, hashes: string[]): void {
-  const receipts = safeChild(state, "reports", true); mkdirSync(receipts, { recursive: true });
+  const receipts = reportReceiptFolder(state, projectRoot, projectId); mkdirSync(receipts, { recursive: true });
   const reportId = randomBytes(16).toString("hex");
   const files = ["report.html", "study.jsonl", "evidence.json"].map((name, i) => {
     return { path: join(bundle, name).replaceAll("\\", "/"), sha256: hashes[i] };
@@ -20,7 +21,9 @@ export function prepareReport(state: string, projectRoot: string, projectId: str
 }
 
 export function finishReport(state: string, projectRoot: string, projectId: string, studyId: string, requestId: string, runId: string): string | undefined {
-  const receipts = safeChild(state, "reports", true);
+  let receipts = reportReceiptFolder(state, projectRoot, projectId);
+  if (!existsSync(receipts) || !existsSync(safeChild(receipts, pendingName(projectRoot, requestId)))) receipts = safeChild(state, "reports", true);
+  if (!existsSync(receipts)) return undefined;
   const pending = safeChild(receipts, pendingName(projectRoot, requestId));
   if (!existsSync(pending)) return undefined;
   const receipt = readHostJson(pending);
@@ -40,8 +43,11 @@ export function readRegisteredReport(config: string, reportId: unknown): { html:
   const c = validateHostConfiguration(readHostJson(config));
   const root = realpathSync(c.projectRoot), state = realpathSync(c.stateRoot);
   if (inside(root, state) || inside(root, realpathSync(config))) throw Error("report catalog must be outside project");
-  const receipt = readHostJson(safeChild(safeChild(state, "reports", true), reportId + ".json"));
   const project = openProject(root);
+  if (!project.ok) throw Error("report project unavailable");
+  let receipts = reportReceiptFolder(state, root, project.value.manifest.projectId as string);
+  if (!existsSync(receipts) || !existsSync(safeChild(receipts, reportId + ".json"))) receipts = safeChild(state, "reports", true);
+  const receipt = readHostJson(safeChild(receipts, reportId + ".json"));
   if (!project.ok || receipt.schema !== "seed.report-receipt/0.1" || receipt.reportId !== reportId || receipt.version !== 1 ||
     receipt.projectRoot !== root || receipt.projectId !== project.value.manifest.projectId || typeof receipt.studyId !== "string" ||
     !Array.isArray(receipt.files) || receipt.files.length !== 3) throw Error("invalid report receipt or project scope");

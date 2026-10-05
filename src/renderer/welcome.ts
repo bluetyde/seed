@@ -64,7 +64,7 @@
     const cards = el("div", { class: "cards" });
     const lesson = s.lesson;
     const lessonButtons = el("div", { class: "btnrow" });
-    for (const caseId of lesson.cases) lessonButtons.append(el("button", { class: "btn", type: "button", disabled: lesson.busy, "data-lesson-case": caseId,
+    for (const caseId of lesson.cases) lessonButtons.append(el("button", { class: "btn", type: "button", disabled: lesson.busy || lesson.blocked, "data-lesson-case": caseId,
       onclick: () => window.host.runLesson(caseId) }, `Run ${caseId}`));
     if (lesson.cancellable) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.cancelLesson() }, "Cancel calculation"));
     if (lesson.canSave && !lesson.busy) lessonButtons.append(el("button", { class: "btn", type: "button", onclick: () => window.host.saveLesson() }, "Save study report"));
@@ -72,6 +72,12 @@
     out.push(el("section", { class: "card", "data-lesson": "" }, el("h2", {}, "Calculation lesson"),
       el("p", { class: "note" }, "Runs approved cases with the configured study budget. Results keep their verification labels."),
       el("p", { role: "status", "data-lesson-status": "" }, lesson.message), lessonButtons));
+    if (lesson.history?.length) out.push(el("section", { class: "card", "data-lesson-history": "" }, el("h2", {}, "Calculation history"),
+      ...lesson.history.map(item => el("div", { class: "btnrow" }, el("span", {}, `${item.adapterId ?? "SEED"} · ${item.caseId} · ${item.time} · ${item.status}${item.reportError ? " · " + item.reportError : ""}`),
+        el("button", { class: "btn secondary", type: "button", "data-history-request": item.requestId, onclick: () => window.host.selectLesson(item.requestId) }, "Select calculation")))));
+    if ((lesson.historyTotal ?? 0) > 50) out.push(el("div", { class: "btnrow" },
+      el("button", { class: "btn secondary", type: "button", disabled: !lesson.historyOffset, onclick: () => window.host.lessonHistoryPage((lesson.historyOffset ?? 0) - 50) }, "Newer calculations"),
+      el("button", { class: "btn secondary", type: "button", disabled: (lesson.historyOffset ?? 0) + 50 >= (lesson.historyTotal ?? 0), onclick: () => window.host.lessonHistoryPage((lesson.historyOffset ?? 0) + 50) }, "Older calculations")));
     for (const a of s.apps) cards.append(card(a, s.installs.find((i) => i.id === a.id)));
     out.splice(2, 0, el("div", { class: "toolrow" }, el("button", { class: "btn secondary", type: "button", "data-check-all": "", onclick: () => window.host.checkUpdates() }, "Check all for updates"),
       el("span", { class: "path" }, `New installs go to ${s.installRoot}`), el("button", { class: "btn secondary", type: "button", onclick: () => window.host.chooseInstallRoot() }, "Change…")));

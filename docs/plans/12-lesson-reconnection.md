@@ -1,12 +1,14 @@
 # Plan 12: Lesson history and reconnection after restart
 
-Status: planned. Implement after [report tabs](11-report-tabs.md), before human conclusion acceptance.
+Status: implemented for new SEED desktop requests (2026-10-04). Follows [report tabs](11-report-tabs.md), before human conclusion acceptance.
 
 ## Student behavior
 
 Reopening SEED restores the lesson's known calculations and saved reports for the configured project. A calculation still owned by its detached supervisor appears as running, with **Cancel calculation** available when current policy permits. Completed calculations offer report save/open actions. An abandoned or ambiguous calculation says it needs recovery; restarting SEED never silently starts it again. Old reports open in their own tabs.
 
 ## Implementation
+
+Ownership boundary: this plan restores SEED-launched request status and SEED report receipts only, scoped by project, adapter and configuration. Native calculation inspection, recovery/collection and native app history are adapter-specific. RAFT recovery is not reused for OpenMC, NODAL or other apps. Each adapter must declare and verify its own supported native lifecycle operations before SEED exposes them. A live SEED owner heartbeat indicates host activity, not independently verified native solver progress. This service never calls an adapter to infer or repair native state.
 
 1. Persist a bounded desktop request-intent entry in trusted host state before launching the supervisor: generated request ID, case/project/study IDs, configuration hash and timestamp. Store no approvals in renderer storage. Use atomic writes and versioned records. Intent alone is not evidence of admission or launch.
 2. Add a read-only reconciliation service. Join intents with verified, project/config-scoped admission entries, protected active/lease records and saved run records. A project-writable request map or run record alone cannot prove a calculation's ownership, completion or report eligibility. Report identities come from the trusted receipts in Plan 11.
@@ -26,3 +28,5 @@ Likely files: new trusted intent/reconciliation modules, `src/main/lesson.ts`, p
 - Two desktops and duplicate clicks preserve one admitted job; unavailable history does not prevent normal app tabs from opening. Existing actual cancellation/recovery tests pass.
 
 Exit: restart restores trustworthy status and report history without changing calculation ownership. Broad native recovery and editable project setup remain separate work.
+
+Implementation checkpoint: shared desktop intent/admission/receipt reconciliation is implemented with per-project partitions, fresh host heartbeat observation, guarded cancellation/export and history pages. Native per-app recovery remains in its adapter. Interrupted intent reservations are surfaced and have a human-only metadata release path; missing ownership/maintenance evidence still requires inspection. Legacy requests without desktop intents and native app history are not imported. Actual Electron restart and RAFT acceptance is recorded in the coordination log.
