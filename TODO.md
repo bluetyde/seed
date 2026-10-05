@@ -106,7 +106,7 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 
 - [x] 2026-10-04 [Plan 11: report tabs](docs/plans/11-report-tabs.md): auto-open successful exports in isolated SEED tabs; trusted report receipts, safe offline viewing and independent tab lifecycle.
 - [x] 2026-10-04 [Plan 12: restart reconnection](docs/plans/12-lesson-reconnection.md): persist trusted request intent, reconcile guarded status/history and reopen report tabs without redispatch.
-- [ ] [Plan 13: human conclusions](docs/plans/13-human-conclusions.md): cited drafts, explicit trusted human review and a new immutable accepted-report version/tab.
+- [~] [Plan 13: human conclusions](docs/plans/13-human-conclusions.md): protected cited CLI drafts implemented with exact source report/head/evidence binding and idempotent retries. [Record contract](docs/conclusion-review.md). Remaining: desktop draft/review display, explicit trusted human acceptance/rejection and a new immutable accepted-report version/tab.
 
 ## E3: experiments ([plan 04](docs/plans/04-runs-and-scheduling.md), [07](docs/plans/07-studies-and-reports.md))
 

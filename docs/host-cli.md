@@ -39,3 +39,7 @@ An abandoned lease is deliberately not taken over automatically. Inspect its own
 The [stdio MCP route](mcp.md) now reuses the guarded file host; future GUI routes must do the same. Owner-mediated cancellation and bounded human crash recovery now exist. General host-death cleanup, resource enforcement, a complete study/report demonstration and E2 review remain unfinished. Budget admission alone does not impose OS CPU, memory or disk limits. RAFT acceptance uses its synthetic library and establishes transport agreement, not independent validation of every physics quantity.
 
 Verification: `npm test` builds the CLI before tests; `npm run test:e2:raft` requires a built RAFT checkout selected by `SEED_RAFT_REPO`, and exercises the real CLI as well as oracle/direct agreement.
+
+## Conclusion proposal
+
+After saving a registered report, `node dist/cli/seed.js draft-conclusion` accepts JSON on stdin with exactly `reportId` and `claims`. A claim contains `text`, `runs` and `oracles`; use the report's run ID or an oracle-set ID recorded in its study. The reply returns an opaque draft ID and hashes. This stores a draft only. Human review/acceptance is not yet implemented; no acceptance CLI or MCP tool exists. See [record contracts and limits](conclusion-review.md).

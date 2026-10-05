@@ -1,6 +1,6 @@
 # Plan 13: Draft and human-accepted conclusions
 
-Status: planned. Implement after [report tabs](11-report-tabs.md) and [reconnection](12-lesson-reconnection.md). Extends [Plan 07](07-studies-and-reports.md); it does not increase physics verification coverage.
+Status: in progress. Protected CLI draft proposals are implemented; desktop review, rejection and acceptance remain planned. Follows [report tabs](11-report-tabs.md) and [reconnection](12-lesson-reconnection.md). Extends [Plan 07](07-studies-and-reports.md); it does not increase physics verification coverage. Record contracts: [conclusion review](../conclusion-review.md).
 
 ## Student behavior
 

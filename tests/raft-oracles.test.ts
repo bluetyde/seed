@@ -18,6 +18,7 @@ import { makeHeader } from "./helpers/studyFixtures";
 import { verifyStudyLog } from "../src/core/semantic";
 import { exportStudyReport } from "../src/core/studyReportHost";
 import { Lesson } from "../src/main/lesson";
+import { proposeConclusion } from "../src/core/conclusionDraft";
 import { readRegisteredReport, reportReceiptFolder } from "../src/core/reportReceipt";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
@@ -253,10 +254,40 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     expect(() => readRegisteredReport(config, "../report.html")).toThrow();
     const receipts = reportReceiptFolder(state, project, opened.value.manifest.projectId);
     const receipt = JSON.parse(readFileSync(join(receipts, desktopId + ".json"), "utf8"));
+    const draftRequest = { reportId: desktopId, claims: [{ text: "The saved synthetic case completed; quantities remain UNVERIFIED.", runs: [receipt.runId], oracles: [] }] };
+    const proposed = await proposeConclusion(config, draftRequest);
+    expect(proposed).toMatchObject({ ok: true, state: "conclusion-drafted" });
+    expect(await proposeConclusion(config, draftRequest)).toEqual(proposed);
+    expect(await proposeConclusion(config, { ...draftRequest, actor: { kind: "human", name: "forged" } })).toMatchObject({ ok: false });
+    expect(await proposeConclusion(config, { ...draftRequest, accepted: true })).toMatchObject({ ok: false });
+    expect(await proposeConclusion(config, { ...draftRequest, claims: [{ text: "unrelated", runs: ["foreign-run"], oracles: [] }] })).toMatchObject({ ok: false });
+    expect(await proposeConclusion(config, { ...draftRequest, claims: [{ text: "unrelated", runs: [], oracles: ["foreign-oracle"] }] })).toMatchObject({ ok: false });
+    expect(await proposeConclusion(config, { ...draftRequest, claims: [{ text: "uncited", runs: [], oracles: [] }] })).toMatchObject({ ok: false });
+    expect(await proposeConclusion(config, { ...draftRequest, claims: [] })).toMatchObject({ ok: false });
+    expect(readRegisteredReport(config, desktopId).html).toEqual(viewed.html);
+    const draftPartition = join(state, "conclusion-drafts", sha256Hex(receipt.projectId + "\n" + project));
+    const draftFiles = (await import("node:fs")).readdirSync(draftPartition);
+    expect(draftFiles).toHaveLength(1);
+    const draftPath = join(draftPartition, draftFiles[0]), draftBytes = readFileSync(draftPath);
+    const draft = JSON.parse(draftBytes.toString());
+    expect(draft).toMatchObject({ status: "draft", actor, claims: draftRequest.claims, reportId: desktopId });
+    expect(draft.acceptedBy).toBeUndefined();
+    const savedConfig = readFileSync(config);
+    writeHostJson(config, { ...JSON.parse(savedConfig.toString()), actor: { kind: "human", name: "different" } });
+    expect(await proposeConclusion(config, draftRequest)).toMatchObject({ ok: false });
+    writeFileSync(config, savedConfig);
+    const cliDraft = spawnSync(process.execPath, [join(__dirname, "..", "dist", "cli", "seed.js"), "draft-conclusion"], {
+      input: JSON.stringify(draftRequest), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_HOST_CONFIG: config } });
+    expect(cliDraft.status, cliDraft.stderr).toBe(0);
+    expect(JSON.parse(cliDraft.stdout)).toMatchObject({ ok: true, draftId: draft.draftId });
+    writeHostJson(draftPath, { ...draft, claimsHash: "altered" });
+    expect(await proposeConclusion(config, draftRequest)).toMatchObject({ ok: false });
+    writeFileSync(draftPath, draftBytes);
     for (const file of receipt.files) {
       const path = join(project, file.path), bytes = readFileSync(path);
       writeFileSync(path, Buffer.concat([bytes, Buffer.from(" altered")]));
       expect(() => readRegisteredReport(config, desktopId)).toThrow(/changed/);
+      expect(await proposeConclusion(config, draftRequest)).toMatchObject({ ok: false });
       writeFileSync(path, bytes);
     }
     const pendingReceipt = join(receipts, "pending-" + sha256Hex(project + "\n" + receipt.requestId) + ".json");
