@@ -10,6 +10,8 @@ Example request (budget must fit the configured study):
 
 The client cannot provide an actor, policy, executable, input path, parameters or approval. Unknown fields and verbs are refused. The `cancel` and human-only `recover` verbs accept only the original requestId; see [cancellation and recovery](cancellation-recovery.md). Input is bounded to 1 MiB and must finish within ten seconds. There is no CLI approval or configuration-writing command.
 
+The `report` verb also accepts only the original requestId. With a trusted external human `SEED_STUDY_HEADER`, it saves a guarded single-case study/report bundle; see [setup and limits](study-report.md).
+
 ## Trusted setup
 
 `schema/host.schema.json` defines the provisional local `seed.host/0.1` format. `saveHostConfiguration` validates and atomically writes it from trusted setup code. The file contains:

@@ -19,6 +19,11 @@ export function safeChild(root: string, name: string, directory = false): string
   const parent = realpathSync(root);
   const child = join(parent, name);
   if (!inside(parent, child) || child === parent) throw Error("host state path leaves its root");
+  let ancestor = parent;
+  for (const component of relative(parent, child).split(sep)) {
+    ancestor = join(ancestor, component);
+    if (existsSync(ancestor) && lstatSync(ancestor).isSymbolicLink()) throw Error("host state path must not contain linked ancestors");
+  }
   if (existsSync(child)) {
     const s = lstatSync(child);
     if (s.isSymbolicLink() || (directory ? !s.isDirectory() : !s.isFile())) throw Error("host state path must not be a link or have the wrong type");
@@ -39,9 +44,10 @@ export function writeHostJson(file: string, value: unknown): void {
 
 export type AdmissionRow = { schema: "seed.admission/0.1"; seq: number; time: string; prev: string | null; event: unknown; hash: string };
 /** Caller holds the engine lease. A partial/corrupt log blocks further admission; never reset it. */
-export function appendAdmission(root: string, event: unknown): AdmissionRow {
+export function readAdmissions(root: string): AdmissionRow[] {
   const file = safeChild(root, "admissions.jsonl");
   let seq = 0; let prev: string | null = null;
+  const rows: AdmissionRow[] = [];
   if (existsSync(file)) {
     regularFile(file); const text = readFileSync(file, "utf8");
     if (text && !text.endsWith("\n")) throw Error("admission log has a partial final line");
@@ -49,8 +55,15 @@ export function appendAdmission(root: string, event: unknown): AdmissionRow {
       const row = JSON.parse(line) as AdmissionRow; const { hash, ...body } = row;
       if (row.schema !== "seed.admission/0.1" || row.seq !== seq + 1 || row.prev !== prev || sha256Hex(canonicalJson(body)) !== hash) throw Error("admission log hash chain is invalid");
       seq = row.seq; prev = row.hash;
+      rows.push(row);
     }
   }
+  return rows;
+}
+export function appendAdmission(root: string, event: unknown): AdmissionRow {
+  const file = safeChild(root, "admissions.jsonl");
+  const rows = readAdmissions(root);
+  const seq = rows.length; const prev = rows.at(-1)?.hash ?? null;
   const body = { schema: "seed.admission/0.1" as const, seq: seq + 1, time: new Date().toISOString(), prev, event };
   const row = { ...body, hash: sha256Hex(canonicalJson(body)) };
   const bytes = Buffer.from(JSON.stringify(row) + "\n");
