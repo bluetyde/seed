@@ -35,13 +35,30 @@ The solver (OpenFOAM Foundation 9 + OFFBEAT, in the WSL distro `feed-solver`) is
 | `heat_flux_outer` | W/m2 | `q'/(2 pi Rco)` |
 | `energy_balance_residual` | 1 | relative, flux through the cladding wall against the input linear heat rate |
 
-All are `verification: "unverified"` until an oracle set covers them. The FEED oracle set (24 entries, closed-form expected values, tolerances from the mesh-refinement bound fixed before any run) covers `temperature_peak`, `temperature_surface`, `heat_flux_outer` and `energy_balance_residual`; `temperature_fuel_surface`, `temperature_clad_inner` and `temperature_radial` stay unverified.
+All are `verification: "unverified"` until an oracle set covers them. The FEED oracle set (33 entries, closed-form expected values, tolerances from the mesh-refinement bound fixed before any run) covers `temperature_peak`, `temperature_surface`, `heat_flux_outer` and `energy_balance_residual`; `temperature_fuel_surface`, `temperature_clad_inner` and `temperature_radial` stay unverified.
 
 ## Known gaps
 
 - No cancel race remains by construction: FEED's runner writes `active-run.json` in the same synchronous step as `RunManager.start()`, before the manager's deferred pump can launch anything, and the run script honours a cancel flag that exists before it starts (FEED test `wslLifecycle`: "a cancel flag set before the script starts"). A solver therefore cannot exist without a record the cancel verb can find. Keep that ordering if the runner is edited.
 - Windows only for the real solver (WSL). The stub tests run anywhere.
 - Mesh is part of the case; there is no refinement study through SEED yet.
+
+## Transient (pulse) results
+
+A case with `assumptions.steadyState: false` and a `transient` section is a thermal pulse: the power history is an input, the step is fixed, the start is a uniform temperature. Its result record is `feed.results/0.2` and the adapter collects these quantities instead of the steady ones:
+
+| Name | Unit | Meaning |
+|---|---|---|
+| `temperature_peak_history` | K | hottest cell centre at each output time; the time axis `t` (s) is in the data file, coordinates system `time` |
+| `temperature_outer_wall_history` | K | outer cladding wall (patch value) at each output time |
+| `temperature_peak_max` | K | the hottest cell-centre value over the whole run |
+| `time_of_peak` | s | first output time at which that value occurs (reported, not oracle-covered: after a pulse the interior stays flat) |
+| `energy_deposited` | J/m | exact integral of the power history |
+| `energy_balance_gap` | 1 | largest relative gap over the outputs between the energy deposited and stored plus rejected; it includes the first-order error of the time stepping |
+
+`collect` refuses a transient whose own checks fail (`energyBalance`, `crossCheckFv` against FEED's independent finite-volume solution, `timeStep`, `propertyRange`) or that used a conductivity or heat capacity law outside its stated range (`E_OUT_OF_DOMAIN`), and any series that is missing, the wrong length, not finite or whose times do not increase from 0. `extensions.feed.kind` is `transient`. Everything else (snapshot hashes, manifest, ownership, cancel) is as for steady runs.
+
+FEED's oracle set now has 33 entries. The pulse entries test the adiabatic limit (the fuel interior keeps all the deposited energy, so its temperature is the root of the integral of c dT = E''') for a triangular pulse with constant heat capacity, the same pulse with a linear heat capacity, and a TRIGA-sized pulse built from UT-Austin SAR numbers, plus the energy deposited, a refusal of a heat-capacity law used out of range, and bad-input entries for a time step that does not divide the run and a missing heat capacity. Heat leaving the fuel during a long transient has no oracle entry: FEED checks it against its own independent solution.
 
 ## Codex review (2026-10-05)
 

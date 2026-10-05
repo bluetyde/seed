@@ -86,14 +86,14 @@ describe("FEED adapter: configuration", () => {
     }
   });
 
-  it("describe: runner version, formats, the seven quantities, thermal-only capability", async () => {
+  it("describe: runner version, formats, the steady and transient quantities, thermal-only capability", async () => {
     useStub();
     const r = okReply(await ask(feedProject().root, { verb: "describe" }));
     expect(r.ok).toBe(true);
     expect(r.result.app.id).toBe("feed");
     expect(r.result.engine).toEqual({ name: "feed-headless", version: "9.9.9" });
     expect(r.result.formats).toEqual([{ id: "feed.case", version: "0.1" }]);
-    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual(QUANTITIES);
+    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap"]);
     expect(r.result.capabilities).toContain("thermal-only");
     expect(r.result.oracleCoverage).toEqual([]);
     expect(r.warnings).toEqual([]);
@@ -344,6 +344,63 @@ describe("FEED adapter: run and collect through the SEED run manager (stub runne
     const other = okReply(await ask(p.root, { verb: "run", requestId: "req-other", snapshot, runDir, budget, settings: { case: CASE } }));
     expect(other.ok).toBe(false);
     expect(other.errors[0]?.code).toBe("E_REQUEST_CONFLICT");
+  });
+});
+
+describe("FEED adapter: transient (pulse) results (stub runner)", () => {
+  const TRANSIENT = ["temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap"];
+
+  it("describe lists the steady and the transient quantities and the transient capability", async () => {
+    useStub();
+    const r = okReply(await ask(feedProject().root, { verb: "describe" }));
+    const names = r.result.quantities.map((q: { name: string }) => q.name);
+    for (const q of [...QUANTITIES, ...TRANSIENT]) expect(names).toContain(q);
+    expect(r.result.capabilities).toContain("transient-pulse");
+  });
+
+  it("a transient run is collected as time series and scalars, valid against the index schema, with the thermal-only statement", async () => {
+    useStub("transient");
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-transient");
+    if (!out.ok) throw new Error(JSON.stringify(out.errors));
+    expect(out.state).toBe("completed");
+    const index = JSON.parse(readFileSync(join(p.root, "runs", out.runId, "results.json"), "utf8"));
+    expect(validate("results-index", index)).toEqual({ ok: true });
+    expect(checkResultsIndex(index)).toEqual([]);
+    expect(checkResultsAgainstRecord(index, out.record)).toEqual([]);
+    expect(index.quantities.map((q: { name: string }) => q.name)).toEqual(TRANSIENT);
+    for (const q of index.quantities) expect(sha256Hex(readFileSync(join(p.root, q.data.path)))).toBe(q.data.sha256);
+    const data = (name: string) => JSON.parse(readFileSync(join(p.root, "runs", out.runId, "native", "series", name + ".json"), "utf8"));
+    expect(data("temperature_peak_history")).toMatchObject({ unit: "K", t: [0, 0.005, 0.01], values: [300, 460.95, 615.5958] });
+    expect(data("temperature_peak_max")).toEqual({ quantity: "temperature_peak_max", unit: "K", values: [615.5958] });
+    expect(data("time_of_peak").values).toEqual([0.01]);
+    expect(data("energy_deposited")).toMatchObject({ unit: "J/m", values: [50000] });
+    expect(data("energy_balance_gap").values).toEqual([0.02]);
+    const series = index.quantities.find((q: { name: string }) => q.name === "temperature_peak_history");
+    expect(series.coordinates).toEqual({ system: "time", axes: [{ name: "t", unit: "s" }] });
+    expect(index.extensions.feed.kind).toBe("transient");
+    expect(index.extensions.feed.thermalOnly).toMatch(/Not a stress, failure or integrity assessment/);
+  });
+
+  it("a steady run is still a steady record (kind steady, the seven steady quantities)", async () => {
+    useStub();
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-steady-kind");
+    if (!out.ok) throw new Error("refused");
+    const index = JSON.parse(readFileSync(join(p.root, "runs", out.runId, "results.json"), "utf8"));
+    expect(index.extensions.feed.kind).toBe("steady");
+    expect(index.quantities.map((q: { name: string }) => q.name)).toEqual(QUANTITIES);
+  });
+
+  it.each([
+    ["transient-shortseries", "peakT"],
+    ["transient-badtimes", "increasing"],
+  ])("a malformed transient (%s) is not collected", async (mode, word) => {
+    useStub(mode);
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-" + mode);
+    expect(out.ok && out.state).toBe("failed");
+    expect(JSON.stringify((await collectError(p.root, out as any)).errors)).toContain(word);
   });
 });
 
