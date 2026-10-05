@@ -12,4 +12,7 @@ if ! command -v node >/dev/null 2>&1; then
   echo "Install Node.js 24 or newer, then reopen this launcher."
   exit 1
 fi
+if [ -d node_modules ] && ! node scripts/deps-stamp.cjs check; then
+  echo "SEED's dependency list changed since the last install (or was not recorded). If SEED fails to start, run: npm ci --include=dev"
+fi
 exec npm start
