@@ -32,6 +32,6 @@ source in a void or a thin absorber) with tolerances fixed before any run.
 
 ## Open points
 
-1. How a WSL job is identified and killed from Windows (reuse FEED's approach, or add a small WSL-side runner like FEED's).
+1. WSL job identity and kill: FEED's answer is that the app owns a runner with its own `run` and `cancel` verbs that handle the distro (manifest written last, hashed files, process-group flag file). Proposed here too: a headless runner in the OpenMC repo, `python -m openmc_studio.headless run MODEL.py --out DIR --seed N --json` plus `cancel`, run inside WSL by the job wrapper, writing a hashed manifest and a results extract from the statepoint. The adapter then repeats the FEED cancel sequence (stop the solver first, then prove ownership of the Windows-side processes).
 2. Which tallies and score types the first slice supports.
 3. Whether Edge/Playwright is a hard requirement of `validate` on a machine, or SEED bundles a Chromium for it (a missing browser must give a setup error, not a skipped check).
