@@ -68,6 +68,33 @@ else if (mode === "hang" && verb !== "cancel") {
       ],
       domain: { verdict: mode === "out-of-domain" ? "out-of-domain" : "in-domain" },
     };
+    if (mode === "transient" || mode === "transient-shortseries" || mode === "transient-badtimes") {
+      // a transient record (feed.results/0.2): three output times, a pulse that peaks at 10 ms
+      const times = mode === "transient-badtimes" ? [0, 0.01, 0.005] : [0, 0.005, 0.01];
+      results.schema = "feed.results/0.2";
+      results.kind = "transient";
+      delete results.radial;
+      results.initialTemperature = 300;
+      results.times = times;
+      results.series = {
+        time: times,
+        power: [0, 1e7, 0],
+        deposited: [0, 25000, 50000],
+        peakT: [300, 460.95, 615.5958],
+        fuelSurfaceCellT: [300, 400, 560],
+        claddingInnerCellT: [300, 310, 330],
+        claddingOuterWallT: [300, 305, 320],
+        stored: [0, 25500, 49000],
+        rejected: [0, 100, 1000],
+      };
+      if (mode === "transient-shortseries") results.series.peakT = [300, 460.95];
+      results.summary = { maxT: 615.5958, timeOfMaxT: 0.01, maxRise: 315.5958, finalPeakT: 615.5958, finalTime: 0.01 };
+      results.checks = [
+        { id: "energyBalance", verdict: "pass", value: 0.02 },
+        { id: "crossCheckFv", verdict: "pass", value: 0.1 },
+        { id: "timeStep", verdict: "pass", value: 1.5 },
+      ];
+    }
     if (mode === "nodomain") delete results.domain;
     if (mode === "nan") results.summary.maxT = null;
     const files = {
