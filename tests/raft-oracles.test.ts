@@ -606,8 +606,8 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       const cancelledBytes = readFileSync(cancelledPath);
       expect(JSON.parse(cancelledBytes.toString()).state).toBe("cancelled");
       expect(existsSync(join(engine, "lease"))).toBe(true);
-      const recovery = spawnSync(process.execPath, [join(__dirname, "../dist/cli/seed.js"), "recover"], {
-        input: JSON.stringify({ requestId: "real-crash" }), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_HOST_CONFIG: config } });
+      const recovery = spawnSync(process.execPath, [join(__dirname, "../dist/cli/admin.js"), "recover"], {
+        input: JSON.stringify({ requestId: "real-crash" }), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_ADMIN_HOST_CONFIG: config } });
       expect(recovery.status, recovery.stdout + recovery.stderr).toBe(0);
       expect(JSON.parse(recovery.stdout)).toMatchObject({ state: "recovered-cancelled", runId: active.runId });
       expect(isAlive(job.pid)).toBe(false); expect(isAlive(child.pid)).toBe(false);
