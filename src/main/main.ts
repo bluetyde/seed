@@ -1,7 +1,7 @@
 // The host window: a thin top bar (menu row + tab row) and, below it, the active tab's page. App tabs are separate web views, each
 // with its own storage, loading a server this host started (or attached to). Nothing from the host is drawn over an app.
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell, WebContentsView, type Input, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, WebContentsView, type Input, type WebContents } from "electron";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { applyInstall, loadRegistry, type AppEntry } from "./apps";
@@ -13,6 +13,8 @@ import * as os from "node:os";
 import { ProcessManager } from "./processes";
 import { TabModel } from "./tabs";
 import { Lesson } from "./lesson";
+import { createReportView } from "./reportView";
+protocol.registerSchemesAsPrivileged([{ scheme: "seed-report", privileges: { standard: true, secure: true } }]);
 
 const MENU_H = 32;
 const TAB_H = 36;
@@ -51,7 +53,23 @@ const tabs = new TabModel();
 const runtime = new Map<string, TabRuntime>();
 const processes = new ProcessManager();
 const childWindows = new Map<string, Set<BrowserWindow>>();
-const lesson = new Lesson(process.env.SEED_HOST_CONFIG, process.env.SEED_STUDY_HEADER, () => refresh());
+const lesson = new Lesson(process.env.SEED_HOST_CONFIG, process.env.SEED_STUDY_HEADER, () => refresh(), undefined, openReport);
+
+async function openReport(reportId: string): Promise<void> {
+  if (!process.env.SEED_HOST_CONFIG) throw Error("No trusted host configuration.");
+  const created = createReportView(process.env.SEED_HOST_CONFIG, reportId);
+  const tab = tabs.openReport(reportId, created.title);
+  const existing = runtime.get(tab.id);
+  if (existing?.view) { created.view.webContents.close(); refresh(); return; }
+  const opening: TabRuntime = { status: "running", view: created.view };
+  runtime.set(tab.id, opening);
+  win.contentView.addChildView(created.view);
+  watchShortcuts(created.view.webContents);
+  try { await created.view.webContents.loadURL(created.url); }
+  catch (e) { if (runtime.get(tab.id) === opening) { destroyView(opening); setError(tab.id, String(e), ""); throw e; } return; }
+  if (runtime.get(tab.id) !== opening) return;
+  refresh();
+}
 
 // ---- state shown in the bar and the welcome page ----
 
@@ -276,6 +294,12 @@ function menuAction(a: MenuAction): void {
 }
 
 async function retry(tabId: string): Promise<void> {
+  const reportId = tabs.tabs.find(t => t.id === tabId)?.reportId;
+  if (reportId) {
+    const rt = runtime.get(tabId); if (rt) destroyView(rt); runtime.delete(tabId);
+    try { await openReport(reportId); } catch (e) { setError(tabId, String(e), ""); }
+    return;
+  }
   const rt = runtime.get(tabId);
   if (rt?.view) destroyView(rt, tabId.replace(/^app:/, ""));
   runtime.delete(tabId);
@@ -381,6 +405,7 @@ app.whenReady().then(() => {
   ipcMain.on("lesson:run", (e, id: unknown) => { if (e.sender === pageView.webContents) void lesson.run(id); });
   ipcMain.on("lesson:cancel", (e) => { if (e.sender === pageView.webContents) lesson.cancel(); });
   ipcMain.on("lesson:save", (e) => { if (e.sender === pageView.webContents) void lesson.save(); });
+  ipcMain.on("lesson:openReport", (e) => { if (e.sender === pageView.webContents) void lesson.openSaved(); });
   ipcMain.on("tab:openApp", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void openApp(id); });
   ipcMain.on("tab:new", (e) => { if (checkSender(e)) menuAction("newTab"); });
   ipcMain.on("tab:activate", (e, id: unknown) => { if (checkSender(e) && typeof id === "string" && tabs.activate(id)) refresh(); });

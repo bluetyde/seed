@@ -68,6 +68,7 @@
       onclick: () => window.host.runLesson(caseId) }, `Run ${caseId}`));
     if (lesson.cancellable) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.cancelLesson() }, "Cancel calculation"));
     if (lesson.canSave && !lesson.busy) lessonButtons.append(el("button", { class: "btn", type: "button", onclick: () => window.host.saveLesson() }, "Save study report"));
+    if (lesson.reportId) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.openLessonReport() }, "Open report"));
     out.push(el("section", { class: "card", "data-lesson": "" }, el("h2", {}, "Calculation lesson"),
       el("p", { class: "note" }, "Runs approved cases with the configured study budget. Results keep their verification labels."),
       el("p", { role: "status", "data-lesson-status": "" }, lesson.message), lessonButtons));

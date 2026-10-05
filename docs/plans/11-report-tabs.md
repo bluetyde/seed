@@ -1,6 +1,6 @@
 # Plan 11: Reports in SEED tabs
 
-Status: planned. Implement first. Builds on the guarded desktop lesson at `13c60ab` and [Plan 07](07-studies-and-reports.md).
+Status: implemented for new guarded exports (2026-10-04); actual desktop acceptance and review recorded in the coordination log. Builds on the guarded desktop lesson at `13c60ab` and [Plan 07](07-studies-and-reports.md).
 
 ## Student behavior
 
@@ -26,3 +26,5 @@ Likely files: `src/main/tabs.ts`, `src/main/main.ts`, new report-view/receipt mo
 - Existing desktop tab/process tests and guarded export regressions pass. Review the new file/protocol/IPC boundary before merging.
 
 Exit: a newly saved guarded report opens safely in a SEED tab. PDF, arbitrary HTML imports, report editing and restart history are outside this slice.
+
+Implementation notes: export persists trusted pending hashes before bundle rename; a retry can finish a published pending receipt after checking its original hashes. A pending receipt without a published bundle requires inspection. Report views use an isolated, script-disabled session and a restricted seed-report protocol. Legacy bundles without receipts and restart report history remain outside this slice.

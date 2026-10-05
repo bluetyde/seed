@@ -5,7 +5,7 @@ type TabStatus = "starting" | "running" | "error" | "idle";
 
 interface HostTab {
   id: string;
-  kind: "welcome" | "app";
+  kind: "welcome" | "app" | "report";
   appId?: string;
   title: string;
   icon: string;
@@ -59,6 +59,7 @@ type MenuAction =
   | "nextTab" | "prevTab" | "editRegistry" | "reloadRegistry" | "about" | "chooseInstallRoot" | "checkUpdates";
 
 interface HostApi {
+  openLessonReport(): void;
   runLesson(caseId: string): void;
   cancelLesson(): void;
   saveLesson(): void;
@@ -87,4 +88,4 @@ interface Window {
   host: HostApi;
 }
 
-interface HostLesson { cases: string[]; busy: boolean; cancellable?: boolean; canSave?: boolean; message: string }
+interface HostLesson { cases: string[]; busy: boolean; cancellable?: boolean; canSave?: boolean; reportId?: string; message: string }

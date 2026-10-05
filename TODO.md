@@ -104,7 +104,7 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 
 ## Next desktop lesson work (in order)
 
-- [ ] [Plan 11: report tabs](docs/plans/11-report-tabs.md): auto-open successful exports in isolated SEED tabs; trusted report receipts, safe offline viewing and independent tab lifecycle.
+- [x] 2026-10-04 [Plan 11: report tabs](docs/plans/11-report-tabs.md): auto-open successful exports in isolated SEED tabs; trusted report receipts, safe offline viewing and independent tab lifecycle.
 - [ ] [Plan 12: restart reconnection](docs/plans/12-lesson-reconnection.md): persist trusted request intent, reconcile guarded status/history and reopen report tabs without redispatch.
 - [ ] [Plan 13: human conclusions](docs/plans/13-human-conclusions.md): cited drafts, explicit trusted human review and a new immutable accepted-report version/tab.
 
@@ -113,7 +113,7 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 - [ ] Typed parameter catalog from each adapter; bounded sweeps; explicit budgets (cases, wall-clock, cores, memory, disk); one active case per engine until limits are measured.
 - [~] Single-case exports now reconstruct hash-chained steps with actor, reason, run and oracle verdict from guarded admission evidence; immutable bundle publication. Live append-only multi-run study recording remains.
 - [ ] Comparison of compatible quantities only, with normalization and uncertainty; failed, cancelled, trip and stale runs visible.
-- [~] 2026-10-03 **[agy]** Report builder done (`src/core/report.ts`, 14 tests: deterministic HTML and Markdown, escaping fuzzed over every free-text field, failed attempts listed, UNVERIFIED and STALE badges, educational-use statement); 2026-10-04: now wired to real guarded RAFT CLI/MCP run files through study/report export with checked offline snapshots; saved HTML report inspected in the browser with readable plots and provenance; desktop lesson run/save accepted against real RAFT; report viewing/reconnect and accepted conclusions remain. Original item: Report builder (HTML and Markdown) from a study record fixture; every figure links to a run ID; educational-use statement; injected text escaped [A8].
+- [~] 2026-10-03 **[agy]** Report builder done (`src/core/report.ts`, 14 tests: deterministic HTML and Markdown, escaping fuzzed over every free-text field, failed attempts listed, UNVERIFIED and STALE badges, educational-use statement); 2026-10-04: now wired to real guarded RAFT CLI/MCP run files through study/report export with checked offline snapshots; saved HTML report inspected in the browser with readable plots and provenance; desktop lesson run/save accepted against real RAFT; report tabs now implemented; restart reconnection and accepted conclusions remain. Original item: Report builder (HTML and Markdown) from a study record fixture; every figure links to a run ID; educational-use statement; injected text escaped [A8].
 - [ ] Replay: reproduces within tolerance or lists each difference (version, seed, library, input hash) [A7].
 - [ ] Cache key includes inputs, material revisions, mapping recipe, versions, settings, seeds; one test per component.
 - [ ] E3 exit review: **[codex]**.

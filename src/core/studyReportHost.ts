@@ -9,6 +9,7 @@ import { buildReport, type ReportRun, type Series } from "./report";
 import { validate } from "./validate";
 import { writeFileAtomic } from "./atomicFile";
 import { evaluateGate } from "./policy";
+import { prepareReport, finishReport } from "./reportReceipt";
 
 /** Host-selected human header; requestId is the only client input. No conclusion or approval is invented. */
 export async function exportStudyReport(file: string, headerFile: string | undefined, request: unknown) {
@@ -102,7 +103,12 @@ export async function exportStudyReport(file: string, headerFile: string | undef
       if (!inside(projectRoot, realpathSync(studies))) throw Error("studies folder leaves project");
       const bundleName = `${header.studyId}-${sha256Hex(requestId).slice(0, 16)}`;
       const target = safeChild(studies, bundleName, true);
-      if (existsSync(target)) throw Error("study export already exists; immutable bundles are never overwritten");
+      if (existsSync(target)) {
+        const reportId = finishReport(state, projectRoot, header.projectId, header.studyId, requestId, runId);
+        if (reportId) return { ok: true as const, state: "report-saved", runId, studyId: header.studyId, reportId,
+          report: { html: relative(projectRoot, join(target, "report.html")).replaceAll("\\", "/"), markdown: relative(projectRoot, join(target, "report.md")).replaceAll("\\", "/") } };
+        throw Error("study export already exists; immutable bundles are never overwritten");
+      }
       staging = safeChild(studies, ".report-" + randomBytes(12).toString("hex"), true); mkdirSync(staging);
       const snapshotFiles: { source: string; path: string; sha256: string }[] = [];
       for (const input of record.inputs) {
@@ -119,16 +125,21 @@ export async function exportStudyReport(file: string, headerFile: string | undef
       writeFileAtomic(join(staging, "study.jsonl"), studyLines.join("\n") + "\n");
       writeFileAtomic(join(staging, "report.html"), report.value.html);
       writeFileAtomic(join(staging, "report.md"), report.value.markdown);
-      writeHostJson(join(staging, "evidence.json"), { schema: "seed.study-evidence/0.1", requestId, runId, header, exportDecision,
+      const savedEvidence = { schema: "seed.study-evidence/0.1", requestId, runId, header, exportDecision,
         admission: { journalVerified: true, projectId: header.projectId, configHash: sha256Hex(configBytes),
           references: [admission, decision, outcome].map(row => ({ seq: row.seq, hash: row.hash, prev: row.prev, time: row.time })),
           request: admitted.request, decision: gate, outcome: (outcome.event as any).event,
-          runtimeSha256: c.runtime.sha256 }, oracle, record, stale, snapshotFiles });
+          runtimeSha256: c.runtime.sha256 }, oracle, record, stale, snapshotFiles };
+      writeHostJson(join(staging, "evidence.json"), savedEvidence);
       if (sha256Hex(readFileSync(file)) !== sha256Hex(configBytes) || canonicalJson(readHostJson(headerFile)) !== canonicalJson(header) ||
         canonicalJson(readHostJson(safeChild(runRoot, "run-record.json"))) !== canonicalJson(record)) throw Error("study evidence changed during export");
       for (const output of record.outputs ?? []) checked(output.path, output.sha256);
+      prepareReport(state, projectRoot, header.projectId, header.studyId, requestId, runId, relative(projectRoot, target),
+        [sha256Hex(report.value.html), sha256Hex(studyLines.join("\n") + "\n"), sha256Hex(JSON.stringify(savedEvidence, null, 2) + "\n")]);
       renameSync(staging, target); staging = undefined;
+      const reportId = finishReport(state, projectRoot, header.projectId, header.studyId, requestId, runId)!;
       return { ok: true as const, state: "report-saved", runId, studyId: header.studyId,
+        reportId,
         report: { html: relative(projectRoot, join(target, "report.html")).replaceAll("\\", "/"), markdown: relative(projectRoot, join(target, "report.md")).replaceAll("\\", "/") } };
     });
     return locked.ok ? locked.value : { ok: false as const, errors: locked.errors };

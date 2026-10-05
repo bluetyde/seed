@@ -10,6 +10,12 @@ const three = () => {
 };
 
 describe("TabModel", () => {
+  it("keeps report versions independent of app tabs and focuses duplicate report identities", () => {
+    const m = three(); m.openReport("one", "Report one"); m.openReport("two", "Report two"); m.openReport("one", "Report one");
+    expect(m.tabs).toHaveLength(5); expect(m.activeId).toBe("report:one");
+    m.close("report:one"); expect(m.tabs.filter(t => t.kind === "app")).toHaveLength(3);
+    expect(m.tabs.find(t => t.id === "report:two")).toBeDefined();
+  });
   it("opens one tab per app and re-activates it instead of duplicating", () => {
     const m = three();
     m.openApp("openmc", "OpenMC");
