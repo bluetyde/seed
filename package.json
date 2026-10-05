@@ -11,6 +11,7 @@
     "test": "npm run build && vitest run",
     "seed:cli": "node dist/cli/seed.js",
     "seed:mcp": "node dist/mcp/seed.js",
+    "seed:admin": "node dist/cli/admin.js",
     "test:e2:raft": "npm run build && node scripts/test-e2-raft.cjs",
     "test:launcher": "node --test scripts/test-windows-launcher.cjs",
     "e2e": "npm run build && playwright test -c tests/e2e/playwright.config.ts"
