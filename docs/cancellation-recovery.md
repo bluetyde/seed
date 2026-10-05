@@ -12,7 +12,7 @@ Cancellation is an A1 operation; at A0 an agent needs a separate scoped `cancel`
 
 ## Recover an abandoned calculation
 
-Recovery is currently a trusted human CLI action, not an MCP tool. Select an externally provisioned host configuration with a human actor, the original project/study and exactly the same adapter/runtime recipe. Run `node dist/cli/seed.js recover` with `{"requestId":"original-request"}` on stdin.
+Recovery is currently a trusted human CLI action, not an MCP tool. Select an externally provisioned host configuration with a human actor, the original project/study and exactly the same adapter/runtime recipe. Run `node dist/cli/admin.js recover` with `SEED_ADMIN_HOST_CONFIG` with `{"requestId":"original-request"}` on stdin.
 
 The host requires an existing matching lease/active record and a dead supervisor. A live PID, including an ambiguous reused PID, blocks recovery. A recovery guard serializes attempts. Under the project writer lock it matches the saved nonterminal run, original request ID, study, adapter and job identity against the authoritative launch binding in external host state, records the recovery request, and asks the configured adapter to cancel the externally bound job directly. A project record is never reread to choose the native stop target. A record change during the stop keeps the lease for inspection even when the bound job was stopped. A confirmed cancellation records the run as cancelled, appends recovery evidence and permits removal of that exact lease.
 

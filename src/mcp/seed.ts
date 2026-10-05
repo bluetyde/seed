@@ -7,48 +7,104 @@ import { exportStudyReport } from "../core/studyReportHost";
 
 export const MAX_MCP_BYTES = 1_048_576;
 const positiveInteger = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
-const requestSchema = z.object({
-  requestId: z.string().min(1).max(256),
-  caseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
-  budget: z.object({ maxWallSeconds: positiveInteger, maxCores: positiveInteger,
-    maxMemoryMB: positiveInteger, maxDiskMB: positiveInteger }).strict(),
-}).strict();
+const requestSchema = z
+  .object({
+    requestId: z.string().min(1).max(256),
+    caseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+    budget: z
+      .object({
+        maxWallSeconds: positiveInteger,
+        maxCores: positiveInteger,
+        maxMemoryMB: positiveInteger,
+        maxDiskMB: positiveInteger,
+      })
+      .strict(),
+  })
+  .strict();
 
 /** The path is selected once by the trusted process environment, never by MCP arguments. */
 export function createSeedMcpServer(hostConfig: string): McpServer {
   const studyHeader = process.env.SEED_STUDY_HEADER;
-  const server = new McpServer({ name: "seed", version: "0.1.0" }, {
-    instructions: "Run only host-registered cases. Authority, approved inputs and oracle evidence come from the trusted SEED host. No approval/configuration tools. Calls wait for terminal results; cancellation or disconnect does not stop a calculation. Keep the connection open and allow the configured wall budget plus cleanup time.",
-  });
-  server.registerTool("seed_run_case", {
-    title: "Run an approved SEED case",
-    description: "Run one registered case through SEED's guarded host. Host policy, scoped approvals, input revisions and oracle/runtime pins are checked; admission is recorded before launch. Only requestId, caseId and a positive-integer budget are accepted. Refusal and calculation failure return isError with typed SEED errors. One active case per engine using shared host state. Budget admission does not enforce OS CPU/memory/disk limits. Synthetic RAFT results have limited validation coverage. Use seed_cancel_calculation for an actual stop; cancelling the MCP request alone does not stop it. Recovery is a human CLI action; no approval tool exists.",
-    inputSchema: requestSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async request => {
-    const outcome = await supervisedRun(hostConfig, request);
-    const reply = { schema: "seed.mcp-reply/0.1", ...outcome };
-    return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply,
-      isError: !outcome.ok || outcome.state !== "completed" };
-  });
-  server.registerTool("seed_cancel_calculation", {
-    title: "Request calculation cancellation",
-    description: "Request actual cancellation of this host's active calculation by its original requestId. Fresh host policy and scoped cancellation approval are checked again by the calculation owner, which durably audits before calling the adapter. A cancellation-requested reply acknowledges the request, not a confirmed stop; the original run call supplies the terminal result. No PID, native job ID, path or actor is accepted. Abandoned owners require human CLI recovery.",
-    inputSchema: z.object({ requestId: z.string().min(1).max(256) }).strict(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async request => {
-    const reply = { schema: "seed.mcp-reply/0.1", ...requestHostCancellation(hostConfig, request) };
-    return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
-  });
-  server.registerTool("seed_export_study_report", {
-    title: "Save a single-case study report",
-    description: "Save immutable HTML, Markdown, hash-chained study steps and admission/oracle evidence for a terminal guarded run. Only its original requestId is accepted. Human study header and output directory are host-selected; fresh append-step policy applies. Completed quantity plots currently support RAFT. No conclusion or approval is invented; existing verification and stale labels remain. Existing bundles are never overwritten.",
-    inputSchema: z.object({ requestId: z.string().min(1).max(256) }).strict(),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async request => {
-    const reply = { schema: "seed.mcp-reply/0.1", ...await exportStudyReport(hostConfig, studyHeader, request) };
-    return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
-  });
+  const server = new McpServer(
+    { name: "seed", version: "0.1.0" },
+    {
+      instructions:
+        "Run only host-registered cases. Authority, approved inputs and oracle evidence come from the trusted SEED host. No approval/configuration tools. Calls wait for terminal results; cancellation or disconnect does not stop a calculation. Keep the connection open and allow the configured wall budget plus cleanup time.",
+    },
+  );
+  server.registerTool(
+    "seed_run_case",
+    {
+      title: "Run an approved SEED case",
+      description:
+        "Run one registered case through SEED's guarded host. Host policy, scoped approvals, input revisions and oracle/runtime pins are checked; admission is recorded before launch. Only requestId, caseId and a positive-integer budget are accepted. Refusal and calculation failure return isError with typed SEED errors. One active case per engine using shared host state. Budget admission does not enforce OS CPU/memory/disk limits. Synthetic RAFT results have limited validation coverage. Use seed_cancel_calculation for an actual stop; cancelling the MCP request alone does not stop it. Recovery is a human CLI action; no approval tool exists.",
+      inputSchema: requestSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async request => {
+      const outcome = await supervisedRun(hostConfig, request);
+      const reply = { schema: "seed.mcp-reply/0.1", ...outcome };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !outcome.ok || outcome.state !== "completed",
+      };
+    },
+  );
+  server.registerTool(
+    "seed_cancel_calculation",
+    {
+      title: "Request calculation cancellation",
+      description:
+        "Request actual cancellation of this host's active calculation by its original requestId. Fresh host policy and scoped cancellation approval are checked again by the calculation owner, which durably audits before calling the adapter. A cancellation-requested reply acknowledges the request, not a confirmed stop; the original run call supplies the terminal result. No PID, native job ID, path or actor is accepted. Abandoned owners require human CLI recovery.",
+      inputSchema: z.object({ requestId: z.string().min(1).max(256) }).strict(),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...requestHostCancellation(hostConfig, request) };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !reply.ok,
+      };
+    },
+  );
+  server.registerTool(
+    "seed_export_study_report",
+    {
+      title: "Save a single-case study report",
+      description:
+        "Save immutable HTML, Markdown, hash-chained study steps and admission/oracle evidence for a terminal guarded run. Only its original requestId is accepted. Human study header and output directory are host-selected; fresh append-step policy applies. Completed quantity plots currently support RAFT. No conclusion or approval is invented; existing verification and stale labels remain. Existing bundles are never overwritten.",
+      inputSchema: z.object({ requestId: z.string().min(1).max(256) }).strict(),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async request => {
+      const reply = {
+        schema: "seed.mcp-reply/0.1",
+        ...(await exportStudyReport(hostConfig, studyHeader, request)),
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !reply.ok,
+      };
+    },
+  );
   return server;
 }
 
@@ -56,13 +112,23 @@ export async function startSeedMcp(hostConfig = process.env.SEED_HOST_CONFIG): P
   if (!hostConfig) throw Error("set SEED_HOST_CONFIG in the trusted host environment");
   const server = createSeedMcpServer(hostConfig);
   const transport = new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: MAX_MCP_BYTES });
-  server.server.onerror = () => { process.stderr.write("SEED MCP protocol/transport error\n"); };
+  server.server.onerror = () => {
+    process.stderr.write("SEED MCP protocol/transport error\n");
+  };
   // EOF stops new requests. In-flight host operations retain the lease and finish their journal.
-  process.stdin.once("end", () => { void transport.close(); });
-  process.stdout.on("error", () => { void transport.close(); });
+  process.stdin.once("end", () => {
+    void transport.close();
+  });
+  process.stdout.on("error", () => {
+    void transport.close();
+  });
   await server.connect(transport);
   return server;
 }
 if (require.main === module) {
-  startSeedMcp().catch(() => { process.stderr.write("SEED MCP setup failed; check SEED_HOST_CONFIG\n"); process.exitCode = 2; process.stdin.destroy(); });
+  startSeedMcp().catch(() => {
+    process.stderr.write("SEED MCP setup failed; check SEED_HOST_CONFIG\n");
+    process.exitCode = 2;
+    process.stdin.destroy();
+  });
 }

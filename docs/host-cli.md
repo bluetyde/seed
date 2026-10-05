@@ -8,7 +8,7 @@ Example request (budget must fit the configured study):
 {"requestId":"lesson-1","caseId":"approved-case","budget":{"maxWallSeconds":30,"maxCores":1,"maxMemoryMB":512,"maxDiskMB":512}}
 ```
 
-The client cannot provide an actor, policy, executable, input path, parameters or approval. Unknown fields and verbs are refused. The `cancel` and human-only `recover` verbs accept only the original requestId; see [cancellation and recovery](cancellation-recovery.md). Input is bounded to 1 MiB and must finish within ten seconds. There is no CLI approval or configuration-writing command.
+The client cannot provide an actor, policy, executable, input path, parameters or approval. Unknown fields and verbs are refused. The `cancel` verb accepts only the original requestId, as does the human-only `recover`, which lives in the separate admin entry (`node dist/cli/admin.js recover`, `SEED_ADMIN_HOST_CONFIG`, never in the agent CLI); see [cancellation and recovery](cancellation-recovery.md). Input is bounded to 1 MiB and must finish within ten seconds. There is no CLI approval or configuration-writing command.
 
 The `report` verb also accepts only the original requestId. With a trusted external human `SEED_STUDY_HEADER`, it saves a guarded single-case study/report bundle; see [setup and limits](study-report.md).
 

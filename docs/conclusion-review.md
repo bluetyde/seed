@@ -22,10 +22,10 @@ The Welcome lesson card offers a single-claim draft text box for the selected sa
 Trusted setup selects `SEED_REVIEWER_CONFIG`, an absolute regular JSON file outside the project. It has exactly this shape, with IDs matching the study/project:
 
 ```json
-{"schema":"seed.reviewer/0.1","projectId":"project-id","studyId":"study-id","actor":{"kind":"human","name":"Reviewer name"}}
+{"schema":"seed.reviewer/0.2","osUser":"windows-or-unix-account-name","projectId":"project-id","studyId":"study-id","actor":{"kind":"human","name":"Reviewer name"}}
 ```
 
-Protect this file and the other external host state using the trusted setup's filesystem permissions. Moving a file outside the project does not itself establish reviewer identity. The renderer supplies neither reviewer identity nor an acceptance decision; the main process resolves the native dialog response. The same configured agent is never promoted to a human by opening this dialog.
+`osUser` is the operating-system account allowed to use the file: a copy made for another account is refused. On POSIX the file must also be owned by the running account and not writable by group or others (Windows has no such check here). These checks make misuse harder; they do not authenticate a person. Anyone who can write the file as that account can still name that account, so the human decision remains the native confirmation dialog, answered at the desktop. Moving a file outside the project does not itself establish reviewer identity. The renderer supplies neither reviewer identity nor an acceptance decision; the main process resolves the native dialog response. The same configured agent is never promoted to a human by opening this dialog.
 
 The implemented `seed.conclusion-review/0.1` receipt binds project/study IDs, source report/head and draft identity/hash; host-resolved human reviewer/time; decision (`accepted` or `rejected`); exact display hash and acknowledged current input hashes, stale/pin/verification limits; exact claims and proposing actor. Its hash covers the canonical record excluding `hash`. A project lock revalidates identity, evidence, current inputs and current policy before a new decision. An accepted receipt never relabels unverified physics as verified.
 
