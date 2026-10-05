@@ -1,6 +1,6 @@
 # RAFT adapter (first real adapter, D5)
 
-2026-10-03. `adapters/raft/cli.cjs` and `job.cjs` implement the seven-verb protocol (transport: CLI per verb, [plan 03](plans/03-adapters-and-transport.md)) over RAFT's headless runner (`docs/headless.md` in the RAFT repo, in RAFT main). Tests: `tests/raft-adapter.test.ts`, `tests/raft-adapter-review.test.ts`, `tests/raft-oracles.test.ts`, `tests/fixtures/raft-stub/` (a scripted stand-in runner).
+2026-10-03. `adapters/raft/cli.cjs` (on the shared wrapper and flows, no `job.cjs` of its own) implements the seven-verb protocol (transport: CLI per verb, [plan 03](plans/03-adapters-and-transport.md)) over RAFT's headless runner (`docs/headless.md` in the RAFT repo, in RAFT main). Tests: `tests/raft-adapter.test.ts`, `tests/raft-adapter-review.test.ts`, `tests/raft-oracles.test.ts`, `tests/fixtures/raft-stub/` (a scripted stand-in runner).
 
 ## Configuration (host environment only, never a project file or a request)
 

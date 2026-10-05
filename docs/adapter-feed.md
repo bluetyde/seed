@@ -1,6 +1,6 @@
 # Adapter: Fuel Performance Studio (FEED)
 
-2026-10-05. `adapters/feed/cli.cjs` and `job.cjs` implement the seven-verb protocol (transport: CLI per verb) over FEED's headless runner (`src/cli/headless.ts`, built to `dist/cli/headless.js` in the FEED repo, private repo `bluetyde/feed`). Modelled on [the RAFT adapter](adapter-raft.md). Tests: `tests/feed-adapter.test.ts` (scripted stand-in runner in `tests/fixtures/feed-stub/`, no solver needed), `tests/feed-oracles.test.ts` (real runner and solver, skipped without them).
+2026-10-05. `adapters/feed/cli.cjs` (on the shared wrapper and flows, no `job.cjs` of its own) implements the seven-verb protocol (transport: CLI per verb) over FEED's headless runner (`src/cli/headless.ts`, built to `dist/cli/headless.js` in the FEED repo, private repo `bluetyde/feed`). Modelled on [the RAFT adapter](adapter-raft.md). Tests: `tests/feed-adapter.test.ts` (scripted stand-in runner in `tests/fixtures/feed-stub/`, no solver needed), `tests/feed-oracles.test.ts` (real runner and solver, skipped without them).
 
 FEED is a **thermal** calculation only (1D radial steady-state pin: fuel, gap, cladding, coolant film). Every result index carries that statement in `extensions.feed.thermalOnly`. Nothing here says anything about stress, failure or integrity.
 
