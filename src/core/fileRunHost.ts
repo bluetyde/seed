@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import Ajv2020 from "ajv/dist/2020";
-import { sha256Hex } from "./canonical";
+import { canonicalJson, sha256Hex } from "./canonical";
 import { checkOracleInputs, latestEntries, loadOracleEntries, pinsOf, type PinSet, type SetResult } from "./oracle";
 import { evaluateGate, issueGrant, type Actor, type Grant, type PolicyStudy } from "./policy";
 import { controlBinding } from "./hostControl";
@@ -10,7 +10,7 @@ import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runD
 import { openProject } from "./projectStore";
 import { type RunOutcome } from "./runManager";
 import { type AdapterSpec } from "./adapterClient";
-import { appendAdmission, inside, readHostJson, regularFile, withEngineLease, writeHostJson } from "./hostFiles";
+import { appendAdmission, inside, readAdmissions, readHostJson, regularFile, withEngineLease, writeHostJson } from "./hostFiles";
 
 export type HostConfiguration = {
   schema: "seed.host/0.1"; projectRoot: string; stateRoot: string;
@@ -144,7 +144,15 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
         }
         finally { clearInterval(timer); }
         dispatched = outcome;
-        audit("outcome", outcome.ok ? { ok: true, runId: outcome.runId, state: outcome.state } : outcome);
+        let replayOf: string | undefined;
+        if (outcome.ok && outcome.replayed) {
+          const original = readAdmissions(engineRoot).find((row: any) => row.event.phase === "outcome" && row.event.projectId === p.value.manifest.projectId &&
+            row.event.configHash === configHash && row.event.event.ok === true && row.event.event.runId === outcome.runId);
+          const evidence = original?.event as any;
+          if (!original || evidence.event.state !== outcome.state || evidence.event.recordSha256 !== sha256Hex(canonicalJson(outcome.record))) throw Error("replayed record differs from original audited outcome or lacks a trusted hash");
+          replayOf = original.hash;
+        }
+        audit("outcome", outcome.ok ? { ok: true, runId: outcome.runId, state: outcome.state, recordSha256: sha256Hex(canonicalJson(outcome.record)), ...(replayOf ? { replayOf } : {}) } : outcome);
         if (outcome.ok && ["completed", "cancelled", "terminated-by-trip"].includes(outcome.state)) writeHostJson(join(lease, "owner.json"), { ...owner, retain: false });
         return outcome;
       } catch (e) {

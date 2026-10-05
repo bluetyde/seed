@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,10 @@ import { runFromHostFile, saveHostConfiguration } from "../src/core/fileRunHost"
 import { writeHostJson } from "../src/core/hostFiles";
 import { recoverHostCalculation } from "../src/core/hostControl";
 import { isAlive } from "../src/core/procTree";
-import { createProject } from "../src/core/projectStore";
+import { createProject, openProject } from "../src/core/projectStore";
+import { makeHeader } from "./helpers/studyFixtures";
+import { verifyStudyLog } from "../src/core/semantic";
+import { exportStudyReport } from "../src/core/studyReportHost";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
@@ -154,7 +157,58 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const log = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
     expect(log.map(row => row.event.phase)).toEqual(["request", "decision", "outcome"]);
     expect(log[1].event.event.decision.allow).toBe(true); expect(log[2].event.event.runId).toBe(reply.runId);
+    const opened = openProject(project); if (!opened.ok) throw Error("project did not reopen");
+    const foreignMarker = "PRIVATE-OTHER-PROJECT-CONFIGURATION";
+    const sharedEngine = join(state, "engines", sha256Hex(bundle));
+    for (const [phase, event] of [
+      ["request", { request: { requestId: "real-mcp" }, configuration: { private: foreignMarker } }],
+      ["decision", { requestId: "real-mcp", decision: { allow: true } }],
+      ["outcome", { ok: true, runId: "r-other-project", state: "completed" }],
+    ] as const) hostFiles.appendAdmission(sharedEngine, { phase, projectId: "other-project", configHash: sha256Hex("other-project-config"), event });
+    const headerFile = join(hostRoot, "study-header.json");
+    writeHostJson(headerFile, makeHeader({ studyId: study.studyId, projectId: opened.value.manifest.projectId,
+      question: "How does this synthetic case evolve? <script>alert('test')</script>", hypothesis: "Examine the recorded series without making a safety claim.",
+      assumptions: ["Synthetic RAFT library; limited oracle coverage", "No conclusion accepted by a human"],
+      parameters: [], budget, tier: study.tier, startRevisions: entry.inputs.map((i, n) => ({ artifact: `input-${n}`, revision: i.sha256 })) }));
+    const reportRecordPath = join(project, "runs", reply.runId, "run-record.json"), reportRecordBytes = readFileSync(reportRecordPath);
+    writeHostJson(reportRecordPath, { ...JSON.parse(reportRecordBytes.toString()), settings: { case: artifact.path, injected: true } });
+    expect((await exportStudyReport(config, headerFile, { requestId: "real-cli" })).ok).toBe(false);
+    expect((await runFromHostFile(config, { requestId: "real-cli", caseId: "approved", budget })).ok).toBe(false);
+    expect((await exportStudyReport(config, headerFile, { requestId: "real-cli" })).ok).toBe(false);
+    writeFileSync(reportRecordPath, reportRecordBytes);
+    expect(await runFromHostFile(config, { requestId: "real-cli", caseId: "approved", budget })).toMatchObject({ ok: true, state: "completed", replayed: true });
+    const reportDataPath = join(project, q.data.path), reportDataBytes = readFileSync(reportDataPath);
+    writeFileSync(reportDataPath, Buffer.concat([reportDataBytes, Buffer.from(" ")]));
+    expect((await exportStudyReport(config, headerFile, { requestId: "real-cli" })).ok).toBe(false);
+    writeFileSync(reportDataPath, reportDataBytes);
+    const manifestPath = join(project, "seed.project.json"), manifestBytes = readFileSync(manifestPath);
+    const outsideStudies = join(hostRoot, "outside-studies"); mkdirSync(outsideStudies);
+    symlinkSync(outsideStudies, join(project, "redirect"), process.platform === "win32" ? "junction" : "dir");
+    writeHostJson(manifestPath, { ...opened.value.manifest, folders: { ...(opened.value.manifest.folders as any), studies: "redirect/new-directory" } });
+    try {
+      expect((await exportStudyReport(config, headerFile, { requestId: "real-cli" })).ok).toBe(false);
+      expect(existsSync(join(outsideStudies, "new-directory"))).toBe(false);
+    } finally { writeFileSync(manifestPath, manifestBytes); unlinkSync(join(project, "redirect")); }
+    const cliReport = spawnSync(process.execPath, [join(__dirname, "../dist/cli/seed.js"), "report"], {
+      input: JSON.stringify({ requestId: "real-cli" }), encoding: "utf8", timeout: 30000, env: { ...process.env, SEED_HOST_CONFIG: config, SEED_STUDY_HEADER: headerFile } });
+    expect(cliReport.status, cliReport.stdout + cliReport.stderr).toBe(0);
+    const savedReport = JSON.parse(cliReport.stdout);
+    const cliHtml = readFileSync(join(project, savedReport.report.html), "utf8");
+    expect(cliHtml).toContain(reply.runId); expect(cliHtml).toContain("UNVERIFIED");
+    expect(cliHtml).toContain("&lt;script&gt;"); expect(cliHtml).not.toContain("<script>alert");
+    const studyDir = dirname(join(project, savedReport.report.html));
+    expect(verifyStudyLog(readFileSync(join(studyDir, "study.jsonl"), "utf8").trim().split("\n"))).toEqual([]);
+    const evidenceBundle = JSON.parse(readFileSync(join(studyDir, "evidence.json"), "utf8"));
+    expect(JSON.stringify(evidenceBundle)).not.toContain(foreignMarker);
+    for (const snapshot of evidenceBundle.snapshotFiles) expect(sha256Hex(readFileSync(join(studyDir, snapshot.path)))).toBe(snapshot.sha256);
+    expect((await exportStudyReport(config, headerFile, { requestId: "real-cli" })).ok).toBe(false);
+    expect((await exportStudyReport(config, headerFile, { requestId: "real-cli", path: "elsewhere" })).ok).toBe(false);
+    const savedHeader = readFileSync(headerFile); writeHostJson(headerFile, { ...JSON.parse(savedHeader.toString()), tier: "A0" });
+    expect((await exportStudyReport(config, headerFile, { requestId: "real-mcp" })).ok).toBe(false);
+    writeFileSync(headerFile, savedHeader);
+    const priorHeader = process.env.SEED_STUDY_HEADER; process.env.SEED_STUDY_HEADER = headerFile;
     const m = await connectSeedMcp(config);
+    if (priorHeader === undefined) delete process.env.SEED_STUDY_HEADER; else process.env.SEED_STUDY_HEADER = priorHeader;
     try {
       const result = await m.client.callTool({ name: "seed_run_case", arguments: { requestId: "real-mcp", caseId: "approved", budget } }, undefined, { timeout: 360000 });
       expect(result.isError).toBe(false);
@@ -164,9 +218,25 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       const mq = mcpIndex.quantities.find((q: any) => q.name === entry.expected.quantity);
       expect(JSON.parse(readFileSync(join(project, mq.data.path), "utf8")).values).toEqual(values);
       expect(m.stderr()).toBe("");
-      const journal = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
-      expect(journal.map(row => row.event.phase)).toEqual(["request", "decision", "outcome", "request", "decision", "outcome"]);
-      expect(journal[5].event.event.runId).toBe(mcpReply.runId);
+      const journal = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)).filter(row => row.event.projectId === opened.value.manifest.projectId);
+      expect(journal.slice(-3).map(row => row.event.phase)).toEqual(["request", "decision", "outcome"]);
+      expect(journal.at(-1).event.event.runId).toBe(mcpReply.runId);
+      const caseFile = join(project, artifact.path), caseBytes = readFileSync(caseFile);
+      writeFileSync(caseFile, Buffer.concat([caseBytes, Buffer.from(" ")]));
+      const mcpExport = await m.client.callTool({ name: "seed_export_study_report", arguments: { requestId: "real-mcp" } });
+      writeFileSync(caseFile, caseBytes);
+      expect(mcpExport.isError, JSON.stringify(mcpExport)).toBe(false);
+      const exported = mcpExport.structuredContent as any;
+      const mcpHtml = readFileSync(join(project, exported.report.html), "utf8");
+      expect(mcpHtml).toContain(mcpReply.runId); expect(mcpHtml).toContain("UNVERIFIED");
+      expect(mcpHtml).toContain("STALE");
+      expect(readFileSync(join(dirname(join(project, exported.report.html)), "evidence.json"), "utf8")).not.toContain(foreignMarker);
+      expect(verifyStudyLog(readFileSync(join(dirname(join(project, exported.report.html)), "study.jsonl"), "utf8").trim().split("\n"))).toEqual([]);
+      if (process.env.SEED_STUDY_DEMO_OUTPUT) {
+        mkdirSync(process.env.SEED_STUDY_DEMO_OUTPUT, { recursive: true });
+        cpSync(studyDir, join(process.env.SEED_STUDY_DEMO_OUTPUT, "cli-study"), { recursive: true });
+        cpSync(dirname(join(project, exported.report.html)), join(process.env.SEED_STUDY_DEMO_OUTPUT, "mcp-study"), { recursive: true });
+      }
     } finally { await m.client.close(); }
 
     // Lifecycle acceptance only: lengthen a registered synthetic case, without claiming new physics oracle coverage.

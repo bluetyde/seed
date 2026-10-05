@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { supervisedRun } from "./supervisor";
 import { requestHostCancellation } from "../core/hostControl";
+import { exportStudyReport } from "../core/studyReportHost";
 
 export const MAX_MCP_BYTES = 1_048_576;
 const positiveInteger = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
@@ -15,6 +16,7 @@ const requestSchema = z.object({
 
 /** The path is selected once by the trusted process environment, never by MCP arguments. */
 export function createSeedMcpServer(hostConfig: string): McpServer {
+  const studyHeader = process.env.SEED_STUDY_HEADER;
   const server = new McpServer({ name: "seed", version: "0.1.0" }, {
     instructions: "Run only host-registered cases. Authority, approved inputs and oracle evidence come from the trusted SEED host. No approval/configuration tools. Calls wait for terminal results; cancellation or disconnect does not stop a calculation. Keep the connection open and allow the configured wall budget plus cleanup time.",
   });
@@ -36,6 +38,15 @@ export function createSeedMcpServer(hostConfig: string): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async request => {
     const reply = { schema: "seed.mcp-reply/0.1", ...requestHostCancellation(hostConfig, request) };
+    return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
+  });
+  server.registerTool("seed_export_study_report", {
+    title: "Save a single-case study report",
+    description: "Save immutable HTML, Markdown, hash-chained study steps and admission/oracle evidence for a terminal guarded run. Only its original requestId is accepted. Human study header and output directory are host-selected; fresh append-step policy applies. Completed quantity plots currently support RAFT. No conclusion or approval is invented; existing verification and stale labels remain. Existing bundles are never overwritten.",
+    inputSchema: z.object({ requestId: z.string().min(1).max(256) }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async request => {
+    const reply = { schema: "seed.mcp-reply/0.1", ...await exportStudyReport(hostConfig, studyHeader, request) };
     return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
   });
   return server;
