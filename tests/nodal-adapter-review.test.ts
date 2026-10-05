@@ -156,12 +156,12 @@ describe.skipIf(!haveNodal)("NODAL adapter: review fixes (Codex, 2026-10-05)", (
     const p = nodalProject("pumped-loop", longModel);
     prepareRunDir(p.root, p.inputs, "runs/r");
     const absRun = join(p.root, "runs", "r");
-    const lookalike = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", join(__dirname, "..", "adapters", "nodal", "job.cjs"), absRun + "-longer"], { stdio: "ignore", detached: true });
+    const token = "look-token";
+    const lookalike = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", join(__dirname, "..", "adapters", "shared", "job.cjs"), absRun + "-longer", token], { stdio: "ignore", detached: true });
     lookalike.unref();
     pids.push(lookalike.pid!);
     const native = join(absRun, "native");
     mkdirSync(native, { recursive: true });
-    const token = "look-token";
     writeFileSync(join(native, "job.json"), JSON.stringify({ jobId: "job-look", requestId: "req-look", pid: lookalike.pid, token, model: p.modelPath, inputs: p.inputs }));
     writeFileSync(join(native, "status.json"), JSON.stringify({ status: "running" }));
     writeFileSync(join(native, "heartbeat.json"), JSON.stringify({ token, time: new Date().toISOString() }));

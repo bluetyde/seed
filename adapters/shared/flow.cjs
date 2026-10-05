@@ -91,11 +91,20 @@ async function startJob({ root, request, absRunDir, record: extra, runSpec, canc
     fs.writeFileSync(jobJsonPath, json(record), { flag: "wx" });
   } catch (err) {
     if (!err || err.code !== "EEXIST") throw err;
-    const existing = readJson(jobJsonPath);
+    let existing = readJson(jobJsonPath);
     if (existing && existing.requestId === request.requestId) {
-      // A reservation without a process id is a launch that has not committed (or failed): it is not a running job.
-      if (!Number.isInteger(existing.pid)) return fail(typed("E_REQUEST_CONFLICT", "", "the launch of this request is still being registered; retry shortly"));
-      return reply({ ok: true, result: { jobId: existing.jobId, runDir: request.runDir, lifecycle: "running" } });
+      // The request id is the idempotency key: the same request gives the same job. A reservation without a process id is a launch that has
+      // not committed yet (another call of this request is starting it): wait for it, because answering "running" for a launch that then
+      // fails would name a job that never existed.
+      for (let waited = 0; waited < 20000 && existing && existing.requestId === request.requestId && !Number.isInteger(existing.pid); waited += 100) {
+        await new Promise((r) => setTimeout(r, 100));
+        existing = readJson(jobJsonPath);
+      }
+      if (existing && existing.requestId === request.requestId && Number.isInteger(existing.pid)) {
+        return reply({ ok: true, result: { jobId: existing.jobId, runDir: request.runDir, lifecycle: "running" } });
+      }
+      if (!existing) return fail(typed("E_REQUEST_CONFLICT", "", "the earlier launch of this request failed and was rolled back; start it again"));
+      if (existing.requestId === request.requestId) return fail(typed("E_REQUEST_CONFLICT", "", "the launch of this request is still being registered; retry shortly"));
     }
     return fail(typed("E_REQUEST_CONFLICT", "", "this run folder already belongs to another request"));
   }
