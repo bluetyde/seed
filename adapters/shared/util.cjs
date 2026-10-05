@@ -224,6 +224,13 @@ function argvOf(cl) {
 const normPath = (x) => (win ? x.split(BACKSLASH).join("/").toLowerCase() : x);
 
 
+/** Canonical JSON (sorted keys): two parsed documents are the same exactly when these strings are equal. */
+function canonical(v) {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
+  return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
+}
+
 /** SEED's typed error: field and message are bounded and stripped of control characters. `source` is "app-content" when the message quotes the app. */
 const typed = (code, field, message, source = "seed") => ({ code, field: String(field).slice(0, 200), message: String(message).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, 900) || "(no message)", source });
 
@@ -283,5 +290,5 @@ function ownsJobProcess(j, s, jobScript) {
 module.exports = {
   BACKSLASH, MAX_CAPTURE, HEARTBEAT_FRESH_MS, STARTUP_GRACE_MS, win, sameOrInside, winDir, portableRel, isAlive, commandLine, killTree, waitDead,
   atomicWrite, json, readJson, insideRoot, containedBelow, jobsDir, jobIdFor, jobIndexPath, findJob, snapshotProblem, appFailed, sha256,
-  argvOf, normPath, typed, jobState, ownsJobProcess,
+  argvOf, normPath, canonical, typed, jobState, ownsJobProcess,
 };

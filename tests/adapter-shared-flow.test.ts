@@ -155,6 +155,26 @@ describe("starting and cancelling a job", () => {
     expect(reply(await ask(root, { verb: "status", jobId: first.result.jobId })).result.lifecycle).toBe("running"); // and the first job is untouched
   }, 60000);
 
+  it("the request id is the idempotency key: the same payload gives the same job, another payload is a conflict", async () => {
+    const root = project();
+    const runDir = runFolder(root, "payload");
+    const first = await startAndTrack(root, "req-payload", runDir, { mode: "hang" });
+    expect(first.ok, JSON.stringify(first.errors)).toBe(true);
+    const again = reply(await ask(root, runReq("req-payload", runDir, { mode: "hang" })));
+    expect(again.ok).toBe(true);
+    expect(again.result.jobId).toBe(first.result.jobId); // the same request again: the same job, nothing new started
+    for (const [what, request] of [
+      ["other settings", runReq("req-payload", runDir, { mode: "hang", extra: 1 })],
+      ["another seed", { ...runReq("req-payload", runDir, { mode: "hang" }), seed: 5 }],
+      ["other inputs", { ...runReq("req-payload", runDir, { mode: "hang" }), snapshot: { inputs: [{ path: "models/x.json", sha256: "1".repeat(64) }] } }],
+    ] as const) {
+      const r = reply(await ask(root, request));
+      expect(r.ok, what).toBe(false);
+      expect(r.errors[0]?.code, what).toBe("E_REQUEST_CONFLICT");
+    }
+    expect(reply(await ask(root, { verb: "status", jobId: first.result.jobId })).result.lifecycle).toBe("running"); // and the first job is untouched
+  }, 60000);
+
   it("a failed launch leaves no job or registry entry behind, and the same request can be started again", async () => {
     const root = project();
     const runDir = runFolder(root, "bad");

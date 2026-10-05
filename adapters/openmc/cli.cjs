@@ -354,8 +354,6 @@ async function run(request, root, reply, fail) {
   const settings = request.settings || {};
   const unknown = Object.keys(settings).find((k) => !["project", "model", "threads"].includes(k));
   if (unknown !== undefined) return fail(typed("E_UNSUPPORTED", "/settings/" + unknown, "unknown setting; this adapter takes project, model and threads"));
-  // The seed is part of the project (it is hashed with it); a second one in the request would be a different run than the record says.
-  if (request.seed !== undefined) return fail(typed("E_UNSUPPORTED", "/seed", "the seed is a project setting; a request that sets one is refused"));
   const need = (key) => {
     if (typeof settings[key] !== "string" || !inputs.some((i) => i.path === settings[key])) return null;
     return settings[key];
@@ -376,6 +374,11 @@ async function run(request, root, reply, fail) {
   const modelAbs = path.join(absRunDir, "inputs", modelPath);
   const project = readJson(projectAbs);
   if (!project) return fail(typed("E_APP_FAILED", "/settings/project", "the snapshot copy of the project is not JSON"));
+  // The seed is part of the project (it is hashed with it). A request may state it, and then it must be the project's own: another seed would be
+  // another project revision, not a different run of this one.
+  if (request.seed !== undefined && !(project.settings && project.settings.seed === request.seed)) {
+    return fail(typed("E_REQUEST_CONFLICT", "/seed", "the request seed differs from the seed in the project; change the project instead"));
+  }
 
   // The script must be exactly what Studio's generator makes of the project: nothing else is run.
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "seed-openmc-regen-"));
