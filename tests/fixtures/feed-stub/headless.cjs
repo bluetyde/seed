@@ -40,7 +40,8 @@ else if (mode === "hang" && verb !== "cancel") {
   else out(0, { ok: true, warnings: [] });
 } else if (verb === "cancel") {
   fs.writeFileSync(path.join(opt("--out"), "cancel-called"), "1");
-  if (process.env.FEED_STUB_CANCEL === "fail") out(1, { ok: false, errors: [{ code: "E_APP_FAILED", field: "", message: "stop not confirmed" }] });
+  if (process.env.FEED_STUB_CANCEL === "none") out(0, { ok: true, cancelled: false, detail: "no active solver run is recorded in this folder" });
+  else if (process.env.FEED_STUB_CANCEL === "fail") out(1, { ok: false, errors: [{ code: "E_APP_FAILED", field: "", message: "stop not confirmed" }] });
   else out(0, { ok: true, cancelled: true });
 } else if (verb === "run") {
   if (mode === "failed") out(0, { ok: true, status: "failed", reason: "E_TIMEOUT: the solver did not finish inside its time limit" });
@@ -67,6 +68,7 @@ else if (mode === "hang" && verb !== "cancel") {
       ],
       domain: { verdict: mode === "out-of-domain" ? "out-of-domain" : "in-domain" },
     };
+    if (mode === "nodomain") delete results.domain;
     if (mode === "nan") results.summary.maxT = null;
     const files = {
       "case.json": caseBytes,

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -410,4 +410,115 @@ describe("FEED adapter: cancel (stub runner that never finishes)", () => {
     await mgr.cancel(runId);
     await started;
   }, 60000);
+});
+
+describe("FEED adapter: review findings (Codex, 2026-10-05)", () => {
+  async function startHanging(p: ReturnType<typeof feedProject>, id: string) {
+    const mgr = manager(p.root);
+    const started = mgr.start({ requestId: id, actor, artifact: p.artifact, inputs: p.inputs, budget, settings: { case: CASE } });
+    let runId: string | undefined;
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline && !runId) {
+      try {
+        const rid = JSON.parse(readFileSync(join(p.root, "runs", "requests.json"), "utf8"))[id]?.runId as string | undefined;
+        if (rid && existsSync(join(p.root, "runs", rid, "native", "child.json"))) runId = rid;
+      } catch {
+        // not written yet
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(runId).toBeDefined();
+    const job = JSON.parse(readFileSync(join(p.root, "runs", runId!, "native", "job.json"), "utf8"));
+    const child = JSON.parse(readFileSync(join(p.root, "runs", runId!, "native", "child.json"), "utf8"));
+    pids.push(job.pid, child.pid);
+    return { mgr, started, runId: runId!, job, child };
+  }
+
+  it("a runner that answers cancelled:false (no solver run registered) is asked again after the kill; the job is then cancelled", async () => {
+    useStub("hang", "run", { FEED_STUB_CANCEL: "none" });
+    const p = feedProject();
+    const { job, child, runId } = await startHanging(p, "req-none");
+    const r = okReply(await ask(p.root, { verb: "cancel", jobId: job.jobId }));
+    expect(r.result).toMatchObject({ lifecycle: "cancelled", cancelled: true });
+    expect(isAlive(job.pid) || isAlive(child.pid)).toBe(false);
+    expect(existsSync(join(p.root, "runs", runId, "native", "out", "cancel-called"))).toBe(true);
+  }, 60000);
+
+  it("a process of another run is never killed: a forged pid in job.json fails the ownership check", async () => {
+    useStub("hang", "run");
+    const p = feedProject();
+    const q = feedProject();
+    const a = await startHanging(p, "req-own-a");
+    const b = await startHanging(q, "req-own-b");
+    const jobPath = join(p.root, "runs", a.runId, "native", "job.json");
+    writeFileSync(jobPath, JSON.stringify({ ...a.job, pid: b.job.pid }));
+    const r = okReply(await ask(p.root, { verb: "cancel", jobId: a.job.jobId }));
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]?.code).toBe("E_NOT_OWNED");
+    expect(isAlive(b.job.pid) && isAlive(b.child.pid)).toBe(true);
+    writeFileSync(jobPath, JSON.stringify(a.job));
+    await a.mgr.cancel(a.runId);
+    await b.mgr.cancel(b.runId);
+    await a.started;
+    await b.started;
+  }, 90000);
+
+  it("the same request id for another run folder is a conflict and leaves the first job findable", async () => {
+    useStub();
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-shared");
+    if (!out.ok) throw new Error("refused");
+    const jobId = jobIdOf(p.root, out.runId);
+    const other = join(p.root, "runs", "r-other");
+    mkdirSync(join(other, "inputs", "models", "feed"), { recursive: true });
+    writeFileSync(join(other, "inputs", CASE), p.caseText);
+    const r = okReply(await ask(p.root, { verb: "run", requestId: "req-shared", snapshot: { inputs: p.inputs }, runDir: "runs/r-other", budget, settings: { case: CASE } }));
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]?.code).toBe("E_REQUEST_CONFLICT");
+    expect(okReply(await ask(p.root, { verb: "status", jobId })).result.lifecycle).toBe("completed");
+    expect(existsSync(join(other, "native", "job.json"))).toBe(false);
+  });
+
+  it("an unfinished reservation (no process id yet) is not reported as a running job", async () => {
+    useStub();
+    const p = feedProject();
+    const dir = join(p.root, "runs", "r-res");
+    mkdirSync(join(dir, "inputs", "models", "feed"), { recursive: true });
+    mkdirSync(join(dir, "native"));
+    writeFileSync(join(dir, "inputs", CASE), p.caseText);
+    writeFileSync(join(dir, "native", "job.json"), JSON.stringify({ jobId: "job-x", requestId: "req-res", pid: null, token: "t" }));
+    const r = okReply(await ask(p.root, { verb: "run", requestId: "req-res", snapshot: { inputs: p.inputs }, runDir: "runs/r-res", budget, settings: { case: CASE } }));
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]?.code).toBe("E_REQUEST_CONFLICT");
+  });
+
+  it("a result with no domain verdict is not collected, and is never labelled in-domain", async () => {
+    useStub("nodomain");
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-nodomain");
+    expect(out.ok && out.state).toBe("failed");
+    expect(JSON.stringify((await collectError(p.root, out as any)).errors)).toContain("no domain verdict");
+  });
+
+  it("collect does not write through a series folder that is a link", async () => {
+    useStub();
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-series");
+    if (!out.ok) throw new Error("refused");
+    const jobId = jobIdOf(p.root, out.runId);
+    const outside = mkdtempSync(join(tmpdir(), "seed-feed-outside-"));
+    dirs.push(outside);
+    writeFileSync(join(outside, "temperature_peak.json"), "SENTINEL");
+    const series = join(p.root, "runs", out.runId, "native", "series");
+    rmSync(series, { recursive: true, force: true });
+    try {
+      symlinkSync(outside, series, "junction");
+    } catch {
+      return; // links are not permitted in this environment
+    }
+    const r = okReply(await ask(p.root, { verb: "collect", jobId, runDir: `runs/${out.runId}` }));
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]?.message).toContain("series folder");
+    expect(readFileSync(join(outside, "temperature_peak.json"), "utf8")).toBe("SENTINEL");
+  });
 });
