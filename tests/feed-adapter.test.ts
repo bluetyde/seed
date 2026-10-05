@@ -216,7 +216,7 @@ describe("FEED adapter: run and collect through the SEED run manager (stub runne
 
   it.each([
     ["failed", "E_TIMEOUT"],
-    ["refuse", "the runner refused the case"],
+    ["refuse", "the runner reported"],
     ["crash", "stub crashed"],
     ["garbage", "the runner exited with 0"],
   ])("a run where the runner is %s ends failed with the reason, and nothing is collected", async (mode, detail) => {

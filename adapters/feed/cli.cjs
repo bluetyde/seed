@@ -21,25 +21,22 @@ const { spawn, spawnSync } = require("node:child_process");
 const {
   MAX_CAPTURE,
   portableRel,
-  isAlive,
-  killTree,
-  waitDead,
+  commandLine,
   atomicWrite,
   json,
   readJson,
   insideRoot,
   containedBelow,
-  jobsDir,
-  jobIdFor,
-  jobIndexPath,
   findJob,
   snapshotProblem,
   appFailed,
   sha256,
+  argvOf,
+  normPath,
   typed,
   jobState,
-  ownsJobProcess,
 } = require("../shared/util.cjs");
+const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
 
 const ADAPTER = { id: "feed", version: "0.1.0" };
 const THERMAL_ONLY = "Thermal calculation only. Not a stress, failure or integrity assessment.";
@@ -161,52 +158,7 @@ const setupError = () =>
 
 
 
-/** This adapter's wrapper script and nothing else: see ownsJobProcess in ../shared/util.cjs. */
-function ownsProcess(j, s) {
-  return ownsJobProcess(j, s, path.join(__dirname, "job.cjs"));
-}
 
-async function main() {
-  const verb = process.argv[2];
-  let input = "";
-  process.stdin.setEncoding("utf8");
-  for await (const chunk of process.stdin) input += chunk;
-  let request;
-  try {
-    request = JSON.parse(input);
-  } catch {
-    process.stderr.write("invalid JSON on stdin\n");
-    process.exit(1);
-  }
-  const root = process.env.SEED_PROJECT_ROOT || process.cwd();
-  const reply = (doc) => {
-    const out = {
-      schema: "seed.adapter-reply/0.1",
-      verb,
-      requestId: request && request.requestId ? request.requestId : "unknown",
-      ok: doc.ok,
-      errors: doc.errors || [],
-      warnings: doc.warnings || [],
-      ...(doc.result !== undefined ? { result: doc.result } : {}),
-    };
-    process.stdout.write(JSON.stringify(out) + "\n", () => process.exit(0));
-  };
-  const fail = (...errors) => reply({ ok: false, errors });
-
-  try {
-    if (!request || request.verb !== verb) return fail(typed("E_SCHEMA_INVALID", "/verb", "the request verb does not match the command"));
-    if (verb === "describe") return await describe(reply, fail);
-    if (verb === "open") return fail(typed("E_VERB_UNKNOWN", "/verb", "FEED's editor is its web app; this headless adapter does not open it"));
-    if (verb === "validate") return await validate(request, root, reply, fail);
-    if (verb === "run") return await run(request, root, reply, fail);
-    if (verb === "status") return status(request, root, reply, fail);
-    if (verb === "cancel") return await cancel(request, root, reply, fail);
-    if (verb === "collect") return collect(request, root, reply, fail);
-    return fail(typed("E_VERB_UNKNOWN", "/verb", "unknown verb"));
-  } catch (err) {
-    return fail(typed("E_INTERNAL", "", "adapter failure: " + (err && err.message)));
-  }
-}
 
 /** Quantities and domains the oracle entries claim (good entries only), or [] when no entries folder is configured. */
 function oracleCoverage() {
@@ -315,125 +267,19 @@ async function run(request, root, reply, fail) {
   const budgetSeconds = request.budget && Number.isInteger(request.budget.maxWallSeconds) ? request.budget.maxWallSeconds : 300;
   const timeoutSeconds = Math.min(86400, Math.max(10, budgetSeconds));
 
-  const nativeDir = path.join(absRunDir, "native");
-  const jobJsonPath = path.join(nativeDir, "job.json");
-  const jobId = jobIdFor(request.requestId);
-  fs.mkdirSync(nativeDir, { recursive: true });
-  if (!containedBelow(absRunDir, nativeDir) || fs.lstatSync(nativeDir).isSymbolicLink()) {
-    return fail(typed("E_PATH_TRAVERSAL", "/runDir", "the native state folder is a link or leaves the run folder"));
-  }
-  const dir = jobsDir(root, true);
-  if (!dir) return fail(typed("E_PATH_TRAVERSAL", "/.seed/jobs", "the job registry folder is a link or leaves the project"));
-
-  // Reserve the run folder exclusively before anything is started: a concurrent start of the same request sees the
-  // reservation, and another request is refused. The record is completed (with the process id) after the start.
-  const token = crypto.randomBytes(16).toString("hex");
-  const record = { jobId, requestId: request.requestId, pid: null, token, case: casePath, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) };
-  try {
-    fs.writeFileSync(jobJsonPath, json(record), { flag: "wx" });
-  } catch (err) {
-    if (!err || err.code !== "EEXIST") throw err;
-    const existing = readJson(jobJsonPath);
-    if (existing && existing.requestId === request.requestId) {
-      // A reservation without a process id is a launch that has not committed (or failed): it is not a running job.
-      if (!Number.isInteger(existing.pid)) return fail(typed("E_REQUEST_CONFLICT", "", "the launch of this request is still being registered; retry shortly"));
-      return reply({ ok: true, result: { jobId: existing.jobId, runDir: request.runDir, lifecycle: "running" } });
-    }
-    return fail(typed("E_REQUEST_CONFLICT", "", "this run folder already belongs to another request"));
-  }
-
-  // The job index is reserved before anything starts, and rollback removes only what THIS invocation created: the same
-  // request id used for another run folder must never delete the first job's registry entry.
-  const indexPath = jobIndexPath(dir, jobId);
-  let createdIndex = false;
-  const removeOwn = (...extra) => {
-    for (const f of [jobJsonPath, ...(createdIndex ? [indexPath] : []), ...extra]) {
-      try {
-        fs.rmSync(f, { force: true });
-      } catch {
-        // best effort: the folder is being abandoned
-      }
-    }
-  };
-  try {
-    fs.writeFileSync(indexPath, json({ runDir: request.runDir }), { flag: "wx" });
-    createdIndex = true;
-  } catch (err) {
-    removeOwn();
-    if (err && err.code === "EEXIST") return fail(typed("E_REQUEST_CONFLICT", "/requestId", "this request id already belongs to a job in another run folder"));
-    return fail(typed("E_INTERNAL", "", "could not register the job: " + (err && err.code ? err.code : err)));
-  }
-
-  const rollback = async (child, error) => {
-    if (child && Number.isInteger(child.pid)) {
-      let stopped = false;
-      try {
-        await killTree(child.pid);
-        stopped = await waitDead(child.pid, 3000);
-      } catch {
-        stopped = false;
-      }
-      if (!stopped) {
-        // The launch cannot be shown to be gone: keep the records so the job can still be found and cancelled.
-        try {
-          atomicWrite(jobJsonPath, json({ ...record, pid: child.pid }));
-        } catch {
-          // nothing more can be recorded
-        }
-        return fail(typed("E_APP_FAILED", "", "launch failed (" + error.message + ") and the job process could not be confirmed stopped; its records were kept (job " + jobId + ")"));
-      }
-    }
-    removeOwn();
-    return fail(error);
-  };
-
-  let child;
-  try {
-    child = spawn(process.execPath, [path.join(__dirname, "job.cjs"), absRunDir, caseAbs, bundle, token, String(timeoutSeconds)], { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true });
-  } catch (err) {
-    return rollback(null, typed("E_APP_FAILED", "", "could not start the job: " + (err && err.message)));
-  }
-  child.unref();
-  const nativeIdentity = new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), 10000);
-    child.once("message", (message) => {
-      clearTimeout(timer);
-      resolve(message && message.token === token && Number.isSafeInteger(message.runnerPid) && message.runnerPid > 1 ? message.runnerPid : null);
-    });
-    child.once("error", () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
+  const outDir = path.join(absRunDir, "native", "out");
+  return startJob({
+    root, request, absRunDir, reply, fail,
+    record: { case: casePath, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) },
+    runSpec: { command: process.execPath, args: [bundle, "run", caseAbs, "--out", outDir, "--run-id", "feed", "--timeout-seconds", String(timeoutSeconds)] },
+    // the runner's own cancel stops the solver in its WSL distro, which no process tree of ours reaches
+    cancelSpec: { command: process.execPath, args: [bundle, "cancel", "--out", outDir] },
+    stopNative: () => stopSolver(path.join(absRunDir, "native")),
   });
-  if (!Number.isInteger(child.pid)) return rollback(null, typed("E_APP_FAILED", "", "the job did not start"));
-  try {
-    atomicWrite(jobJsonPath, json({ ...record, pid: child.pid }));
-  } catch (err) {
-    return rollback(child, typed("E_INTERNAL", "", "could not register the job: " + (err && err.code ? err.code : err)));
-  }
-  const runnerPid = await nativeIdentity;
-  if (!runnerPid) return rollback(child, typed("E_APP_FAILED", "", "native runner identity was not confirmed over launch IPC"));
-  reply({ ok: true, result: { jobId, runDir: request.runDir, lifecycle: "running", nativeProcesses: [child.pid, runnerPid] } });
 }
 
 function status(request, root, reply, fail) {
-  const j = findJob(root, request.jobId);
-  if (!j) return fail(typed("E_APP_FAILED", "/jobId", "job not found: " + request.jobId));
-  const s = jobState(j.nativeDir, j.job);
-  reply({
-    ok: true,
-    result: {
-      jobId: request.jobId,
-      lifecycle: s.lifecycle,
-      native: s.native,
-      ...(s.status && s.status.startedAt ? { startedAt: s.status.startedAt } : {}),
-      ...(s.status && s.status.finishedAt ? { finishedAt: s.status.finishedAt } : {}),
-    },
-  });
+  return statusJob({ request, root, reply, fail });
 }
 
 
@@ -447,48 +293,17 @@ async function stopSolver(nativeDir) {
   return { confirmed: ok, stoppedOne: ok && out.cancelled === true };
 }
 
+/** A runner left behind by a dead wrapper: ours only when its command line runs the headless bundle's `run` on this run folder's own output folder. */
+function ownsRunner(j, pid) {
+  const bundle = bundlePath();
+  const cl = commandLine(pid);
+  if (!bundle || cl === null) return false;
+  const args = argvOf(cl).map(normPath);
+  return args.includes(normPath(bundle)) && args.includes("run") && args.includes(normPath(path.join(j.absRunDir, "native", "out")));
+}
+
 async function cancel(request, root, reply, fail) {
-  const j = findJob(root, request.jobId);
-  if (!j) return fail(typed("E_APP_FAILED", "/jobId", "job not found: " + request.jobId));
-  const launch = request.extensions && request.extensions["seed.launch"];
-  if (launch) {
-    const child = readJson(path.join(j.nativeDir, "child.json"));
-    const pids = launch.nativeProcesses;
-    if (launch.runDir !== j.runDir || (pids !== undefined && (!Array.isArray(pids) || pids.length !== 2 || pids.some((pid) => !Number.isSafeInteger(pid) || pid < 2) || j.job.pid !== pids[0] || !child || child.pid !== pids[1]))) {
-      return fail(typed("E_NOT_OWNED", "/extensions/seed.launch", "job differs from protected launch binding"));
-    }
-  }
-  const s = jobState(j.nativeDir, j.job);
-  if (s.lifecycle !== "running") {
-    // already over (or died): nothing to stop, and nothing was cancelled by this call
-    const child = readJson(path.join(j.nativeDir, "child.json"));
-    let nativeStopped = !s.alive && !!child && Number.isInteger(child.pid) && child.pid > 1 && !isAlive(child.pid);
-    // A job that failed or died may have left its solver in the WSL distro: the processes being gone says nothing about it.
-    if (s.lifecycle === "failed") nativeStopped = nativeStopped && (await stopSolver(j.nativeDir)).confirmed;
-    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: s.lifecycle, cancelled: false, nativeStopped } });
-  }
-  if (!ownsProcess(j, s)) return fail(typed("E_NOT_OWNED", "/jobId", "the process behind this job is not owned by this run"));
-  const child = readJson(path.join(j.nativeDir, "child.json"));
-
-  // 1. Stop the SOLVER first: it runs in a WSL distro, outside the process tree that is killed below. The runner's own cancel
-  //    verb writes the flag, signals that run's process group and confirms. If it cannot confirm, nothing is claimed.
-  const first = await stopSolver(j.nativeDir);
-  if (!first.confirmed) return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
-
-  // 2. Then the wrapper and the runner process, only after the command line proved they are this job's.
-  await killTree(j.job.pid);
-  const dead = await waitDead(j.job.pid, 5000);
-  const childDead = child && Number.isInteger(child.pid) && child.pid > 1 ? await waitDead(child.pid, 5000) : true;
-  if (!dead || !childDead) {
-    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
-  }
-  // 3. If the first stop found no solver run registered yet, the runner may have been about to start one: with the runner
-  //    dead no new run can appear, so ask again and require that answer to be confirmed too.
-  if (!first.stoppedOne && !(await stopSolver(j.nativeDir)).confirmed) {
-    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "failed", cancelled: false, nativeStopped: false } });
-  }
-  atomicWrite(path.join(j.nativeDir, "status.json"), json({ status: "cancelled", startedAt: s.status && s.status.startedAt, finishedAt: new Date().toISOString() }));
-  reply({ ok: true, result: { jobId: request.jobId, lifecycle: "cancelled", cancelled: true, nativeStopped: true } });
+  return cancelJob({ request, root, reply, fail, stopNative: (j) => stopSolver(j.nativeDir), ownsRunner });
 }
 
 function collect(request, root, reply, fail) {
@@ -634,4 +449,4 @@ function collect(request, root, reply, fail) {
   reply({ ok: true, result: { jobId: request.jobId, lifecycle: "completed", resultsIndex: request.runDir + "/results.json", resultsSha256: sha256(text) } });
 }
 
-main();
+serve({ describe: (_request, _root, reply, fail) => describe(reply, fail), validate, run, status, cancel, collect }, "FEED's editor is its web app; this headless adapter does not open it");

@@ -2,7 +2,7 @@ import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { callAdapter } from "../src/core/adapterClient";
@@ -12,7 +12,8 @@ import { RunManager, type Budget } from "../src/core/runManager";
 // FEED's own oracle entries (oracles/seed in the FEED repo, closed-form expected values) run through the adapter and the run
 // manager against the real headless runner and the real OFFBEAT solver. Needs the FEED repo with `npm run build`, its entries,
 // and the feed-solver WSL distro; skipped otherwise, loudly. Set SEED_FEED_REPO to the FEED checkout.
-const repo = process.env.SEED_FEED_REPO ?? join(__dirname, "..", "..", "fuel-performance-studio");
+const repoCandidates = [process.env.SEED_FEED_REPO, join(__dirname, "..", "..", "fuel-performance-studio"), join(homedir(), "Claude Code Test", "fuel-performance-studio")];
+const repo = repoCandidates.find(p => p && existsSync(join(p, "dist", "cli", "headless.js"))) ?? join(__dirname, "..", "..", "fuel-performance-studio");
 const bundle = join(repo, "dist", "cli", "headless.js");
 const base = join(repo, "oracles", "seed");
 const solverUp = (() => {

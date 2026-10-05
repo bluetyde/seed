@@ -234,12 +234,14 @@ async function cancelJob({ request, root, reply, fail, stopNative = null, ownsRu
     // Already over (or died): nothing was cancelled by this call. A wrapper that died can leave the native run going outside any process tree:
     // ask the app (which proves its own child) and stop the runner only when it provably is ours.
     let nativeStopped = !s.alive && (childPid === null || !isAlive(childPid));
-    if (s.lifecycle === "failed" && stopNative) {
+    // Only when the wrapper is gone: a live wrapper whose token or heartbeat does not match this job is not shown to be ours, and its run is left alone.
+    if (s.lifecycle === "failed" && stopNative && !s.alive) {
       const n = await stopNative(j);
       if (n.notOwned) return fail(typed("E_NOT_OWNED", "/jobId", "a process of this run is still running and cannot be shown to be this run's own"));
       nativeStopped = nativeStopped && n.confirmed;
     }
-    if (childPid !== null && isAlive(childPid)) {
+    // Same rule for the runner: only one left behind by a dead wrapper. A live wrapper that is not running this job is left alone, with everything under it.
+    if (!s.alive && childPid !== null && isAlive(childPid)) {
       if (!ownsRunner || !ownsRunner(j, childPid)) return fail(typed("E_NOT_OWNED", "/jobId", "a process from this job is still running and cannot be shown to be this run's runner"));
       await killTree(childPid);
       nativeStopped = nativeStopped && (await waitDead(childPid, 5000));
