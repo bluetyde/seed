@@ -30,7 +30,20 @@ batches, seed, threads, runtime and data identity. Results: raw per-source quant
 uncertainty; `verification: unverified` until an oracle passes. Oracle: an independent analytic case (uncollided flux from a point
 source in a void or a thin absorber) with tolerances fixed before any run.
 
+## Built so far (2026-10-05)
+
+OpenMC repo, branch `claude/seed-adapter` (pushed, not merged): `studio/tools/regen_script.cjs` (Electron regeneration) and
+`studio/openmc_studio/headless.py`, the app-owned runner: `describe | validate | run | cancel`, one JSON line each. Runs `model.py`
+as a child in its own session; run folder with `manifest.json` written last and atomically (sha256 per file), `results.json`
+(Studio's own `results.load`, checked against the project's particles/batches/seed, no wall-clock values), `provenance.json`.
+Refuses outside the first slice (fixed source, no tracks, at most 1e6 particles and 1000 batches, a seed, at least one tally).
+Cancel proves the child by OS start time and process group, kills the group, and refuses a stranger (`E_NOT_OWNED`).
+Tests (`test/test_headless.py`, 11, real OpenMC 0.15.3 in WSL `Ubuntu` env `openmc-mcnp`, ~65 s): a mutation that removes the ownership
+check is caught. Finding: the same seed gives byte-identical results at one thread, but only equal to ~1e-12 relative at several
+threads (floating-point reduction order); SEED pins the thread count and compares with a tolerance.
+Not yet tested: the identity race fixed here (child is still a fork of the runner right after Popen) has no deterministic test.
+
 ## Open points
 
-1. WSL job identity and kill: FEED's answer is that the app owns a runner with its own `run` and `cancel` verbs that handle the distro (manifest written last, hashed files, process-group flag file). Proposed here too: a headless runner in the OpenMC repo, `python -m openmc_studio.headless run MODEL.py --out DIR --seed N --json` plus `cancel`, run inside WSL by the job wrapper, writing a hashed manifest and a results extract from the statepoint. The adapter then repeats the FEED cancel sequence (stop the solver first, then prove ownership of the Windows-side processes).
+1. (answered by the runner above; the wrapper side is next) WSL job identity and kill: FEED's answer is that the app owns a runner with its own `run` and `cancel` verbs that handle the distro (manifest written last, hashed files, process-group flag file). Proposed here too: a headless runner in the OpenMC repo, `python -m openmc_studio.headless run MODEL.py --out DIR --seed N --json` plus `cancel`, run inside WSL by the job wrapper, writing a hashed manifest and a results extract from the statepoint. The adapter then repeats the FEED cancel sequence (stop the solver first, then prove ownership of the Windows-side processes).
 2. Which tallies and score types the first slice supports.
