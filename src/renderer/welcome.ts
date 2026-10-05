@@ -3,6 +3,8 @@
 
 (() => {
   const root = document.getElementById("page")!;
+  let draftText = "";
+  let selectedReport = "";
   const STATUS_TEXT: Record<TabStatus, string> = { idle: "Not open", starting: "Starting…", running: "Open", error: "Failed to start" };
 
   const INSTALL_TEXT: Record<HostInstall["state"], string> = {
@@ -69,6 +71,14 @@
     if (lesson.cancellable) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.cancelLesson() }, "Cancel calculation"));
     if (lesson.canSave && !lesson.busy) lessonButtons.append(el("button", { class: "btn", type: "button", onclick: () => window.host.saveLesson() }, "Save study report"));
     if (lesson.reportId) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.openLessonReport() }, "Open report"));
+    if (lesson.reportId) lessonButtons.append(el("button", { class: "btn secondary", type: "button", onclick: () => window.host.reviewConclusion() }, "Review conclusion drafts"));
+    if (lesson.reportId && selectedReport !== lesson.reportId) { selectedReport = lesson.reportId; draftText = ""; }
+    if (lesson.reportId) {
+      const input = el("textarea", { "aria-label": "Draft conclusion", maxlength: "2000", rows: "4" }) as HTMLTextAreaElement;
+      input.value = draftText; input.oninput = () => { draftText = input.value; };
+      lessonButtons.append(el("div", {}, el("p", {}, "Draft a claim. SEED cites this report's saved run automatically; drafting does not accept it."), input,
+        el("button", { class: "btn secondary", type: "button", onclick: () => window.host.draftConclusion(draftText, lesson.reportId!) }, "Save conclusion draft")));
+    }
     out.push(el("section", { class: "card", "data-lesson": "" }, el("h2", {}, "Calculation lesson"),
       el("p", { class: "note" }, "Runs approved cases with the configured study budget. Results keep their verification labels."),
       el("p", { role: "status", "data-lesson-status": "" }, lesson.message), lessonButtons));
@@ -103,6 +113,7 @@
   }
 
   function render(s: HostState): void {
+    if (document.activeElement?.tagName === "TEXTAREA" && s.lesson.reportId === selectedReport && s.tabs.find(t => t.id === s.activeId)?.kind === "welcome") return;
     const t = s.tabs.find((x) => x.id === s.activeId);
     const kids = !t || t.kind === "welcome" ? welcome(s) : t.status === "error" ? failed(t) : starting(t);
     root.replaceChildren(...kids);

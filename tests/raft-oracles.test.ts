@@ -19,6 +19,7 @@ import { verifyStudyLog } from "../src/core/semantic";
 import { exportStudyReport } from "../src/core/studyReportHost";
 import { Lesson } from "../src/main/lesson";
 import { proposeConclusion } from "../src/core/conclusionDraft";
+import { inspectConclusion, decideConclusion, listConclusionDrafts, reviewPublication } from "../src/core/conclusionReview";
 import { readRegisteredReport, reportReceiptFolder } from "../src/core/reportReceipt";
 import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
@@ -283,6 +284,83 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     writeHostJson(draftPath, { ...draft, claimsHash: "altered" });
     expect(await proposeConclusion(config, draftRequest)).toMatchObject({ ok: false });
     writeFileSync(draftPath, draftBytes);
+    const reviewerFile = join(hostRoot, "reviewer.json");
+    writeHostJson(reviewerFile, { schema: "seed.reviewer/0.1", projectId: receipt.projectId, studyId: receipt.studyId, actor: { kind: "human", name: "Test reviewer" } });
+    expect(() => inspectConclusion(config, undefined, draft.draftId)).toThrow(/REVIEWER/);
+    const reviewerBytes = readFileSync(reviewerFile);
+    writeHostJson(reviewerFile, { ...JSON.parse(reviewerBytes.toString()), actor: { kind: "agent", name: "forged reviewer" } });
+    expect(() => inspectConclusion(config, reviewerFile, draft.draftId)).toThrow(/reviewer/);
+    writeHostJson(reviewerFile, { ...JSON.parse(reviewerBytes.toString()), projectId: "foreign-project" });
+    expect(() => inspectConclusion(config, reviewerFile, draft.draftId)).toThrow(/reviewer/);
+    writeFileSync(reviewerFile, reviewerBytes);
+    const reviewSnapshot = inspectConclusion(config, reviewerFile, draft.draftId);
+    expect(reviewSnapshot.binding.unverified.length).toBeGreaterThan(0);
+    await expect(decideConclusion(config, reviewerFile, draft.draftId, "forged", "accepted")).rejects.toThrow(/changed/);
+    const inputFile = join(project, reviewSnapshot.evidence.record.inputs[0].path), inputBytes = readFileSync(inputFile);
+    writeFileSync(inputFile, Buffer.concat([inputBytes, Buffer.from(" ")]));
+    await expect(decideConclusion(config, reviewerFile, draft.draftId, reviewSnapshot.displayHash, "accepted")).rejects.toThrow(/changed/);
+    writeFileSync(inputFile, inputBytes);
+    // Inject a failure after receipt finalization; retry keeps the one immutable acceptance and report identity.
+    const hostWrite = hostFiles.writeHostJson;
+    const publicationFailure = vi.spyOn(hostFiles, "writeHostJson").mockImplementation((file, value: any) => {
+      if (file.endsWith(draft.draftId + "-report.json") && value.status === "published") throw Error("injected publication marker failure");
+      hostWrite(file, value);
+    });
+    try { await expect(decideConclusion(config, reviewerFile, draft.draftId, reviewSnapshot.displayHash, "accepted")).rejects.toThrow(/injected/); }
+    finally { publicationFailure.mockRestore(); }
+    const publicationPath = join(state, "conclusion-reviews", sha256Hex(receipt.projectId + "\n" + project), draft.draftId + "-report.json");
+    const pendingPublication = JSON.parse(readFileSync(publicationPath, "utf8"));
+    const acceptedReceipt = JSON.parse(readFileSync(join(receipts, pendingPublication.reportId + ".json"), "utf8"));
+    const acceptedBundle = dirname(join(project, acceptedReceipt.files[0].path));
+    const copiedSnapshot = join(acceptedBundle, reviewSnapshot.evidence.snapshotFiles[0].path), copiedBytes = readFileSync(copiedSnapshot);
+    writeFileSync(copiedSnapshot, "altered copied evidence");
+    await expect(decideConclusion(config, reviewerFile, draft.draftId, reviewSnapshot.displayHash, "accepted")).rejects.toThrow(/changed/);
+    expect(() => readRegisteredReport(config, pendingPublication.reportId)).toThrow(/changed/);
+    writeFileSync(copiedSnapshot, copiedBytes);
+    expect(hostFiles.inside(project, acceptedBundle)).toBe(true);
+    renameSync(acceptedBundle, acceptedBundle + "-missing-test");
+    try { await expect(decideConclusion(config, reviewerFile, draft.draftId, reviewSnapshot.displayHash, "accepted")).rejects.toThrow(/never replace/); }
+    finally { renameSync(acceptedBundle + "-missing-test", acceptedBundle); }
+    expect(JSON.parse(readFileSync(publicationPath, "utf8")).reportId).toBe(pendingPublication.reportId);
+    writeFileSync(inputFile, Buffer.concat([inputBytes, Buffer.from(" changed after committed acceptance")]));
+    const recoverySnapshot = inspectConclusion(config, reviewerFile, draft.draftId);
+    const accepted = await decideConclusion(config, reviewerFile, draft.draftId, recoverySnapshot.displayHash, "accepted");
+    writeFileSync(inputFile, inputBytes);
+    expect(accepted.reportId).toBeTruthy();
+    expect(accepted.reportId).toBe(pendingPublication.reportId);
+    expect(await decideConclusion(config, reviewerFile, draft.draftId, reviewSnapshot.displayHash, "accepted")).toEqual(accepted);
+    expect(readRegisteredReport(config, accepted.reportId).title).toContain("v2");
+    expect(readRegisteredReport(config, accepted.reportId).html.toString()).toContain("Test reviewer");
+    expect(readRegisteredReport(config, accepted.reportId).html.toString()).toContain("UNVERIFIED");
+    expect(readRegisteredReport(config, desktopId).html).toEqual(viewed.html);
+    expect(listConclusionDrafts(config, desktopId)[0].acceptedReportId).toBe(accepted.reportId);
+    await expect(decideConclusion(config, reviewerFile, draft.draftId, reviewSnapshot.displayHash, "rejected")).rejects.toThrow(/differently/);
+    const rejectedProposal = await proposeConclusion(config, { ...draftRequest, claims: [{ ...draftRequest.claims[0], text: "Reject this test draft." }] });
+    if (!rejectedProposal.ok) throw Error("test proposal refused");
+    const rejectSnapshot = inspectConclusion(config, reviewerFile, rejectedProposal.draftId);
+    expect(await decideConclusion(config, reviewerFile, rejectedProposal.draftId, rejectSnapshot.displayHash, "rejected")).toEqual({ decision: "rejected", draftId: rejectedProposal.draftId });
+    await expect(decideConclusion(config, reviewerFile, rejectedProposal.draftId, rejectSnapshot.displayHash, "accepted")).rejects.toThrow(/differently/);
+    for (const failurePhase of ["write", "rename"] as const) {
+      const proposal = await proposeConclusion(config, { ...draftRequest, claims: [{ ...draftRequest.claims[0], text: `Recover ${failurePhase} failure without another acceptance.` }] });
+      if (!proposal.ok) throw Error("recovery proposal failed");
+      const snapshot = inspectConclusion(config, reviewerFile, proposal.draftId);
+      const write = reviewPublication.write, rename = reviewPublication.rename;
+      let injected = false;
+      const mock = failurePhase === "write" ? vi.spyOn(reviewPublication, "write").mockImplementation(((path: any, data: any, options: any) => {
+        if (!injected && typeof path === "string" && path.includes(".accepted-" + proposal.draftId) && path.endsWith("report.html")) { injected = true; write(path, "partial"); throw Error("injected staging write"); }
+        return write(path, data, options);
+      }) as any) : vi.spyOn(reviewPublication, "rename").mockImplementation((from, to) => {
+        if (!injected && String(from).endsWith(".accepted-" + proposal.draftId)) { injected = true; throw Error("injected staging rename"); }
+        return rename(from, to);
+      });
+      try { await expect(decideConclusion(config, reviewerFile, proposal.draftId, snapshot.displayHash, "accepted")).rejects.toThrow(/injected/); }
+      finally { mock.mockRestore(); }
+      expect(injected).toBe(true);
+      const reviewFile = join(state, "conclusion-reviews", sha256Hex(receipt.projectId + "\n" + project), proposal.draftId + ".json"), reviewBytes = readFileSync(reviewFile);
+      const recovered = await decideConclusion(config, reviewerFile, proposal.draftId, snapshot.displayHash, "accepted");
+      expect(recovered.reportId).toBeTruthy(); expect(readFileSync(reviewFile)).toEqual(reviewBytes);
+      expect(await decideConclusion(config, reviewerFile, proposal.draftId, snapshot.displayHash, "accepted")).toEqual(recovered);
+    }
     for (const file of receipt.files) {
       const path = join(project, file.path), bytes = readFileSync(path);
       writeFileSync(path, Buffer.concat([bytes, Buffer.from(" altered")]));
@@ -305,7 +383,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       const registry = join(hostRoot, "gui-apps.json"), catalog = join(hostRoot, "gui-catalog.json");
       writeHostJson(registry, { apps: [] }); writeHostJson(catalog, { repos: [] });
       const launchGui = () => _electron.launch({ args: [join(__dirname, "..")], env: { ...process.env,
-        SEED_HOST_CONFIG: config, SEED_STUDY_HEADER: headerFile, SEED_CATALOG: catalog,
+        SEED_HOST_CONFIG: config, SEED_STUDY_HEADER: headerFile, SEED_REVIEWER_CONFIG: reviewerFile, SEED_CATALOG: catalog,
         EXPERIMENT_STUDIO_APPS: registry, EXPERIMENT_STUDIO_USER_DATA: join(hostRoot, "gui-user") } });
       let gui = await launchGui();
       try {
@@ -357,6 +435,68 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
         await page.getByRole("button", { name: "Open report", exact: true }).click();
         for (let n = 0; n < 100 && !gui.windows().some(p => p.url().startsWith("seed-report://")); n++) await new Promise(r => setTimeout(r, 100));
         expect(gui.windows().filter(p => p.url().startsWith("seed-report://"))).toHaveLength(1);
+        expect(readFileSync(admissionPath, "utf8")).toBe(beforeRestart);
+        // Native dialogs receive automated test responses; this verifies routing, not a real person's decision.
+        const welcomeBar = gui.windows().find(p => p.url().endsWith("/renderer/index.html"));
+        if (!welcomeBar) throw Error("review bar missing");
+        await welcomeBar.getByRole("tab", { name: "Welcome" }).click();
+        const selectedReport = (await page.evaluate(() => window.host.getState())).lesson.reportId!;
+        await page.getByRole("textbox", { name: "Draft conclusion", exact: true }).fill("GUI review test draft; values remain UNVERIFIED.");
+        await page.getByRole("button", { name: "Save conclusion draft", exact: true }).click();
+        await page.waitForFunction(() => window.host.getState().then(s => s.lesson.message.includes("Conclusion draft saved")));
+        const guiDraft = listConclusionDrafts(config, selectedReport)[0];
+        await gui.evaluate(({ dialog }) => {
+          (globalThis as any).reviewPrompts = [];
+          (globalThis as any).reviewResponses = [0, 2];
+          dialog.showMessageBox = (async (_win: any, options: any) => {
+            (globalThis as any).reviewPrompts.push(options);
+            return { response: (globalThis as any).reviewResponses.shift() ?? 2, checkboxChecked: false };
+          }) as any;
+        });
+        await page.getByRole("button", { name: "Review conclusion drafts", exact: true }).click();
+        for (let n = 0; n < 100 && (await gui.evaluate(() => (globalThis as any).reviewPrompts.length)) < 2; n++) await new Promise(r => setTimeout(r, 100));
+        const reviewsRoot = join(state, "conclusion-reviews", sha256Hex(receipt.projectId + "\n" + project));
+        expect(existsSync(join(reviewsRoot, guiDraft.draftId + ".json"))).toBe(false);
+        await page.waitForFunction(() => window.host.getState().then(s => s.lesson.message.includes("draft remains unaccepted")));
+        await gui.evaluate(() => { (globalThis as any).reviewResponses = [0, 0]; });
+        await gui.evaluate((_electron, modulePath) => {
+          const core = (process as any).mainModule.require(modulePath), write = core.reviewPublication.write;
+          let once = false;
+          core.reviewPublication.write = (path: any, data: any, options: any) => {
+            if (!once && typeof path === "string" && path.includes(".accepted-") && path.endsWith("report.html")) {
+              once = true; write(path, "partial"); throw Error("injected desktop staging write");
+            }
+            return write(path, data, options);
+          };
+        }, join(__dirname, "..", "dist", "core", "conclusionReview.js"));
+        await page.getByRole("button", { name: "Review conclusion drafts", exact: true }).click();
+        await page.waitForFunction(() => window.host.getState().then(s => s.lesson.message.includes("injected desktop staging write")));
+        const committedGuiReview = readFileSync(join(reviewsRoot, guiDraft.draftId + ".json"));
+        await gui.evaluate(() => { (globalThis as any).reviewResponses = [0, 0]; });
+        await page.getByRole("button", { name: "Review conclusion drafts", exact: true }).click();
+        for (let n = 0; n < 100 && !existsSync(join(reviewsRoot, guiDraft.draftId + "-report.json")); n++) await new Promise(r => setTimeout(r, 100));
+        const guiPublication = JSON.parse(readFileSync(join(reviewsRoot, guiDraft.draftId + "-report.json"), "utf8"));
+        expect(guiPublication.status).toBe("published");
+        for (let n = 0; n < 100 && !gui.windows().some(p => p.url() === `seed-report://${guiPublication.reportId}/report.html`); n++) await new Promise(r => setTimeout(r, 100));
+        const acceptedPage = gui.windows().find(p => p.url() === `seed-report://${guiPublication.reportId}/report.html`);
+        if (!acceptedPage) throw Error("accepted report tab missing");
+        await acceptedPage.waitForLoadState("domcontentloaded");
+        expect(await acceptedPage.locator("body").textContent()).toContain("GUI review test draft");
+        expect(readRegisteredReport(config, guiPublication.reportId).title).toContain("v2");
+        const prompts = await gui.evaluate(() => (globalThis as any).reviewPrompts);
+        expect(prompts[1].detail).toContain("UNVERIFIED"); expect(prompts[1].detail).toContain("GUI review test draft");
+        expect(prompts[1].defaultId).toBe(2);
+        expect(prompts[5].buttons[0]).toBe("Finish accepted report");
+        expect(readFileSync(join(reviewsRoot, guiDraft.draftId + ".json"))).toEqual(committedGuiReview);
+        expect(readFileSync(admissionPath, "utf8")).toBe(beforeRestart);
+        await gui.close(); gui = await launchGui();
+        let restartedReviewPage = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html"));
+        for (let n = 0; !restartedReviewPage && n < 100; n++) { await new Promise(r => setTimeout(r, 100)); restartedReviewPage = gui.windows().find(p => p.url().endsWith("/renderer/welcome.html")); }
+        if (!restartedReviewPage) throw Error("accepted history restart page missing");
+        await gui.evaluate(({ dialog }) => { dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as any; });
+        await restartedReviewPage.getByRole("button", { name: "Review conclusion drafts", exact: true }).click();
+        for (let n = 0; n < 100 && !gui.windows().some(p => p.url() === `seed-report://${guiPublication.reportId}/report.html`); n++) await new Promise(r => setTimeout(r, 100));
+        expect(gui.windows().some(p => p.url() === `seed-report://${guiPublication.reportId}/report.html`)).toBe(true);
         expect(readFileSync(admissionPath, "utf8")).toBe(beforeRestart);
       } finally { await gui.close(); }
     }

@@ -1,6 +1,6 @@
 # Single-case study and report workflow
 
-The guarded CLI and MCP can now turn a terminal RAFT calculation into a saved study/report bundle. Run the registered case first, then export using its original request ID. The report is reconstructed from the durable admission decision and terminal outcome, not from client claims. This is the first single-case workflow; live append-only multi-run studies, accepted conclusions and replay remain planned.
+The guarded CLI and MCP can now turn a terminal RAFT calculation into a saved study/report bundle. Run the registered case first, then export using its original request ID. The report is reconstructed from the durable admission decision and terminal outcome, not from client claims. This is the first single-case workflow; live append-only multi-run studies and replay remain planned. Desktop human-reviewed derivatives are described in [conclusion review](conclusion-review.md).
 
 ## Trusted human setup
 
@@ -52,13 +52,13 @@ Publication uses a temporary sibling folder followed by rename. Export never edi
 
 Set `SEED_RAFT_REPO` to a built compatible RAFT checkout and run `npm run test:e2:raft`. This runs actual CLI/MCP calculations and report exports, validates study chains and copied-file hashes, checks escaping and STALE/UNVERIFIED labels, and refuses altered records, corrupt output and linked destinations. A shared-journal fixture verifies request-ID collisions do not select another project's evidence and unrelated configuration is not exported. Set `SEED_STUDY_DEMO_OUTPUT` to a dedicated acceptance-output directory to retain both example bundles after the temporary test project is removed.
 
-This first report route supports completed RAFT time series. Failed/cancelled/trip states remain visible when a terminal audited run is exportable and its lease has been safely released. General recovered-run exports without an original hashed outcome, other adapters' series formats, comparison, aggregate study budgets, broader study UI and accepted conclusions remain follow-ups.
+This first report route supports completed RAFT time series. Failed/cancelled/trip states remain visible when a terminal audited run is exportable and its lease has been safely released. General recovered-run exports without an original hashed outcome, other adapters' series formats, comparison, aggregate study budgets and broader study UI remain follow-ups. Human-reviewed report derivatives use the separate [conclusion workflow](conclusion-review.md).
 
 ## Desktop lesson panel
 
 Start SEED with the same trusted `SEED_HOST_CONFIG` and `SEED_STUDY_HEADER` environment variables. The welcome page lists registered lesson cases. **Run** uses the configured study budget and a new host-generated request ID. It retains the configured actor and approval rules; clicking a desktop button does not grant human authority. **Cancel calculation** uses fresh cancellation checks and reports acknowledgment separately from the eventual stop. **Save study report** calls the same guarded export and shows the project-relative saved location.
 
-The renderer cannot choose configuration paths, actors, budgets, request IDs or output destinations. Companion app views have no host preload and cannot use the lesson IPC handlers. The detached calculation owner survives closing the desktop; closing SEED does not cancel it. Use the existing human CLI recovery process if the owner fails. The panel records request intent before dispatch: new desktop requests now have trusted restart status/history. Successful saves automatically open a report tab; Open report refocuses the current saved version. No scientific conclusion is accepted by this panel.
+The renderer cannot choose configuration paths, actors, budgets, request IDs or output destinations. Companion app views have no host preload and cannot use the lesson IPC handlers. The detached calculation owner survives closing the desktop; closing SEED does not cancel it. Use the existing human CLI recovery process if the owner fails. The panel records request intent before dispatch: new desktop requests now have trusted restart status/history. Successful saves automatically open a report tab; Open report refocuses the current saved version. Running, saving or viewing accepts no scientific conclusion. Draft authoring and a separate native human review action are described in [conclusion review](conclusion-review.md).
 
 For actual Electron-to-RAFT acceptance, set `SEED_GUI_ACCEPTANCE=1` alongside `SEED_RAFT_REPO` and run `npx vitest run tests/raft-oracles.test.ts --maxWorkers=1` after building. This clicks the real lesson run/save buttons, waits for terminal completion and asserts the report-saved state. The shell suite checks missing setup and app-tab behavior.
 

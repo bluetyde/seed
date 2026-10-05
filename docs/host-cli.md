@@ -42,4 +42,4 @@ Verification: `npm test` builds the CLI before tests; `npm run test:e2:raft` req
 
 ## Conclusion proposal
 
-After saving a registered report, `node dist/cli/seed.js draft-conclusion` accepts JSON on stdin with exactly `reportId` and `claims`. A claim contains `text`, `runs` and `oracles`; use the report's run ID or an oracle-set ID recorded in its study. The reply returns an opaque draft ID and hashes. This stores a draft only. Human review/acceptance is not yet implemented; no acceptance CLI or MCP tool exists. See [record contracts and limits](conclusion-review.md).
+After saving a registered report, `node dist/cli/seed.js draft-conclusion` accepts JSON on stdin with exactly `reportId` and `claims`. A claim contains `text`, `runs` and `oracles`; use the report's run ID or an oracle-set ID recorded in its study. The reply returns an opaque draft ID and hashes. This stores a draft only. Human review/acceptance uses a separate native desktop confirmation and trusted reviewer setup; no acceptance CLI or MCP tool exists. See [record contracts and limits](conclusion-review.md).

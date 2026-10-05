@@ -62,6 +62,8 @@ interface HostApi {
   selectLesson(requestId: string): void;
   lessonHistoryPage(offset: number): void;
   openLessonReport(): void;
+  reviewConclusion(): void;
+  draftConclusion(text: string, reportId: string): void;
   runLesson(caseId: string): void;
   cancelLesson(): void;
   saveLesson(): void;

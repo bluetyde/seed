@@ -14,6 +14,7 @@ import { ProcessManager } from "./processes";
 import { TabModel } from "./tabs";
 import { Lesson } from "./lesson";
 import { createReportView } from "./reportView";
+import { listConclusionDrafts, inspectConclusion, decideConclusion } from "../core/conclusionReview";
 protocol.registerSchemesAsPrivileged([{ scheme: "seed-report", privileges: { standard: true, secure: true } }]);
 
 const MENU_H = 32;
@@ -54,6 +55,41 @@ const runtime = new Map<string, TabRuntime>();
 const processes = new ProcessManager();
 const childWindows = new Map<string, Set<BrowserWindow>>();
 const lesson = new Lesson(process.env.SEED_HOST_CONFIG, process.env.SEED_STUDY_HEADER, () => refresh(), undefined, openReport);
+let reviewing = false;
+async function reviewConclusion(): Promise<void> {
+  if (reviewing || !process.env.SEED_HOST_CONFIG) return;
+  reviewing = true;
+  try {
+    const config = process.env.SEED_HOST_CONFIG, reportId = lesson.snapshot().reportId;
+    if (!reportId) throw Error("Select a saved report first.");
+    const choices = listConclusionDrafts(config, reportId);
+    if (!choices.length) throw Error("No conclusion drafts for this report. Propose one through the guarded draft-conclusion route.");
+    let offset = 0, selected: typeof choices[number] | undefined;
+    while (!selected) {
+      const page = choices.slice(offset, offset + 10), buttons = [...page.map((_, i) => `Draft ${offset + i + 1}`), "Next page", "Cancel"];
+      const choice = await dialog.showMessageBox(win, { type: "question", title: "Choose a conclusion draft", message: "Choose the exact draft to review.",
+        detail: page.map((d, i) => `${offset + i + 1}. ${d.time}: ${d.text}${d.acceptedReportId ? " (accepted report)" : ""}`).join("\n\n"), buttons, defaultId: buttons.length - 1, cancelId: buttons.length - 1 });
+      if (choice.response === buttons.length - 1) return;
+      if (choice.response === page.length) { offset = offset + 10 >= choices.length ? 0 : offset + 10; continue; }
+      selected = page[choice.response];
+    }
+    if (selected.acceptedReportId) { await openReport(selected.acceptedReportId); return; }
+    const s = inspectConclusion(config, process.env.SEED_REVIEWER_CONFIG, selected.draftId);
+    if (s.committedReview?.decision === "rejected") { lesson.notice("This draft was rejected. Save a revised draft to request another review."); return; }
+    const finishing = s.committedReview?.decision === "accepted";
+    const response = await dialog.showMessageBox(win, { type: "question", title: "Human conclusion review", message: `Review as ${s.reviewer.name}`,
+      detail: (finishing ? `Already accepted by ${s.committedReview.reviewer.name} at ${s.committedReview.time}. This retry finishes that historical version; it records no new decision or updated limits. Original acknowledged limits: ${JSON.stringify(s.committedReview.acknowledgedLimits)}\n\n` : "") +
+        `Question: ${s.header.question}\nAssumptions: ${s.header.assumptions.join("; ")}\nProposed by: ${s.draft.actor.kind} ${s.draft.actor.name}\nStudy head: ${s.draft.sourceHead}\n\n` +
+        s.draft.claims.map((c: any, i: number) => `${i + 1}. ${c.text}\nRuns: ${c.runs.join(", ")}\nOracles: ${c.oracles.join(", ")}`).join("\n\n") +
+        `\n\n${s.binding.stale ? "STALE: inputs or pinned engine/oracle evidence changed." : "Current inputs and pins match the saved calculation."}\nUNVERIFIED quantities: ${s.binding.unverified.join(", ") || "none recorded"}\nAccepting acknowledges these displayed limits. Citations establish traceability, not scientific proof.`,
+      buttons: finishing ? ["Finish accepted report", "Cancel"] : ["Accept these claims and limits", "Reject draft", "Cancel"], defaultId: finishing ? 1 : 2, cancelId: finishing ? 1 : 2 });
+    if (response.response === (finishing ? 1 : 2)) { lesson.notice(finishing ? "Publication retry cancelled. The historical acceptance is unchanged." : "Review cancelled; draft remains unaccepted."); return; }
+    const reply = await decideConclusion(config, process.env.SEED_REVIEWER_CONFIG, selected.draftId, s.displayHash, finishing || response.response === 0 ? "accepted" : "rejected");
+    lesson.notice(reply.decision === "accepted" ? "Human review recorded. Original report preserved." : "Draft rejected. No accepted report created.");
+    if (reply.reportId) await openReport(reply.reportId);
+  } catch (error) { lesson.notice(`Conclusion review: ${error instanceof Error ? error.message : String(error)}. Review or retry from the original report.`); }
+  finally { reviewing = false; }
+}
 
 async function openReport(reportId: string): Promise<void> {
   if (!process.env.SEED_HOST_CONFIG) throw Error("No trusted host configuration.");
@@ -406,6 +442,8 @@ app.whenReady().then(() => {
   ipcMain.on("lesson:cancel", (e) => { if (e.sender === pageView.webContents) lesson.cancel(); });
   ipcMain.on("lesson:save", (e) => { if (e.sender === pageView.webContents) void lesson.save(); });
   ipcMain.on("lesson:openReport", (e) => { if (e.sender === pageView.webContents) void lesson.openSaved(); });
+  ipcMain.on("lesson:reviewConclusion", e => { if (e.sender === pageView.webContents) void reviewConclusion(); });
+  ipcMain.on("lesson:draftConclusion", (e, text: unknown, reportId: unknown) => { if (e.sender === pageView.webContents) void lesson.propose(text, reportId); });
   ipcMain.on("lesson:select", (e, id: unknown) => { if (e.sender === pageView.webContents) lesson.select(id); });
   ipcMain.on("lesson:historyPage", (e, offset: unknown) => { if (e.sender === pageView.webContents) lesson.page(offset); });
   ipcMain.on("tab:openApp", (e, id: unknown) => { if (checkSender(e) && typeof id === "string") void openApp(id); });

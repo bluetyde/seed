@@ -9,7 +9,18 @@ import { verifyStudyLog } from "./semantic";
 import { evaluateGate } from "./policy";
 
 export type ConclusionClaim = { text: string; runs: string[]; oracles: string[] };
-function claimsOf(value: unknown): ConclusionClaim[] {
+/** Desktop text authoring automatically cites the selected protected report's run. */
+export async function proposeReportConclusion(file: string, reportId: string, text: unknown) {
+  if (typeof text !== "string" || !text.trim() || text.length > 2000) throw Error("Enter a conclusion of 1 to 2000 characters.");
+  readRegisteredReport(file, reportId);
+  const c = validateHostConfiguration(readHostJson(file)), root = realpathSync(c.projectRoot), state = realpathSync(c.stateRoot), project = openProject(root);
+  if (!project.ok) throw Error("report project unavailable");
+  let dir = reportReceiptFolder(state, root, project.value.manifest.projectId as string);
+  if (!existsSync(dir) || !existsSync(safeChild(dir, reportId + ".json"))) dir = safeChild(state, "reports", true);
+  const receipt = readHostJson(safeChild(dir, reportId + ".json"));
+  return proposeConclusion(file, { reportId, claims: [{ text, runs: [receipt.runId], oracles: [] }] });
+}
+export function claimsOf(value: unknown): ConclusionClaim[] {
   if (!Array.isArray(value) || !value.length || value.length > 20) throw Error("draft requires 1 to 20 claims");
   return value.map(claim => {
     if (!claim || typeof claim !== "object" || Object.keys(claim).sort().join() !== "oracles,runs,text" ||
