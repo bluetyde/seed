@@ -4,6 +4,14 @@ Status 2026-10-05. Collected while building and testing the five adapters (RAFT,
 
 Kinds: **schema** (needs v0.2 and a migration), **text** (clarify the contract text, no schema change), **adapter** (not a contract matter).
 
+## Decisions (user, 2026-10-05)
+
+- Items 1, 2, 3, 4 and 7 (schema): accepted for v0.2.
+- **Item 5 (`run.seed`): option B.** A request seed must equal the model's seed; deterministic apps refuse. Implemented: OpenMC now accepts the project's own seed (it refused any), `E_REQUEST_CONFLICT` otherwise; text in contracts.md 12.1.
+- **Item 6 (`oraclePin`): keep it as it is; revisit for v0.3.**
+- Items 8 to 13: accepted, now written down as contracts.md section 12 (v0.1.1). Item 9: wall-clock is host-enforced, cores by OpenMC only, memory and disk advisory; host-side disk enforcement is a follow-up (TODO). Item 10: the host is to check settings against `describe.parameters` (TODO). Item 11: implemented: the shared start flow stores a payload hash and answers `E_REQUEST_CONFLICT` for the same request id with other inputs, settings or seed. Item 13: an unmappable path is `E_PATH_UNMAPPABLE` (OpenMC changed).
+- **Final sign-off of v0.1: not given yet.**
+
 ## Schema changes
 
 | # | Candidate | Evidence | Proposal |
@@ -34,4 +42,4 @@ Kinds: **schema** (needs v0.2 and a migration), **text** (clarify the contract t
 
 ## Recommendation
 
-Sign off v0.1 as the contract all five adapters implement, fold the text items (8 to 13) into a v0.1.1 clarification, and plan v0.2 for items 1 to 3 plus 5 to 7 (item 4 with 3). None of them blocks anything that works today.
+Sign off v0.1 as the contract all five adapters implement, with the v0.1.1 clarifications of section 12 (done). Plan v0.2 for items 1 to 4 and 7; `oraclePin` (6) waits for v0.3. None of them blocks anything that works today.
