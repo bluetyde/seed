@@ -424,3 +424,31 @@ it("journal tampering is detected rather than replaced", () => {
   const tampered = readFileSync(path, "utf8").replace("before", "after"); writeFileSync(path, tampered);
   expect(() => appendAdmission(root, { value: "new" })).toThrow(/hash chain/); expect(readFileSync(path, "utf8")).toBe(tampered);
 });
+
+// Review hardening 2026-10-05: reservation maintenance is a separate human admin entry, not a verb of the agent CLI.
+it("the agent CLI has no release verb; the admin CLI needs its own human configuration", async () => {
+  const f = await fixture(), p = openProject(f.project); if (!p.ok) throw Error("fixture missing");
+  const folder = join(f.state, "desktop-intents", sha256Hex(p.value.manifest.projectId + "\n" + f.project)), reservation = join(folder, "reservation");
+  mkdirSync(reservation, { recursive: true }); writeHostJson(join(reservation, "owner.json"), { pid: 99999999, token: "dead-fixture" });
+  const { Readable } = await import("node:stream");
+  const { runCli } = await import("../src/cli/seed");
+  const { runAdminCli } = await import("../src/cli/admin");
+  const empty = () => Readable.from(["{}"]);
+  // the agent CLI does not know the verb, even with a human configuration
+  f.config.actor = { kind: "human", name: "maintainer" }; saveHostConfiguration(f.file, f.config);
+  const viaAgentCli = await runCli(["release-intent-reservation"], empty(), f.file);
+  expect(viaAgentCli.code).toBe(2); expect((viaAgentCli.reply as any).errors[0].code).toBe("E_VERB_UNKNOWN");
+  expect(existsSync(reservation)).toBe(true);
+  // the admin CLI refuses unknown verbs and a missing configuration
+  expect(((await runAdminCli(["run"], empty(), f.file)).reply as any).errors[0].code).toBe("E_VERB_UNKNOWN");
+  expect(((await runAdminCli(["release-intent-reservation"], empty(), undefined)).reply as any).errors[0].code).toBe("E_SETUP_REQUIRED");
+  // an agent identity in the admin configuration is refused and nothing is released
+  f.config.actor = { kind: "agent", name: "bot", model: "m" }; saveHostConfiguration(f.file, f.config);
+  const asAgent = await runAdminCli(["release-intent-reservation"], empty(), f.file);
+  expect(asAgent.code).toBe(2); expect(existsSync(reservation)).toBe(true);
+  // a human configuration releases the dead owner's reservation
+  f.config.actor = { kind: "human", name: "maintainer" }; saveHostConfiguration(f.file, f.config);
+  const done = await runAdminCli(["release-intent-reservation"], empty(), f.file);
+  expect(done).toMatchObject({ code: 0, reply: { ok: true, state: "intent-reservation-released" } });
+  expect(existsSync(reservation)).toBe(false);
+});
