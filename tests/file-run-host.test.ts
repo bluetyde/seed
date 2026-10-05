@@ -456,3 +456,17 @@ it("the agent CLI has no release verb; the admin CLI needs its own human configu
   expect(done).toMatchObject({ code: 0, reply: { ok: true, state: "intent-reservation-released" } });
   expect(existsSync(reservation)).toBe(false);
 });
+
+// Review hardening follow-up 2026-10-05: the full cause of an internal refusal goes to the host's diagnostics file only.
+it("an internal refusal tells the caller the stage and class, and the host diagnostics file keeps the full cause", async () => {
+  const f = await fixture();
+  const out = await runFromHostFile(f.file, { ...f.request, caseId: "not-registered-case" });
+  expect(out.ok).toBe(false);
+  if (out.ok) throw Error("expected a refusal");
+  expect(out.errors[0]!.message).toBe("run not started: failed while loading the registered case (Error)");
+  expect(JSON.stringify(out)).not.toMatch(/registered case is not|not registered|diagnostics/);
+  const lines = readFileSync(join(f.engineRoot, "diagnostics.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toMatchObject({ stage: "loading the registered case", kind: "Error", message: "case is not registered" });
+  expect(lines[0].project).toMatch(/^p-/); expect(Number.isFinite(Date.parse(lines[0].time))).toBe(true);
+});
