@@ -18,18 +18,12 @@ const { spawn, spawnSync } = require("node:child_process");
 const {
   MAX_CAPTURE,
   portableRel,
-  isAlive,
   commandLine,
-  killTree,
-  waitDead,
   atomicWrite,
   json,
   readJson,
   insideRoot,
   containedBelow,
-  jobsDir,
-  jobIdFor,
-  jobIndexPath,
   findJob,
   snapshotProblem,
   appFailed,
@@ -38,8 +32,8 @@ const {
   normPath,
   typed,
   jobState,
-  ownsJobProcess,
 } = require("../shared/util.cjs");
+const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
 
 const ADAPTER = { id: "pra", version: "0.1.0" };
 const RUN_ID = "pra";
@@ -159,52 +153,7 @@ function mapWarnings(list) {
 
 
 
-/** This adapter's wrapper script and nothing else: see ownsJobProcess in ../shared/util.cjs. */
-function ownsProcess(j, s) {
-  return ownsJobProcess(j, s, path.join(__dirname, "job.cjs"));
-}
 
-async function main() {
-  const verb = process.argv[2];
-  let input = "";
-  process.stdin.setEncoding("utf8");
-  for await (const chunk of process.stdin) input += chunk;
-  let request;
-  try {
-    request = JSON.parse(input);
-  } catch {
-    process.stderr.write("invalid JSON on stdin\n");
-    process.exit(1);
-  }
-  const root = process.env.SEED_PROJECT_ROOT || process.cwd();
-  const reply = (doc) => {
-    const out = {
-      schema: "seed.adapter-reply/0.1",
-      verb,
-      requestId: request && request.requestId ? request.requestId : "unknown",
-      ok: doc.ok,
-      errors: doc.errors || [],
-      warnings: doc.warnings || [],
-      ...(doc.result !== undefined ? { result: doc.result } : {}),
-    };
-    process.stdout.write(JSON.stringify(out) + "\n", () => process.exit(0));
-  };
-  const fail = (...errors) => reply({ ok: false, errors });
-
-  try {
-    if (!request || request.verb !== verb) return fail(typed("E_SCHEMA_INVALID", "/verb", "the request verb does not match the command"));
-    if (verb === "describe") return await describe(reply, fail);
-    if (verb === "open") return fail(typed("E_VERB_UNKNOWN", "/verb", "SNEED's editor is its web page; this headless adapter does not open it"));
-    if (verb === "validate") return await validate(request, root, reply, fail);
-    if (verb === "run") return await run(request, root, reply, fail);
-    if (verb === "status") return status(request, root, reply, fail);
-    if (verb === "cancel") return await cancel(request, root, reply, fail);
-    if (verb === "collect") return collect(request, root, reply, fail);
-    return fail(typed("E_VERB_UNKNOWN", "/verb", "unknown verb"));
-  } catch (err) {
-    return fail(typed("E_INTERNAL", "", "adapter failure: " + (err && err.message)));
-  }
-}
 
 /** Quantities and domains the oracle entries claim (good entries only), or [] when no entries folder is configured. */
 function oracleCoverage() {
@@ -333,108 +282,19 @@ async function run(request, root, reply, fail) {
   if (!preOut || (pre.code !== 0 && pre.code !== 2)) return fail(appFailed("the SNEED runner could not check the model", pre));
   if (preOut.ok !== true) return fail(...(mapErrors(preOut.errors).length > 0 ? mapErrors(preOut.errors) : [typed("E_APP_FAILED", "", "the runner refused the model without giving a reason", "app-content")]));
 
-  const nativeDir = path.join(absRunDir, "native");
-  const jobJsonPath = path.join(nativeDir, "job.json");
-  const jobId = jobIdFor(request.requestId);
-  fs.mkdirSync(nativeDir, { recursive: true });
-  if (!containedBelow(absRunDir, nativeDir) || fs.lstatSync(nativeDir).isSymbolicLink()) {
-    return fail(typed("E_PATH_TRAVERSAL", "/runDir", "the native state folder is a link or leaves the run folder"));
-  }
-  const dir = jobsDir(root, true);
-  if (!dir) return fail(typed("E_PATH_TRAVERSAL", "/.seed/jobs", "the job registry folder is a link or leaves the project"));
-  // One request id belongs to one run folder: refuse a start that would reuse it elsewhere, before anything is created or started.
-  const bound = readJson(jobIndexPath(dir, jobId));
-  if (bound && bound.runDir !== request.runDir) return fail(typed("E_REQUEST_CONFLICT", "/requestId", "this request id is already bound to another run folder"));
-
-  // Reserve the run folder exclusively before anything is started; the record is completed (with the process id) after the start.
-  const token = crypto.randomBytes(16).toString("hex");
-  const record = { jobId, requestId: request.requestId, pid: null, token, model: modelPath, method, limitOrder, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) };
-  const created = { job: false, index: false };
-  try {
-    fs.writeFileSync(jobJsonPath, json(record), { flag: "wx" });
-    created.job = true;
-  } catch (err) {
-    if (!err || err.code !== "EEXIST") throw err;
-    const existing = readJson(jobJsonPath);
-    if (existing && existing.requestId === request.requestId) {
-      return reply({ ok: true, result: { jobId: existing.jobId, runDir: request.runDir, lifecycle: "running" } });
-    }
-    return fail(typed("E_REQUEST_CONFLICT", "", "this run folder already belongs to another request"));
-  }
-
-  const outAbs = path.join(nativeDir, "out");
-  const rollback = async (child, error) => {
-    if (child && Number.isInteger(child.pid)) {
-      try {
-        await stopNative(cfg, nativeDir);
-        await killTree(child.pid);
-        await waitDead(child.pid, 3000);
-      } catch {
-        // the failure being reported matters more
-      }
-    }
-    for (const f of [created.job ? jobJsonPath : null, created.index ? jobIndexPath(dir, jobId) : null]) {
-      if (f === null) continue;
-      try {
-        fs.rmSync(f, { force: true });
-      } catch {
-        // best effort: the folder is being abandoned
-      }
-    }
-    return fail(error);
-  };
-
+  const outAbs = path.join(absRunDir, "native", "out");
   const runArgs = ["run", modelAbs, "--out", outAbs, "--run-id", RUN_ID, "--method", method, ...(limitOrder !== undefined ? ["--limit-order", String(limitOrder)] : []), "--timeout-seconds", String(timeoutSeconds)];
-  const cancelArgs = ["cancel", "--out", outAbs];
-  let child;
-  try {
-    child = spawn(process.execPath, [path.join(__dirname, "job.cjs"), absRunDir, token, JSON.stringify(launchSpec(cfg, runArgs)), JSON.stringify(launchSpec(cfg, cancelArgs))], { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true });
-  } catch (err) {
-    return rollback(null, typed("E_APP_FAILED", "", "could not start the job: " + (err && err.message)));
-  }
-  child.unref();
-  const nativeIdentity = new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), 15000);
-    child.once("message", (message) => {
-      clearTimeout(timer);
-      resolve(message && message.token === token && Number.isSafeInteger(message.runnerPid) && message.runnerPid > 1 ? message.runnerPid : null);
-    });
-    child.once("error", () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
+  return startJob({
+    root, request, absRunDir, reply, fail,
+    record: { model: modelPath, method, limitOrder, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) },
+    runSpec: launchSpec(cfg, runArgs),
+    cancelSpec: launchSpec(cfg, ["cancel", "--out", outAbs]),
+    stopNative: () => stopNative(cfg, path.join(absRunDir, "native")),
   });
-  if (!Number.isInteger(child.pid)) return rollback(null, typed("E_APP_FAILED", "", "the job did not start"));
-  try {
-    fs.writeFileSync(jobIndexPath(dir, jobId), json({ runDir: request.runDir }), { flag: "wx" });
-    created.index = true;
-    atomicWrite(jobJsonPath, json({ ...record, pid: child.pid }));
-  } catch (err) {
-    return rollback(child, typed("E_INTERNAL", "", "could not register the job, so it was stopped: " + (err && err.code ? err.code : err)));
-  }
-  const runnerPid = await nativeIdentity;
-  if (!runnerPid) return rollback(child, typed("E_APP_FAILED", "", "native runner identity was not confirmed over launch IPC"));
-  reply({ ok: true, result: { jobId, runDir: request.runDir, lifecycle: "running", nativeProcesses: [child.pid, runnerPid] } });
 }
 
 function status(request, root, reply, fail) {
-  const j = findJob(root, request.jobId);
-  if (!j) return fail(typed("E_APP_FAILED", "/jobId", "job not found: " + request.jobId));
-  const s = jobState(j.nativeDir, j.job);
-  reply({
-    ok: true,
-    result: {
-      jobId: request.jobId,
-      lifecycle: s.lifecycle,
-      native: s.native,
-      ...(s.status && s.status.startedAt ? { startedAt: s.status.startedAt } : {}),
-      ...(s.status && s.status.finishedAt ? { finishedAt: s.status.finishedAt } : {}),
-    },
-  });
+  return statusJob({ request, root, reply, fail });
 }
 
 
@@ -465,54 +325,7 @@ async function stopNative(cfg, nativeDir) {
 async function cancel(request, root, reply, fail) {
   const cfg = config();
   if (cfg.setup) return fail(setupError(cfg.setup));
-  const j = findJob(root, request.jobId);
-  if (!j) return fail(typed("E_APP_FAILED", "/jobId", "job not found: " + request.jobId));
-  const launch = request.extensions && request.extensions["seed.launch"];
-  if (launch) {
-    const child = readJson(path.join(j.nativeDir, "child.json"));
-    const pids = launch.nativeProcesses;
-    if (launch.runDir !== j.runDir || (pids !== undefined && (!Array.isArray(pids) || pids.length !== 2 ||
-      pids.some((pid) => !Number.isSafeInteger(pid) || pid < 2) || j.job.pid !== pids[0] || !child || child.pid !== pids[1]))) {
-      return fail(typed("E_NOT_OWNED", "/extensions/seed.launch", "job differs from protected launch binding"));
-    }
-  }
-  const s = jobState(j.nativeDir, j.job);
-  const child = readJson(path.join(j.nativeDir, "child.json"));
-  const childPid = child && Number.isInteger(child.pid) && child.pid > 1 ? child.pid : null;
-  if (s.lifecycle !== "running") {
-    // Already over (or died): nothing was cancelled by this call. A wrapper that died can leave SCRAM running inside WSL (outside any
-    // process tree): ask the runner, which only kills what carries this run's owner tag, and stop the Node runner only when it provably is ours.
-    let nativeStopped = !s.alive && (childPid === null || !isAlive(childPid));
-    if (s.lifecycle === "failed") {
-      const n = await stopNative(cfg, j.nativeDir);
-      if (n.notOwned) return fail(typed("E_NOT_OWNED", "/jobId", "a process of this run is still running and cannot be shown to be this run's"));
-      nativeStopped = nativeStopped && n.confirmed;
-    }
-    if (childPid !== null && isAlive(childPid)) {
-      if (!ownsRunner(cfg, j, childPid)) return fail(typed("E_NOT_OWNED", "/jobId", "a process from this job is still running and cannot be shown to be this run's runner"));
-      await killTree(childPid);
-      nativeStopped = nativeStopped && (await waitDead(childPid, 5000));
-    }
-    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: s.lifecycle, cancelled: false, nativeStopped } });
-  }
-  if (!ownsProcess(j, s)) return fail(typed("E_NOT_OWNED", "/jobId", "the process behind this job is not owned by this run"));
-
-  // 1. The native run first: SCRAM lives in WSL, outside the tree killed below.
-  const first = await stopNative(cfg, j.nativeDir);
-  if (first.notOwned) return fail(typed("E_NOT_OWNED", "/jobId", "the native process of this run cannot be shown to be its own"));
-  if (!first.confirmed) return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
-  // 2. Then the wrapper and the Node runner, only after the command line proved they are this job's.
-  await killTree(j.job.pid);
-  const dead = await waitDead(j.job.pid, 5000);
-  const childDead = childPid !== null ? await waitDead(childPid, 5000) : true;
-  if (!dead || !childDead) return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
-  // 3. If the first stop found nothing recorded yet, the runner may have been about to start SCRAM: with it dead no new run can
-  //    appear, so ask again and require that answer to be confirmed too.
-  if (!first.stoppedOne && !(await stopNative(cfg, j.nativeDir)).confirmed) {
-    return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "failed", cancelled: false, nativeStopped: false } });
-  }
-  atomicWrite(path.join(j.nativeDir, "status.json"), json({ status: "cancelled", startedAt: s.status && s.status.startedAt, finishedAt: new Date().toISOString() }));
-  reply({ ok: true, result: { jobId: request.jobId, lifecycle: "cancelled", cancelled: true, nativeStopped: true } });
+  return cancelJob({ request, root, reply, fail, stopNative: (j) => stopNative(cfg, j.nativeDir), ownsRunner: (j, pid) => ownsRunner(cfg, j, pid) });
 }
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
@@ -628,4 +441,4 @@ function collect(request, root, reply, fail) {
   reply({ ok: true, warnings, result: { jobId: request.jobId, lifecycle: "completed", resultsIndex: request.runDir + "/results.json", resultsSha256: sha256(text) } });
 }
 
-main();
+serve({ describe: (_request, _root, reply, fail) => describe(reply, fail), validate, run, status, cancel, collect }, "SNEED's editor is its web page; this headless adapter does not open it");
