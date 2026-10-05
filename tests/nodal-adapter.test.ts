@@ -13,8 +13,8 @@ import { validate } from "../src/core/validate";
 // The real tests need NODAL: SEED_NODAL_REPO (default: a sibling folder pipe-studio) on a branch that has the runner's
 // --describe/--validate/--json modes, and a Python with its solver requirements (SEED_NODAL_PYTHON, default the repo's .venv).
 // Without them the real-runner tests are skipped with a warning, and only the setup tests run.
-const repo = process.env.SEED_NODAL_REPO ?? join(__dirname, "..", "..", "pipe-studio");
-const pythonCandidates = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python")];
+const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-seed"), join(__dirname, "..", "..", "pipe-studio")].find(p => existsSync(join(p, "nodal_studio", "run.py"))) ?? join(__dirname, "..", "..", "pipe-studio");
+const pythonCandidates = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "pipe-studio", ".venv", "Scripts", "python.exe"), join(__dirname, "..", "..", "pipe-studio", ".venv", "bin", "python")];
 const python = pythonCandidates.find(p => p && existsSync(p)) ?? "";
 const haveNodal =
   python !== "" &&

@@ -11,8 +11,8 @@ import { RunManager, type Budget } from "../src/core/runManager";
 // NODAL's own oracle entries (oracles/seed in the NODAL repo): four analytic cases whose expected values come from formulas and integrals that
 // do not use the solver, golden-vector regression cases, and bad inputs. They run through the adapter and the run manager. Needs the NODAL repo
 // (SEED_NODAL_REPO, default a sibling folder pipe-studio) on a branch with the runner's JSON modes and the entries, and its Python.
-const repo = process.env.SEED_NODAL_REPO ?? join(__dirname, "..", "..", "pipe-studio");
-const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python")].find(p => p && existsSync(p)) ?? "";
+const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-seed"), join(__dirname, "..", "..", "pipe-studio")].find(p => existsSync(join(p, "nodal_studio", "run.py"))) ?? join(__dirname, "..", "..", "pipe-studio");
+const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "pipe-studio", ".venv", "Scripts", "python.exe"), join(__dirname, "..", "..", "pipe-studio", ".venv", "bin", "python")].find(p => p && existsSync(p)) ?? "";
 const base = join(repo, "oracles", "seed");
 const have =
   python !== "" &&
