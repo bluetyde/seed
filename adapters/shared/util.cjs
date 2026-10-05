@@ -180,6 +180,7 @@ function snapshotProblem(absRunDir, inputs) {
     const p = path.join(absRunDir, "inputs", i.path);
     let bytes;
     try {
+      if (!fs.existsSync(p)) return i.path + " is missing from the snapshot";
       if (!containedBelow(realRun, p)) return i.path + " resolves outside the run folder";
       bytes = fs.readFileSync(p);
     } catch {
