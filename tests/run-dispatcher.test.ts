@@ -108,10 +108,30 @@ for (const [stage, make] of [
   expect(out.errors[0]!.message).not.toMatch(/Users|home\/me|state\/audit|\.json/);
   expect(readdirSync(join(f.p.root, "runs"))).toEqual([]);
 });
-it("describeCause keeps the code or name, drops paths and control characters, and bounds the length", () => {
-  expect(describeCause(Object.assign(Error("open '/etc/passwd' failed"), { code: "ENOENT" }))).toBe("ENOENT: open '<path>' failed");
-  expect(describeCause(new RangeError("x".repeat(500))).length).toBeLessThanOrEqual("RangeError: ".length + 160);
-  expect(describeCause(new Error("line one" + String.fromCharCode(10) + "line two C:/secret"))).toBe("Error: line one");
+it("describeCause returns only an allowlisted classification, never message text (UNC, spaces, secrets)", () => {
+  const unc = Error("cannot read " + String.fromCharCode(92, 92) + "fileserver" + String.fromCharCode(92) + "private" + String.fromCharCode(92) + "host.json");
+  expect(describeCause(unc)).toBe("Error");
+  expect(describeCause(Object.assign(Error("open 'C:/Users/Jane Doe/private/host.json'"), { code: "ENOENT" }))).toBe("ENOENT");
+  expect(describeCause(new Error("invalid token=SYNTHETIC_SENTINEL"))).toBe("Error");
+  expect(describeCause(new RangeError("anything"))).toBe("RangeError");
+  expect(describeCause(Object.assign(Error("x"), { code: "not an errno; token=secret" }))).toBe("Error");
+  expect(describeCause(Object.assign(Error("x"), { name: "SecretNamedError" }))).toBe("Error");
   expect(describeCause("not an error")).toBe("Error");
   expect(describeCause(null)).toBe("Error");
+});
+it("the host diagnostics hook receives the stage and the full cause, and a throwing hook changes nothing", async () => {
+  const seen: { stage: string; message: string }[] = [];
+  const f = fixture();
+  f.options.audit = async () => { throw Object.assign(Error("no space left on D:/state/audit.jsonl token=SYNTHETIC_SENTINEL"), { code: "ENOSPC" }); };
+  f.options.onInternalError = (stage, cause) => { seen.push({ stage, message: (cause as Error).message }); };
+  const out = await new RunDispatcher(f.options).start(f.request);
+  if (out.ok) throw Error("expected a refusal");
+  expect(out.errors[0]!.message).toBe("run not started: failed while recording the gate decision (ENOSPC)");
+  expect(out.errors[0]!.message).not.toMatch(/SYNTHETIC_SENTINEL|audit.jsonl/);
+  expect(seen).toEqual([{ stage: "recording the gate decision", message: "no space left on D:/state/audit.jsonl token=SYNTHETIC_SENTINEL" }]);
+  const g = fixture();
+  g.options.audit = async () => { throw Error("disk full"); };
+  g.options.onInternalError = () => { throw Error("logger broke"); };
+  const refused = await new RunDispatcher(g.options).start(g.request);
+  expect(!refused.ok && refused.errors[0]!.code).toBe("E_INTERNAL");
 });
