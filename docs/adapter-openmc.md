@@ -32,7 +32,7 @@ source in a void or a thin absorber) with tolerances fixed before any run.
 
 ## Built so far (2026-10-05)
 
-OpenMC repo, branch `claude/seed-adapter` (pushed, not merged): `studio/tools/regen_script.cjs` (Electron regeneration) and
+OpenMC repo, branch `claude/seed-adapter` (merged into OpenMC Studio main on 2026-10-05, merge commit 9f8a7e8): `studio/tools/regen_script.cjs` (Electron regeneration) and
 `studio/openmc_studio/headless.py`, the app-owned runner: `describe | validate | run | cancel`, one JSON line each. Runs `model.py`
 as a child in its own session; run folder with `manifest.json` written last and atomically (sha256 per file), `results.json`
 (Studio's own `results.load`, checked against the project's particles/batches/seed, no wall-clock values), `provenance.json`.
