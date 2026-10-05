@@ -32,6 +32,7 @@ const {
   sha256,
   argvOf,
   normPath,
+  canonical,
   typed,
   jobState,
 } = require("../shared/util.cjs");
@@ -42,12 +43,6 @@ const MAX_CHANNELS = 200;
 
 
 
-/** Canonical JSON (sorted keys): two parsed documents are the same exactly when these strings are equal. */
-function canonical(v) {
-  if (v === null || typeof v !== "object") return JSON.stringify(v);
-  if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
-  return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
-}
 
 
 

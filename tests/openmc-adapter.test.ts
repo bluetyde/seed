@@ -206,7 +206,7 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
     }, 300000);
 
     it.each<[string, Record<string, unknown>, Record<string, unknown>, string]>([
-      ["a seed in the request", { seed: 7 }, {}, "E_UNSUPPORTED"],
+      ["a seed that is not the project's own", { seed: 7 }, {}, "E_REQUEST_CONFLICT"],
       ["an unknown setting", {}, { extra: 1 }, "E_UNSUPPORTED"],
       ["threads over the budget", {}, { threads: 2 }, "E_BOUNDS_EXCEEDED"],
       ["a model that is not an input", {}, { model: "models/none.py" }, "E_PROP_MISSING"],
@@ -216,6 +216,14 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       const out = await manager(p.root).start({ requestId: "req-refuse", actor, artifact: p.artifact, inputs: p.inputs, budget, settings: { ...p.settings, ...extraSettings }, ...top });
       expect(out.ok && out.state).toBe("failed");
       expect(JSON.stringify(out.ok && out.record)).toContain(code);
+    }, 300000);
+
+    it("a request may state the project's own seed, and the run is the same run", async () => {
+      const p = openmcProject();
+      const withSeed = await start(p, "req-seed", { seed: p.project.settings.seed });
+      if (!withSeed.ok) throw new Error(JSON.stringify(withSeed.errors));
+      expect(withSeed.state).toBe("completed");
+      expect(read(join(p.root, "runs", withSeed.runId, "native", "job.json")).payloadHash).toMatch(/^[0-9a-f]{64}$/);
     }, 300000);
 
     it("an eigenvalue project is refused by the runner's first-slice check before a job exists", async () => {

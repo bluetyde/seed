@@ -15,7 +15,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const {
-  typed, json, readJson, atomicWrite, jobsDir, jobIdFor, jobIndexPath, findJob, jobState, containedBelow, isAlive, killTree, waitDead, ownsJobProcess,
+  typed, json, readJson, atomicWrite, canonical, sha256, jobsDir, jobIdFor, jobIndexPath, findJob, jobState, containedBelow, isAlive, killTree, waitDead, ownsJobProcess,
 } = require("./util.cjs");
 
 /** The wrapper every adapter starts. Its path is part of the ownership check, so it is one constant for all of them. */
@@ -86,12 +86,21 @@ async function startJob({ root, request, absRunDir, record: extra, runSpec, canc
   // Reserve the run folder exclusively before anything is started: a concurrent start of the same request sees the reservation, and another
   // request is refused. The record is completed (with the process id) after the start.
   const token = crypto.randomBytes(16).toString("hex");
-  const record = { jobId, requestId: request.requestId, pid: null, token, ...extra };
+  // What determines the run: the same request id with another payload is a different request (the host compares its whole start request; this
+  // is the adapter's own guard for a client that reaches it directly). Budget and actor are not part of it.
+  const payloadHash = sha256(canonical({
+    inputs: ((request.snapshot && request.snapshot.inputs) || []).map((i) => ({ path: i.path, sha256: i.sha256 })),
+    settings: request.settings || {},
+    seed: request.seed === undefined ? null : request.seed,
+  }));
+  const record = { jobId, requestId: request.requestId, pid: null, token, payloadHash, ...extra };
   try {
     fs.writeFileSync(jobJsonPath, json(record), { flag: "wx" });
   } catch (err) {
     if (!err || err.code !== "EEXIST") throw err;
     let existing = readJson(jobJsonPath);
+    const differs = (e) => e && e.requestId === request.requestId && typeof e.payloadHash === "string" && e.payloadHash !== payloadHash;
+    if (differs(existing)) return fail(typed("E_REQUEST_CONFLICT", "/requestId", "this request id was already used with a different payload (settings, seed or inputs)"));
     if (existing && existing.requestId === request.requestId) {
       // The request id is the idempotency key: the same request gives the same job. A reservation without a process id is a launch that has
       // not committed yet (another call of this request is starting it): wait for it, because answering "running" for a launch that then
