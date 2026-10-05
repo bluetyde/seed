@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { callAdapter } from "../src/core/adapterClient";
@@ -11,7 +11,7 @@ import { RunManager, type Budget } from "../src/core/runManager";
 // SNEED's own oracle entries (oracles/seed in the SNEED repository): hand-derived exact top-event probabilities (checked there against an
 // exhaustive enumeration) and bad-input refusals. They run through the adapter and the run manager. Needs the SNEED checkout built with
 // `npm run build:cli` (SEED_PRA_REPO, default a sibling folder pra-studio or sneed) and its installed SCRAM runtime. Only read, never written.
-const candidates = [process.env.SEED_PRA_REPO, join(__dirname, "..", "..", "pra-studio"), join(__dirname, "..", "..", "sneed"), join(__dirname, "..", "..", "..", "Users", "jwncr", "Claude Code Test", "pra-studio")];
+const candidates = [process.env.SEED_PRA_REPO, join(__dirname, "..", "..", "pra-studio"), join(__dirname, "..", "..", "sneed"), join(homedir(), "Claude Code Test", "pra-studio")];
 const repo = candidates.find(p => p && existsSync(join(p, "dist", "node", "cli", "headless.js"))) ?? "";
 const base = join(repo, "oracles", "seed");
 const describeOut = repo ? spawnSync(process.execPath, [join(repo, "dist", "node", "cli", "headless.js"), "describe"], { encoding: "utf8" }) : null;
