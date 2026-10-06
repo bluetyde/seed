@@ -60,7 +60,7 @@ describe("dimensions: W, W/m and W/m^3 are distinct (plan 08)", () => {
   });
 
   it("refuses a counted thing inside a physical dimension and passes `other`", () => {
-    expect(mismatch("eV/particle", "energy")).not.toBeNull();
+    expect(mismatch("eV/particle", "energy")).toMatch(/counted thing/);
     expect(mismatch("eV/particle", "other")).toBeNull();
     expect(mismatch("furlong", "other")).not.toBeNull();
   });

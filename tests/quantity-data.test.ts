@@ -56,6 +56,7 @@ describe("v0.2 files", () => {
     fails(readQuantityData(t({ rows: [["a", 1, -0.1]] }), entry("h", "eV")), "E_SCHEMA_INVALID", "/rows/0/2");
     fails(readQuantityData(t({ columns: [cols[0], cols[1], { ...cols[2], of: "nope" }] }), entry("h", "eV")), "E_SCHEMA_INVALID", "/columns/2/of");
     fails(readQuantityData(t({ columns: [cols[0], { ...cols[1], of: "cell" }, cols[2]] }), entry("h", "eV")), "E_SCHEMA_INVALID", "/columns/1/of");
+    fails(readQuantityData(t({ columns: [cols[0], cols[1], { ...cols[2], of: "cell" }] }), entry("h", "eV")), "E_SCHEMA_INVALID", "/columns/2/of");
     fails(readQuantityData(t({ columns: [cols[0], cols[0], cols[2]] }), entry("h", "eV")), "E_SCHEMA_INVALID");
     fails(readQuantityData(t({ columns: [cols[0], { ...cols[1], unit: "furlong" }, cols[2]] }), entry("h", "eV")), "E_UNITS", "/columns/1/unit");
   });
