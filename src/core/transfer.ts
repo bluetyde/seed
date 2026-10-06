@@ -409,7 +409,7 @@ export async function applyTransfer(opts: {
     return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer command returned no usable target content", "app-content")] };
   }
   const after = sha256Hex(reply.output.content);
-  if (after === recipe.target.revision) return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer left the target unchanged", "app-content")] };
+  if (reply.output.content === opts.targetContent) return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer left the target unchanged", "app-content")] };
   return {
     ok: true, content: reply.output.content, contentSha256: after, ...(reply.checks ? { checks: reply.checks } : {}),
     provenance: { recipeId: recipe.recipeId, recipeDigest: ev.digest, approvalId: ev.approval.approvalId, sourceRunId: recipe.source.runId, sourceResultsSha256: recipe.source.resultsSha256, targetRevisionBefore: recipe.target.revision, targetRevisionAfter: after }

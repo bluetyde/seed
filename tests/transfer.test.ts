@@ -1,0 +1,365 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { sha256Hex } from "../src/core/canonical";
+import type { Actor, GateContext } from "../src/core/policy";
+import {
+  applyTransfer, checkPipeline, downstreamOf, evaluateTransfer, grantsFromApprovals, listApprovals, readRecipes, recipeDigest, recordApproval,
+  spawnTransferCommand, writeRecipe, type Approval, type Recipe, type TransferView
+} from "../src/core/transfer";
+import { validate } from "../src/core/validate";
+
+const tmp = mkdtempSync(join(tmpdir(), "seed-transfer-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+let n = 0;
+const fresh = (): { project: string; state: string } => {
+  const base = join(tmp, "w" + n++);
+  const project = join(base, "project"), state = join(base, "state");
+  mkdirSync(project, { recursive: true });
+  mkdirSync(state, { recursive: true });
+  return { project, state };
+};
+
+const agent: Actor = { kind: "agent", name: "claude", model: "opus" };
+const human: Actor = { kind: "human", name: "John" };
+const NOW = new Date("2026-10-06T12:00:00Z");
+const gate = (over: Partial<GateContext> = {}): GateContext => ({
+  study: { studyId: "study-1", tier: "A2", budget: { maxWallSeconds: 60, maxCores: 1, maxMemoryMB: 100, maxDiskMB: 100 }, parameters: [] },
+  now: () => NOW, ...over
+});
+
+type Over = { index?: (i: any) => void; data?: (d: any) => void; recipe?: (r: any) => void; indexText?: (s: string) => string };
+function world(over: Over = {}) {
+  const dataDoc: any = {
+    schema: "seed.quantity-data/0.2", quantity: "Fuel:heating", kind: "table", unit: "eV",
+    columns: [{ name: "bin", unit: "1", role: "label" }, { name: "mean", unit: "eV", role: "value" }, { name: "std", unit: "eV", role: "std", of: "mean" }],
+    rows: [[["a"], 1e6, 1e3], [["b"], 2e6, 1e3], [["c"], 3e6, 1e3]]
+  };
+  over.data?.(dataDoc);
+  const dataText = JSON.stringify(dataDoc);
+  const indexDoc: any = {
+    schema: "seed.results-index/0.2", runId: "run-001", status: "completed", adapter: { id: "openmc", version: "1" }, engine: { name: "openmc", version: "0.15" },
+    inputHashes: [{ path: "m.json", sha256: "a".repeat(64) }], nativeStatus: { status: "ok", detail: "ok" },
+    quantities: [{ name: "Fuel:heating", unit: "eV", dimension: "energy", normalization: "per-source-particle", provenance: { runId: "run-001", inputRevisions: ["a".repeat(64)] }, data: { path: "runs/run-001/native/000.json", sha256: sha256Hex(dataText) }, verification: "unverified" }]
+  };
+  over.index?.(indexDoc);
+  const indexText = JSON.stringify(indexDoc);
+  const recipe: any = {
+    schema: "seed.transfer-recipe/0.2", recipeId: "heat-to-pin-1", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
+    source: { runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "Fuel:heating", dataSha256: sha256Hex(dataText), unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: "rev-c" }] },
+    target: { app: "feed", artifact: "pin-case", revision: "rev-d", field: "heating-to-pin" },
+    units: { to: "W" },
+    normalization: { kind: "source-rate", value: { value: 1.5e17, unit: "1/s" }, origin: "1 MW over 200 MeV per fission, from the model's power" },
+    mapping: { spatial: { slices: [{ id: "s1", bins: ["a", "b"] }, { id: "s2", bins: ["c"] }] }, time: { kind: "steady" }, extrapolation: "refused" },
+    tolerance: { conservation: 0.01, fixedBefore: "mapping" }
+  };
+  over.recipe?.(recipe);
+  const w = fresh();
+  const view = (extra: Partial<TransferView> = {}): TransferView => ({
+    projectId: "proj-1", projectRoot: w.project, now: NOW,
+    sourceIndex: over.indexText ? over.indexText(indexText) : indexText, sourceRunState: "completed",
+    readData: (p) => (p === "runs/run-001/native/000.json" ? dataText : null),
+    currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-d" },
+    targetTransfers: [{ field: "heating-to-pin", accepts: [{ dimension: "energy", normalization: "per-source-particle" }] }],
+    approvals: [], applied: [], ...extra
+  });
+  const approve = (r: Recipe = recipe, id = "appr-1", expiresInH = 24): Approval => {
+    const out = recordApproval({ stateRoot: w.state, projectRoot: w.project, projectId: "proj-1", studyId: "study-1", recipe: r, approver: human, grantedTo: agent, approvalId: id, now: NOW, expires: new Date(NOW.getTime() + expiresInH * 3600e3) });
+    if (!out.ok) throw new Error(JSON.stringify(out.errors));
+    return out.approval;
+  };
+  return { recipe: recipe as Recipe, view, approve, ...w, dataText, indexText };
+}
+
+const flat = (r: { errors: { code: string; field: string }[] }) => r.errors.map((e) => `${e.code} ${e.field}`);
+
+describe("recipe states", () => {
+  it("a recipe with no approval is proposed; with one it is approved; once applied it is applied", () => {
+    const w = world();
+    const p = evaluateTransfer(w.recipe, w.view());
+    expect(p.state).toBe("proposed");
+    expect(flat(p)).toEqual(["E_NOT_PERMITTED /approval"]);
+    const a = w.approve();
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a] })).state).toBe("approved");
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe) }] })).state).toBe("applied");
+  });
+
+  it("editing the recipe after approval voids the approval", () => {
+    const w = world();
+    const a = w.approve();
+    const edited = { ...w.recipe, tolerance: { ...w.recipe.tolerance, conservation: 0.5 } };
+    const e = evaluateTransfer(edited, w.view({ approvals: [a] }));
+    expect(e.state).toBe("proposed");
+    expect(e.errors[0]!.message).toMatch(/changed after/);
+  });
+
+  it("an expired approval, another project's approval and an approval for other revisions do not count", () => {
+    const w = world();
+    const expired = w.approve(w.recipe, "appr-old", 1);
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [expired], now: new Date(NOW.getTime() + 2 * 3600e3) })).errors[0]!.message).toMatch(/expired/);
+    const a = w.approve();
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], projectId: "proj-2" })).state).toBe("proposed");
+    const other: Approval = { ...a, inputRevisions: [{ artifact: "openmc-model", revision: "rev-c" }, { artifact: "pin-case", revision: "rev-x" }] };
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [other] })).errors[0]!.message).toMatch(/other revisions/);
+    const byAgent = { ...a, approvedBy: { kind: "agent", name: "claude" } } as unknown as Approval;
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [byAgent] })).state).toBe("proposed");
+  });
+
+  it("a changed source or target revision makes it stale, never approved", () => {
+    const w = world();
+    const a = w.approve();
+    for (const [artifact, field] of [["openmc-model", "/source/revisionPins/0"], ["pin-case", "/target/revision"]] as const) {
+      const e = evaluateTransfer(w.recipe, w.view({ approvals: [a], currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-d", [artifact]: "rev-new" } }));
+      expect(e.state).toBe("stale");
+      expect(flat(e)).toEqual([`E_STALE_REVISION ${field}`]);
+    }
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], currentRevisions: { "openmc-model": "rev-c" } })).state).toBe("stale");
+  });
+
+  it("source results or data that differ from the pins are stale", () => {
+    const w = world();
+    const changed = evaluateTransfer(w.recipe, w.view({ sourceIndex: w.indexText.replace("0.15", "0.16") }));
+    expect(changed.state).toBe("stale");
+    expect(flat(changed)).toContain("E_STALE_REVISION /source/resultsSha256");
+    const dataChanged = evaluateTransfer(w.recipe, w.view({ readData: () => w.dataText.replace("1000000", "1000001") }));
+    expect(flat(dataChanged)).toContain("E_STALE_REVISION /source/dataSha256");
+  });
+});
+
+describe("refusals SEED makes from its own records", () => {
+  const refused = (over: Over, code: string, field: string, extra: Partial<TransferView> = {}) => {
+    const w = world(over);
+    const e = evaluateTransfer(w.recipe, w.view(extra));
+    expect(e.state, JSON.stringify(e.errors)).toBe("invalid");
+    expect(flat(e)).toContain(`${code} ${field}`);
+  };
+
+  it("units: unknown unit, a unit of another dimension, a quantity with no dimension, a differing dimension or unit", () => {
+    refused({ recipe: (r) => { r.source.unit = "furlong"; } }, "E_UNITS", "/source/unit");
+    refused({ recipe: (r) => { r.source.unit = "W"; } }, "E_UNITS", "/source/unit");
+    refused({ index: (i) => { delete i.quantities[0].dimension; } }, "E_UNITS", "/source/dimension");
+    refused({ recipe: (r) => { r.source.dimension = "power"; r.source.unit = "W"; } }, "E_UNITS", "/source/dimension");
+    refused({ index: (i) => { i.quantities[0].unit = "keV"; } }, "E_UNITS", "/source/unit");
+    refused({ recipe: (r) => { r.units.to = "W/m"; } }, "E_UNITS", "/units/to");
+    refused({ recipe: (r) => { r.units.to = "furlong"; } }, "E_UNITS", "/units/to");
+  });
+
+  it("normalization: a per-source-particle score needs one, and an absolute score must not get one", () => {
+    refused({ recipe: (r) => { r.normalization = { kind: "none" }; r.units.to = "eV"; } }, "E_NORMALIZATION_MISSING", "/normalization");
+    refused({ recipe: (r) => { delete r.normalization.origin; } }, "E_NORMALIZATION_MISSING", "/normalization");
+    refused({ recipe: (r) => { r.normalization.value.unit = "W"; } }, "E_UNITS", "/normalization/value/unit");
+    refused({ recipe: (r) => { r.normalization = { kind: "total-power", value: { value: 1e6, unit: "1/s" }, origin: "x" }; r.units.to = "W"; } }, "E_UNITS", "/normalization/value/unit");
+    refused({ index: (i) => { i.quantities[0].normalization = "none"; }, recipe: (r) => { r.source.normalization = "none"; } }, "E_UNITS", "/normalization");
+  });
+
+  it("a source-rate cannot turn a length into something", () => {
+    refused({ index: (i) => { i.quantities[0].unit = "cm"; i.quantities[0].dimension = "length"; }, recipe: (r) => { r.source.unit = "cm"; r.source.dimension = "length"; r.units.to = "W"; }, data: (d) => { d.unit = "cm"; d.columns[1].unit = "cm"; d.columns[2].unit = "cm"; } }, "E_UNITS", "/normalization");
+  });
+
+  it("a missing, incomplete or other quantity of the source run is refused", () => {
+    refused({}, "E_OUTPUT_INCOMPLETE", "/source/runId", { sourceIndex: null });
+    const w = world();
+    expect(flat(evaluateTransfer(w.recipe, w.view({ sourceRunState: "failed" })))).toContain("E_OUTPUT_INCOMPLETE /source/runId");
+    refused({ recipe: (r) => { r.source.quantity = "Nope:heating"; } }, "E_NOT_FOUND", "/source/quantity");
+    refused({}, "E_OUTPUT_INCOMPLETE", "/source/dataSha256", { readData: () => null });
+    refused({ data: (d) => { d.rows[0][1] = "x"; } }, "E_SCHEMA_INVALID", "/rows/0/1");
+  });
+
+  it("the target must declare the transfer and accept this source", () => {
+    refused({}, "E_UNSUPPORTED", "/target/field", { targetTransfers: [] });
+    refused({}, "E_UNITS", "/target/field", { targetTransfers: [{ field: "heating-to-pin", accepts: [{ dimension: "power" }] }] });
+    refused({}, "E_UNITS", "/target/field", { targetTransfers: [{ field: "heating-to-pin", accepts: [{ dimension: "energy", normalization: "none" }] }] });
+  });
+
+  it("a recipe that breaks its schema is invalid before anything else", () => {
+    const w = world({ recipe: (r) => { r.mapping.extrapolation = "allowed"; } });
+    const e = evaluateTransfer(w.recipe, w.view());
+    expect(e.state).toBe("invalid");
+    expect(e.errors[0]!.code).toBe("E_SCHEMA_INVALID");
+  });
+});
+
+describe("who may do what", () => {
+  it("an agent cannot approve; the approval needs a human and lives outside the project", () => {
+    const w = world();
+    const common = { stateRoot: w.state, projectRoot: w.project, projectId: "proj-1", studyId: "study-1", recipe: w.recipe, grantedTo: agent, approvalId: "x1", now: NOW, expires: new Date(NOW.getTime() + 3600e3) };
+    const byAgent = recordApproval({ ...common, approver: agent });
+    expect(byAgent.ok).toBe(false);
+    if (!byAgent.ok) expect(byAgent.errors[0]!.code).toBe("E_NOT_PERMITTED");
+    expect(recordApproval({ ...common, approver: { kind: "system", name: "host" } }).ok).toBe(false);
+    mkdirSync(join(w.project, "state"));
+    const inside = recordApproval({ ...common, approver: human, stateRoot: join(w.project, "state") });
+    expect(inside.ok).toBe(false);
+    expect(listApprovals(w.state, "proj-1", w.project).approvals).toEqual([]);
+  });
+
+  it("an approval cannot be written twice, and round-trips through the schema", () => {
+    const w = world();
+    const a = w.approve();
+    expect(validate("transfer-approval", a).ok).toBe(true);
+    const again = recordApproval({ stateRoot: w.state, projectRoot: w.project, projectId: "proj-1", studyId: "study-1", recipe: w.recipe, approver: human, grantedTo: agent, approvalId: "appr-1", now: NOW, expires: new Date(NOW.getTime() + 3600e3) });
+    expect(again.ok).toBe(false);
+    const listed = listApprovals(w.state, "proj-1", w.project);
+    expect(listed.problems).toEqual([]);
+    expect(listed.approvals).toEqual([a]);
+    expect(listApprovals(w.state, "proj-2", w.project).approvals).toEqual([]);
+  });
+
+  it("an unreadable or foreign file in the approvals folder is reported, never trusted", () => {
+    const w = world();
+    const a = w.approve();
+    const dir = join(w.state, "transfer-approvals", sha256Hex("proj-1\n" + w.project));
+    writeFileSync(join(dir, "junk.json"), "{}");
+    writeFileSync(join(dir, "appr-9.json"), JSON.stringify({ ...a, approvalId: "other" }));
+    const listed = listApprovals(w.state, "proj-1", w.project);
+    expect(listed.approvals).toEqual([a]);
+    expect(listed.problems).toHaveLength(2);
+  });
+
+  it("the approvals work as grants for enable_transfer, only for this recipe content", () => {
+    const w = world();
+    const a = w.approve();
+    expect(grantsFromApprovals([a], w.recipe)).toHaveLength(1);
+    expect(grantsFromApprovals([a], { ...w.recipe, units: { to: "kW" } })).toHaveLength(0);
+    expect(grantsFromApprovals([{ ...a, recipeId: "other" }], w.recipe)).toHaveLength(0);
+  });
+
+  it("writing a recipe needs the propose_transfer gate and the proposer's own name", () => {
+    const w = world();
+    const ok = writeRecipe({ projectRoot: w.project, recipe: w.recipe, actor: agent, gate: gate(), studyId: "study-1" });
+    expect(ok.ok).toBe(true);
+    expect(existsSync(join(w.project, "transfers", "heat-to-pin-1.json"))).toBe(true);
+    const spoof = writeRecipe({ projectRoot: w.project, recipe: w.recipe, actor: { ...agent, name: "other" }, gate: gate(), studyId: "study-1" });
+    expect(spoof.ok).toBe(false);
+    const a0 = writeRecipe({ projectRoot: w.project, recipe: w.recipe, actor: agent, gate: gate({ study: { ...gate().study, tier: "A1" } }), studyId: "study-1" });
+    expect(a0.ok).toBe(false);
+    const blocked = writeRecipe({ projectRoot: w.project, recipe: w.recipe, actor: agent, gate: gate({ oracleBlocked: true }), studyId: "study-1" });
+    expect(blocked.ok).toBe(false);
+    const read = readRecipes(w.project);
+    expect(read.problems).toEqual([]);
+    expect(read.recipes).toEqual([w.recipe]);
+  });
+
+  it("the transfers folder must be a real folder inside the project", () => {
+    const w = world();
+    const outside = join(tmp, "elsewhere");
+    mkdirSync(outside, { recursive: true });
+    try { symlinkSync(outside, join(w.project, "transfers"), "junction"); } catch { return; }
+    expect(() => writeRecipe({ projectRoot: w.project, recipe: w.recipe, actor: agent, gate: gate(), studyId: "study-1" })).toThrow();
+    expect(existsSync(join(outside, "heat-to-pin-1.json"))).toBe(false);
+  });
+});
+
+describe("pipeline graph", () => {
+  const rec = (id: string, from: string[], to: string): Recipe => {
+    const w = world();
+    return { ...w.recipe, recipeId: id, source: { ...w.recipe.source, revisionPins: from.map((a) => ({ artifact: a, revision: "r" })) }, target: { ...w.recipe.target, artifact: to } };
+  };
+  it("refuses a cycle at definition, and a self loop", () => {
+    expect(checkPipeline([rec("a", ["x"], "y"), rec("b", ["y"], "z")])).toEqual([]);
+    const cyc = checkPipeline([rec("a", ["x"], "y"), rec("b", ["y"], "z"), rec("c", ["z"], "x")]);
+    expect(cyc).toHaveLength(1);
+    expect(cyc[0]).toMatchObject({ code: "E_RECIPE_CYCLE" });
+    expect(checkPipeline([rec("a", ["x"], "x")])[0]!.code).toBe("E_RECIPE_CYCLE");
+  });
+  it("an upstream change marks everything downstream, visibly", () => {
+    const rs = [rec("a", ["x"], "y"), rec("b", ["y"], "z"), rec("c", ["q"], "r")];
+    expect(downstreamOf(rs, ["x"])).toEqual({ recipeIds: ["a", "b"], artifacts: ["y", "z"] });
+    expect(downstreamOf(rs, ["y"])).toEqual({ recipeIds: ["b"], artifacts: ["z"] });
+    expect(downstreamOf(rs, ["r"])).toEqual({ recipeIds: [], artifacts: [] });
+  });
+});
+
+describe("applying through the target command (fake apps)", () => {
+  const target = join(__dirname, "fixtures", "fake-transfer", "target.cjs");
+  const runWith = (mode: string) => (request: any) => { process.env.FAKE_TRANSFER_MODE = mode; return spawnTransferCommand(process.execPath, [target], request, 20000); };
+  const apply = (w: ReturnType<typeof world>, mode: string, over: { actor?: Actor; approvals?: Approval[]; gateCtx?: GateContext; view?: Partial<TransferView> } = {}) =>
+    applyTransfer({ recipe: w.recipe, view: w.view({ approvals: over.approvals ?? [w.approve()], ...over.view }), actor: over.actor ?? agent, gate: over.gateCtx ?? gate(), studyId: "study-1", targetContent: '{"pin":"pin-1"}\n', run: runWith(mode) });
+
+  it("the good case: maps, conserves the total, and records the provenance", async () => {
+    const w = world();
+    const out = await apply(w, "good");
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    if (!out.ok) return;
+    const doc = JSON.parse(out.content);
+    const total = (1e6 + 2e6 + 3e6) * 1.5e17 * 1.602176634e-19;
+    expect(doc.powerW.s1 + doc.powerW.s2).toBeCloseTo(total, 3);
+    expect(out.provenance).toMatchObject({ recipeId: "heat-to-pin-1", sourceRunId: "run-001", targetRevisionBefore: "rev-d", approvalId: "appr-1" });
+    expect(out.provenance.targetRevisionAfter).toBe(sha256Hex(out.content));
+    expect(out.provenance.recipeDigest).toBe(recipeDigest(w.recipe));
+    expect(doc.from).toBe(recipeDigest(w.recipe));
+  });
+
+  it("a uniform field onto a uniform target reproduces the total exactly", async () => {
+    const w = world({ data: (d) => { d.rows = [[["a"], 1e6, 0], [["b"], 1e6, 0], [["c"], 1e6, 0]]; } });
+    w.recipe.mapping.spatial = { slices: [{ id: "s1", bins: ["a"] }, { id: "s2", bins: ["b"] }, { id: "s3", bins: ["c"] }] };
+    const out = await apply(w, "good");
+    expect(out.ok).toBe(true);
+    if (out.ok) { const p = Object.values(JSON.parse(out.content).powerW) as number[]; expect(p[0]).toBe(p[1]); expect(p[1]).toBe(p[2]); }
+  });
+
+  it("a deliberately lossy mapping fails conservation, and the app's refusal is data with its own code", async () => {
+    const out = await apply(world(), "lossy");
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_CONSERVATION", source: "app-content" });
+  });
+
+  it("coverage: a bin the source does not have is refused, not extrapolated", async () => {
+    const w = world();
+    w.recipe.mapping.spatial = { slices: [{ id: "s1", bins: ["a", "zzz"] }] };
+    const out = await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [w.approve(w.recipe)] }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: runWith("good") });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors[0]!.code).toBe("E_COVERAGE");
+  });
+
+  it("app refusals keep valid codes, a bad code becomes E_APP_FAILED", async () => {
+    const out = await apply(world(), "refuse");
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors.map((e) => e.code)).toEqual(["E_BOUNDARY_INCOMPLETE", "E_APP_FAILED"]);
+  });
+
+  it("a command that exits, answers garbage or changes nothing is a refusal", async () => {
+    for (const mode of ["exit", "garbage", "nochange"]) {
+      const out = await apply(world(), mode);
+      expect(out.ok, mode).toBe(false);
+      if (!out.ok) expect(out.errors[0]!.code).toBe("E_APP_FAILED");
+    }
+    const none = await spawnTransferCommand("definitely-not-a-command-seed", [], {} as any, 5000);
+    expect(none.ok).toBe(false);
+  });
+
+  it("nothing runs without a matching human approval: not approved, edited, another actor, expired, stale", async () => {
+    const w = world();
+    const calls: number[] = [];
+    const spy = (r: any) => { calls.push(1); return runWith("good")(r); };
+    const good = w.approve();
+    const run = (over: Partial<Parameters<typeof applyTransfer>[0]>) => applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [good] }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: spy, ...over });
+    expect((await run({ view: w.view({ approvals: [] }) })).ok).toBe(false);
+    const edited = { ...w.recipe, tolerance: { ...w.recipe.tolerance, conservation: 0.9 } };
+    expect((await run({ recipe: edited })).ok).toBe(false);
+    expect((await run({ actor: { ...agent, name: "someone-else" } })).ok).toBe(false);
+    expect((await run({ view: w.view({ approvals: [w.approve(w.recipe, "appr-e", 1)], now: new Date(NOW.getTime() + 2 * 3600e3) }) })).ok).toBe(false);
+    expect((await run({ view: w.view({ approvals: [w.approve(w.recipe, "appr-s")], currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-other" } }) })).ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("an applied recipe cannot be applied again", async () => {
+    const w = world();
+    const a = w.approve();
+    const out = await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe) }] }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: runWith("good") });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors[0]!.code).toBe("E_EXISTS");
+  });
+
+  it("the request the app receives carries the typed source data, not the file", async () => {
+    const w = world();
+    let seen: any;
+    await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [w.approve()] }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "TARGET", run: async (r) => { seen = r; return { ok: false, errors: [{ code: "E_UNSUPPORTED", message: "stop" }] }; } });
+    expect(seen.schema).toBe("seed.transfer-request/0.2");
+    expect(seen.source.data.kind).toBe("table");
+    expect(seen.source.quantity.dimension).toBe("energy");
+    expect(seen.target).toEqual({ artifact: "pin-case", revision: "rev-d", content: "TARGET" });
+    expect(readFileSync(target, "utf8")).toContain("FAKE_TRANSFER_MODE");
+  });
+});
