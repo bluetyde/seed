@@ -81,7 +81,7 @@ function praProject(name = "pra-vote-exact", edit: (m: Vec) => void = () => {}, 
 }
 type P = ReturnType<typeof praProject>;
 
-/** An AND of n two-event ORs with a shared structure that makes SCRAM work for a while: 2^n cut sets (12 pairs: ~4 s, 15 pairs: ~100 s). */
+/** An AND of n two-event ORs: 2^n cut sets. SCRAM works for a while (the runner ends 17 pairs as too-many-cut-sets after about 20 s; 15 pairs take about 5 s), so a cancel has something to stop. */
 function slowTree(m: Vec, n = 14) {
   m.events = [];
   m.gates = [{ id: "TOP", type: "and", inputs: Array.from({ length: n }, (_, i) => `G${i}`) }];
@@ -209,14 +209,6 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
         expect(index.engine.name === "SCRAM").toBe(engine === "scram");
       }, 300000);
 
-      it("an engine the adapter does not know is refused before a job exists", async () => {
-        const p = praProject("pra-vote-exact", () => {}, { engine: "magic" });
-        const out = await start(p, "req-engine-bad");
-        expect(out.ok).toBe(false);
-        if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_UNSUPPORTED", field: "/settings/engine" });
-        expect(readdirSync(join(p.root, "runs"))).toEqual([]);
-      }, 120000);
-
       it.skipIf(!haveBuiltin)("collect refuses a result made by another engine than the one requested", async () => {
         const p = praProject("pra-vote-exact", () => {}, { engine: "builtin" });
         const out = await start(p, "req-engine-mismatch");
@@ -263,6 +255,7 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       ["an unknown setting", {}, { extra: 1 }, "E_UNSUPPORTED"],
       ["an unknown method", {}, { method: "monte-carlo" }, "E_UNSUPPORTED"],
       ["a limitOrder of zero", {}, { limitOrder: 0 }, "E_BOUNDS_EXCEEDED"],
+      ["an engine the adapter does not know", {}, { engine: "magic" }, "E_UNSUPPORTED"],
       ["a model that is not an input", {}, { model: "models/none.json" }, "E_PROP_MISSING"],
     ])("a request with %s is refused by the adapter and the run is recorded failed", async (_n, top, extraSettings, code) => {
       const p = praProject();
@@ -290,7 +283,7 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
     }, 300000);
 
     it.skipIf(!haveScram)("cancel stops SCRAM inside WSL through the runner and the Windows processes, and collects nothing", async () => {
-      const p = praProject("pra-vote-exact", m => slowTree(m), { engine: "scram" });
+      const p = praProject("pra-vote-exact", m => slowTree(m, 17), { engine: "scram" });
       const mgr = manager(p.root);
       const started = mgr.start({ requestId: "req-cancel", actor, artifact: p.artifact, inputs: p.inputs, budget, settings: p.settings });
       const runId = await waitForChild(p.root);
@@ -351,7 +344,7 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
     }, 900000);
 
     it.skipIf(!haveScram)("a request id already bound to another run folder is refused and the first job is untouched", async () => {
-      const p = praProject("pra-vote-exact", m => slowTree(m), { engine: "scram" });
+      const p = praProject("pra-vote-exact", m => slowTree(m, 17), { engine: "scram" });
       for (const d of ["runs/original", "runs/second"]) {
         mkdirSync(join(p.root, d, "inputs", "models"), { recursive: true });
         writeFileSync(join(p.root, d, "inputs", p.modelPath), readFileSync(join(p.root, p.modelPath)));
