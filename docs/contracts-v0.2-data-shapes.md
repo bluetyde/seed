@@ -1,6 +1,6 @@
 # Contracts v0.2: result data shapes, units and dimensions (proposal)
 
-Status 2026-10-06: **proposal, not decided.** Covers candidates 3 and 4 of [contracts-v0.2-candidates.md](contracts-v0.2-candidates.md) (the user accepted both for v0.2). No schema file changes until the user approves this text. First step of the E4 order in [TODO.md](../TODO.md); the FEED transfer intake (its decision 0003) and the recipe schema read result data through whatever this fixes.
+Status 2026-10-06: **decided by the user (A, B, C, D all as recommended); steps 1 and 2 of section 4 built.** Covers candidates 3 and 4 of [contracts-v0.2-candidates.md](contracts-v0.2-candidates.md) (the user accepted both for v0.2). No schema file changes until the user approves this text. First step of the E4 order in [TODO.md](../TODO.md); the FEED transfer intake (its decision 0003) and the recipe schema read result data through whatever this fixes.
 
 ## 1. What exists today (checked in the adapters, 2026-10-06)
 
@@ -50,14 +50,15 @@ Today `unit` is a free string (<= 40 characters). The contract keeps it a string
 |---|---|
 | SI base and derived | `m`, `s`, `kg`, `K`, `Pa`, `W`, `J`, `N`, `A`, `mol`, `Hz` and the prefixes `k`, `M`, `G`, `m`, `u`, `c` on them (the Celsius scale is `degC`, a temperature, never mixed into a product) |
 | Nuclear | `eV`, `keV`, `MeV`, `b` (barn), `cm` |
-| Counted things (named, not dimensional) | `particle`, `reaction`, `event`, `fission`, `demand`, `hour` |
+| Counted things (each its own axis, so `reaction/particle` is not dimensionless) | `particle`, `reaction`, `event`, `fission`, `demand` |
+| Time | `hour` (3600 s), besides `s` |
 | Dimensionless | `1` |
 
 The rule for counts and per-source quantities, which OpenMC had to invent: a count is a counted-thing token (`reaction`), and a quantity "per source particle" is written `<unit>/particle` when the unit is a physical unit of the score (heating: `eV/particle`; flux: `cm` track length per source particle stays `cm`, and the index's `normalization: per-source-particle` says what it is per). **Open for the user (A):** keep `normalization` as the only place that says "per source particle" (the unit stays `cm`, `reaction`, `eV`), or write it in the unit as well. The recommendation is the first: one place, and the unit then names only what is measured; heating becomes `eV` with `per-source-particle`.
 
 **Dimension tag.** Optional `dimension` on each index quantity: one of `length`, `time`, `temperature`, `pressure`, `energy`, `power`, `power-per-length`, `power-per-volume`, `heat-flux`, `mass-flow`, `probability`, `count`, `rate`, `dimensionless`, `other`. It exists because plan 08 requires "W, W/m and W/m3 are distinct": a transfer refuses a source whose `dimension` differs from the recipe's, and refuses a `unit` that is not valid for the dimension (a table in `src/core/units.ts`: allowed units per dimension, conversion factor to the SI unit of that dimension, tested for each pair). Absent `dimension` means the quantity is not offered to transfers (still fine for runs and oracles).
 
-The host converts only through that table; an unknown unit for a known dimension is a refusal (`E_UNIT_UNKNOWN`), never a pass-through.
+The host converts only through that table; an unknown unit, or a unit of another dimension, is a refusal (`E_UNITS`, the existing code), never a pass-through.
 
 ## 4. What changes, in order, if approved
 
@@ -67,7 +68,11 @@ The host converts only through that table; an unknown unit for a known dimension
 4. Adapters write the new shape one at a time (RAFT first as the simplest), each with its own review and merge, as for the shared module.
 5. `oracle.schema.json` and `validate` changes (candidates 1, 2, 7) are separate steps in the same version.
 
-## 5. Questions for the user
+## 5. Decisions (user, 2026-10-06)
+
+A: per-source-particle only in `normalization`; B: `dimension` optional; C: adapters keep the v0.1 files until each moves, the reader converts; D: no grid kind yet. Built (SEED branch claude/v02-data-shapes): `src/core/units.ts`, `src/core/quantityData.ts`, `schema/quantity-data.schema.json`, `seed.results-index/0.2` (v0.1 still read; `dimension` only valid in 0.2, checked by `checkResultsAgainstRecord`), tests `units`, `quantity-data`. Steps 3 (oracle observers use the reader) and 4 (adapters write v0.2 files) remain.
+
+### Original questions
 
 - **A.** Per-source-particle: only in `normalization` (recommended), or also in the unit?
 - **B.** `dimension` optional now (recommended: nothing breaks, and only quantities meant for transfer need it) or required in v0.2?
