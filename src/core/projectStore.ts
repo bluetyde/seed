@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -602,6 +603,15 @@ function saveLocked(
 
     const storedRevision = projectRevision(storedManifest);
     if (storedRevision !== expectedRevision) {
+      // The refusal is recorded (acceptance case 6): the second writer's attempt, what it expected and what the project held.
+      try {
+        appendFileSync(
+          join(dir, ".seed", "conflicts.jsonl"),
+          JSON.stringify({ time: (opts?.now?.() ?? new Date()).toISOString(), code: "E_STALE_REVISION", expectedRevision, observedRevision: storedRevision }) + "\n"
+        );
+      } catch {
+        // the record is best effort; the refusal itself is what protects the manifest
+      }
       return {
         ok: false,
         errors: [

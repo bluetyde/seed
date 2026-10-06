@@ -180,7 +180,8 @@ export function latestEntries(entries: readonly IndexedOracle[], adapterId: stri
 }
 
 export async function runOracleSet(opts: RunOracleSetOptions): Promise<SetResult> {
-  const chosen = latestEntries(opts.entries, opts.adapter.id);
+  // The whole set is snapshotted before any callback runs: nothing a callback does to the caller's objects changes what is judged or pinned.
+  const chosen = latestEntries(opts.entries, opts.adapter.id).map((i) => structuredClone(i));
   const results: SetResult["results"] = [];
   const blockedQuantities = new Set<string>();
   let anyFail = false;
@@ -258,8 +259,16 @@ export function comparePins(accepted: PinSet, current: PinSet): string[] {
 }
 
 /** Accepting changed pins is a human action. */
-export function acceptPins(approver: Actor, current: PinSet): { ok: true; pins: PinSet } | { ok: false; errors: TypedError[] } {
+export function acceptPins(approver: Actor, current: PinSet, previous?: PinSet): { ok: true; pins: PinSet } | { ok: false; errors: TypedError[] } {
   if (approver.kind !== "human") return { ok: false, errors: [err("E_NOT_PERMITTED", "/approver", "only a human can accept changed oracle pins")] };
+  // Changed content under an existing id and version is a rewrite of history: an entry that changes (a tolerance, an expectation) is a new version.
+  if (previous) {
+    const before = new Map(previous.oracleFiles.map((f) => [`${f.oracleId}@${f.entryVersion}`, f.sha256]));
+    const rewritten = current.oracleFiles.filter((f) => before.has(`${f.oracleId}@${f.entryVersion}`) && before.get(`${f.oracleId}@${f.entryVersion}`) !== f.sha256);
+    if (rewritten.length > 0) {
+      return { ok: false, errors: rewritten.map((f) => err("E_ORACLE_VERSION", `/oracleFiles/${f.oracleId}@${f.entryVersion}`, "this oracle entry changed without a new entryVersion; a changed tolerance or expectation is a new version")) };
+    }
+  }
   return { ok: true, pins: JSON.parse(canonicalJson(current)) as PinSet };
 }
 

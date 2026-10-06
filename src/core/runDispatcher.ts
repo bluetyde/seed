@@ -116,7 +116,23 @@ export class RunDispatcher {
     }
 
     // Reserve before awaiting loaders or audit, so two dispatchers cannot both pass the gate.
-    if (occupied.has(o.engine)) return refusal("one active case per engine", "E_BUDGET_EXCEEDED");
+    if (occupied.has(o.engine)) {
+      try {
+        await o.audit({
+          requestId: request.requestId,
+          caseId: request.caseId,
+          actor: o.actor,
+          decision: {
+            allow: false,
+            errors: [{ code: "E_BUDGET_EXCEEDED", field: "", message: "one active case per engine", source: "seed" }],
+            gateStop: { request: `run_case by ${o.actor.kind}:${o.actor.name}`.slice(0, 200), rule: "one active case per engine" },
+          },
+        });
+      } catch {
+        // recording a refusal must never change the refusal
+      }
+      return refusal("one active case per engine", "E_BUDGET_EXCEEDED");
+    }
     occupied.add(o.engine);
     let stage = "loading the registered case";
     try {
