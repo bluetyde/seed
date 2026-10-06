@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { sha256Hex } from "../src/core/canonical";
 import type { Actor, GateContext } from "../src/core/policy";
 import {
-  applyTransfer, checkPipeline, downstreamOf, evaluateTransfer, grantsFromApprovals, listApprovals, readRecipes, recipeDigest, recordApproval,
+  applyTransfer, checkPipeline, downstreamOf, evaluateTransfer, grantsFromApprovals, listApprovals, readRecipes, recipeDigest, recordApproval, selectSample,
   spawnTransferCommand, writeRecipe, type Approval, type Recipe, type TransferView
 } from "../src/core/transfer";
 import { validate } from "../src/core/validate";
@@ -401,5 +401,143 @@ describe("applying through the target command (fake apps)", () => {
     expect(seen.source.quantity.dimension).toBe("energy");
     expect(seen.target).toEqual({ artifact: "pin-case", revision: "rev-d", content: "TARGET" });
     expect(readFileSync(target, "utf8")).toContain("FAKE_TRANSFER_MODE");
+  });
+});
+
+describe("a coolant boundary: two quantities of one run and a chosen sample (fake apps)", () => {
+  const boundaryCmd = join(__dirname, "fixtures", "fake-transfer", "boundary.cjs");
+  const series = (quantity: string, unit: string, values: number[]) => ({ schema: "seed.quantity-data/0.2", quantity, kind: "series", unit, axis: { name: "t", unit: "s" }, x: [0, 10, 20], values });
+  const accepts = [{ field: "coolant-boundary", accepts: [{ dimension: "temperature", normalization: "none", additional: [{ role: "heat-transfer-coefficient", dimension: "heat-transfer-coefficient" }] }] }];
+
+  function bworld(over: { recipe?: (r: any) => void; index?: (i: any) => void; targetTransfers?: any } = {}) {
+    const T = JSON.stringify(series("coolant T", "K", [550, 560, 570])), H = JSON.stringify(series("wall htc", "W/m2/K", [30000, 31000, 32000]));
+    const files: Record<string, string> = { "runs/run-001/native/000.json": T, "runs/run-001/native/001.json": H };
+    const index: any = {
+      schema: "seed.results-index/0.2", runId: "run-001", status: "completed", adapter: { id: "nodal", version: "1" }, engine: { name: "nodal", version: "1" },
+      inputHashes: [{ path: "m.json", sha256: "a".repeat(64) }], nativeStatus: { status: "ok", detail: "ok" },
+      quantities: [
+        { name: "coolant T", unit: "K", dimension: "temperature", normalization: "none", provenance: { runId: "run-001", inputRevisions: ["a".repeat(64)] }, data: { path: "runs/run-001/native/000.json", sha256: sha256Hex(T) }, verification: "unverified" },
+        { name: "wall htc", unit: "W/m2/K", dimension: "heat-transfer-coefficient", normalization: "none", provenance: { runId: "run-001", inputRevisions: ["a".repeat(64)] }, data: { path: "runs/run-001/native/001.json", sha256: sha256Hex(H) }, verification: "unverified" },
+      ],
+    };
+    over.index?.(index);
+    const indexText = JSON.stringify(index);
+    const recipe: any = {
+      schema: "seed.transfer-recipe/0.2", recipeId: "boundary-1", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
+      source: {
+        runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "coolant T", dataSha256: sha256Hex(T), unit: "K", dimension: "temperature", normalization: "none",
+        revisionPins: [{ artifact: "nodal-model", revision: "rev-n" }],
+        additional: [{ role: "heat-transfer-coefficient", quantity: "wall htc", dataSha256: sha256Hex(H), unit: "W/m2/K", dimension: "heat-transfer-coefficient", normalization: "none", unitTo: "W/m2/K" }],
+      },
+      target: { app: "feed", artifact: "pin-case", revision: "rev-d", field: "coolant-boundary" },
+      units: { to: "K" },
+      normalization: { kind: "none" },
+      mapping: { spatial: { region: { id: "core-mid", z: { min: 0.4, max: 0.6 } }, boundaryForm: "bulk-plus-h" }, time: { kind: "steady", select: { kind: "last" } }, extrapolation: "refused" },
+      tolerance: { conservation: 0.01, fixedBefore: "mapping" },
+    };
+    over.recipe?.(recipe);
+    const w = fresh();
+    const view = (extra: Partial<TransferView> = {}): TransferView => ({
+      projectId: "proj-1", projectRoot: w.project, now: NOW, sourceIndex: indexText, sourceRunState: "completed", readData: (p) => files[p] ?? null,
+      currentRevisions: { "nodal-model": "rev-n", "pin-case": "rev-d" }, targetTransfers: over.targetTransfers ?? accepts, approvals: [], applied: [], ...extra,
+    });
+    let given: Approval | undefined;
+    const approve = (): Approval => {
+      if (!given) {
+        const o = recordApproval({ stateRoot: w.state, projectRoot: w.project, projectId: "proj-1", studyId: "study-1", recipe, approver: human, grantedTo: agent, approvalId: "appr-b", now: NOW, expires: new Date(NOW.getTime() + 3600e3) });
+        if (!o.ok) throw new Error(JSON.stringify(o.errors));
+        given = o.approval;
+      }
+      return given;
+    };
+    const apply = (run?: (r: any) => Promise<any>) => applyTransfer({ recipe, view: view({ approvals: [approve()] }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: run ?? ((r) => spawnTransferCommand(process.execPath, [boundaryCmd], r, 20000)) });
+    return { recipe: recipe as Recipe, view, approve, apply };
+  }
+
+  it("the last sample of each series reaches the target by role, and the provenance says which samples were used", async () => {
+    const w = bworld();
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [w.approve()] })).state).toBe("approved");
+    const out = await w.apply();
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    if (!out.ok) return;
+    expect(JSON.parse(out.content).boundary).toMatchObject({ bulkTemperatureK: 570, heatTransferCoefficient: 32000, at: 20, interpolated: false, region: { id: "core-mid" } });
+    expect(out.provenance.selected).toEqual([{ quantity: "coolant T", x: 20, value: 570, interpolated: false }, { quantity: "wall htc", x: 20, value: 32000, interpolated: false }]);
+    expect(out.checks).toMatchObject({ sawRoles: ["heat-transfer-coefficient"], units: { T: "K", h: "W/m2/K" } });
+  });
+
+  it("at a time between samples is linear and flagged; at a sample time it is that sample", async () => {
+    const between = await bworld({ recipe: (r) => { r.mapping.time.select = { kind: "at", t: 15 }; } }).apply();
+    expect(between.ok).toBe(true);
+    if (between.ok) {
+      expect(JSON.parse(between.content).boundary).toMatchObject({ bulkTemperatureK: 565, heatTransferCoefficient: 31500, at: 15, interpolated: true });
+      expect(between.provenance.selected!.every((x) => x.interpolated)).toBe(true);
+    }
+    const exact = await bworld({ recipe: (r) => { r.mapping.time.select = { kind: "at", t: 10 }; } }).apply();
+    if (exact.ok) expect(JSON.parse(exact.content).boundary).toMatchObject({ bulkTemperatureK: 560, heatTransferCoefficient: 31000, interpolated: false });
+    const first = await bworld({ recipe: (r) => { r.mapping.time.select = { kind: "at", t: 0 }; } }).apply();
+    if (first.ok) expect(JSON.parse(first.content).boundary).toMatchObject({ bulkTemperatureK: 550, at: 0, interpolated: false });
+  });
+
+  it("selectSample on its own: last, at, between, outside, missing", () => {
+    const sr = { x: [0, 10, 20], values: [1, 3, 7] };
+    expect(selectSample(sr, { kind: "last" })).toEqual({ x: 20, value: 7, interpolated: false });
+    expect(selectSample(sr, { kind: "at", t: 5 })).toEqual({ x: 5, value: 2, interpolated: true });
+    expect(selectSample(sr, { kind: "at", t: 20 })).toEqual({ x: 20, value: 7, interpolated: false });
+    for (const bad of [undefined, { kind: "at" as const }, { kind: "at" as const, t: -1 }, { kind: "at" as const, t: 21 }, { kind: "last" as const, t: 3 }, { kind: "at" as const, t: Number.NaN }]) {
+      expect(typeof selectSample(sr, bad as any)).toBe("string");
+    }
+  });
+
+  it.each<[string, (r: any) => void, string]>([
+    ["a series with no way to pick a sample", (r) => { delete r.mapping.time.select; }, "E_TIME_MAPPING /mapping/time/select"],
+    ["a time outside the series", (r) => { r.mapping.time.select = { kind: "at", t: 99 }; }, "E_TIME_MAPPING /mapping/time/select"],
+    ["an additional quantity the run does not have", (r) => { r.source.additional[0].quantity = "nope"; }, "E_NOT_FOUND /source/additional/0/quantity"],
+    ["an additional quantity of another dimension than the recipe says", (r) => { r.source.additional[0].dimension = "heat-flux"; }, "E_UNITS /source/additional/0/dimension"],
+    ["an additional quantity in another unit than the recipe says", (r) => { r.source.additional[0].unit = "kW/m2/K"; }, "E_UNITS /source/additional/0/unit"],
+    ["an additional quantity that is not absolute", (r) => { r.source.additional[0].normalization = "per-source-particle"; }, "E_UNITS /source/additional/0/normalization"],
+    ["a unit to convert to that is another dimension", (r) => { r.source.additional[0].unitTo = "W/m2"; }, "E_UNITS /source/additional/0/unitTo"],
+    ["the same quantity twice", (r) => { r.source.additional[0].quantity = "coolant T"; }, "E_SCHEMA_INVALID /source/additional/0/quantity"],
+    ["data that is not the pinned data", (r) => { r.source.additional[0].dataSha256 = "f".repeat(64); }, "E_STALE_REVISION /source/additional/0/dataSha256"],
+  ])("refuses %s", (_n, edit, expected) => {
+    const w = bworld({ recipe: edit });
+    const e = evaluateTransfer(w.recipe, w.view());
+    expect(e.state).not.toBe("approved");
+    expect(e.errors.map((x) => `${x.code} ${x.field}`)).toContain(expected);
+  });
+
+  it("a role used twice is refused", () => {
+    const w = bworld({ recipe: (r) => { r.source.additional.push({ ...r.source.additional[0], quantity: "coolant T" }); } });
+    expect(evaluateTransfer(w.recipe, w.view()).errors.map((x) => `${x.code} ${x.field}`)).toContain("E_SCHEMA_INVALID /source/additional/1/role");
+  });
+
+  it("the target must declare exactly the roles the recipe carries", () => {
+    const none = bworld({ targetTransfers: [{ field: "coolant-boundary", accepts: [{ dimension: "temperature", normalization: "none" }] }] });
+    expect(evaluateTransfer(none.recipe, none.view()).errors.map((x) => x.field)).toContain("/target/field");
+    const wrongDim = bworld({ targetTransfers: [{ field: "coolant-boundary", accepts: [{ dimension: "temperature", additional: [{ role: "heat-transfer-coefficient", dimension: "heat-flux" }] }] }] });
+    expect(evaluateTransfer(wrongDim.recipe, wrongDim.view()).state).toBe("invalid");
+    const extraRole = bworld({ targetTransfers: [{ field: "coolant-boundary", accepts: [{ dimension: "temperature", additional: [{ role: "heat-transfer-coefficient", dimension: "heat-transfer-coefficient" }, { role: "pressure", dimension: "pressure" }] }] }] });
+    expect(evaluateTransfer(extraRole.recipe, extraRole.view()).state).toBe("invalid");
+    // a heating-style target (no additional roles) does not take a recipe that carries one, and the reverse
+    const w = world();
+    expect(evaluateTransfer(w.recipe, w.view({ targetTransfers: [{ field: "heating-to-pin", accepts: [{ dimension: "energy", normalization: "per-source-particle", additional: [{ role: "x", dimension: "power" }] }] }] })).state).toBe("invalid");
+  });
+
+  it("the request the app gets carries the primary quantity, the additional ones by role and the chosen samples", async () => {
+    const w = bworld({ recipe: (r) => { r.mapping.time.select = { kind: "at", t: 5 }; } });
+    let seen: any;
+    await w.apply(async (r) => { seen = r; return { ok: false, errors: [{ code: "E_UNSUPPORTED", message: "stop" }] }; });
+    expect(seen.source.quantity.name).toBe("coolant T");
+    expect(seen.source.data.kind).toBe("series");
+    expect(seen.source.selected).toEqual({ x: 5, value: 555, interpolated: true });
+    expect(seen.source.additional).toHaveLength(1);
+    expect(seen.source.additional[0]).toMatchObject({ role: "heat-transfer-coefficient", selected: { x: 5, value: 30500, interpolated: true } });
+    expect(seen.source.additional[0].quantity.dimension).toBe("heat-transfer-coefficient");
+  });
+
+  it("an app that cannot build a boundary from one temperature says so (a bulk temperature alone is not a convective boundary)", async () => {
+    const w = bworld({ recipe: (r) => { r.source.additional = []; }, targetTransfers: [{ field: "coolant-boundary", accepts: [{ dimension: "temperature", normalization: "none" }] }] });
+    const out = await w.apply();
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_BOUNDARY_INCOMPLETE", source: "app-content" });
   });
 });
