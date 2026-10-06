@@ -227,10 +227,24 @@ describe.skipIf(!haveNodal)("NODAL adapter against the real runner", () => {
       const direct = spawnSync(python, args, { cwd: repo, encoding: "utf8", env: { ...process.env, PYTHONPATH: repo } });
       expect(direct.status, direct.stderr).toBe(0);
       const directResults = read(join(directDir, "d", "results.json"));
+      expect(index.schema).toBe("seed.results-index/0.2");
+      // a recorded channel carries a dimension exactly when its kind and unit are a known pair (what a transfer needs to accept it)
+      const known: Record<string, [string, string[]]> = { temperature: ["temperature", ["K", "degC"]], wallTemperature: ["temperature", ["K", "degC"]], HTTEMP: ["temperature", ["K", "degC"]], HTVAT: ["temperature", ["K", "degC"]], TIME: ["time", ["s"]], pressure: ["pressure", ["Pa", "kPa", "MPa"]], massFlow: ["mass-flow", ["kg/s"]], HTHTC: ["heat-transfer-coefficient", ["W/m2/K"]] };
+      for (const q of index.quantities) {
+        const kind = read(join(p.root, q.data.path)).meta.kind as string;
+        const row = known[kind];
+        expect(q.dimension, `${q.name} (${kind}, ${q.unit})`).toBe(row && row[1].includes(q.unit) ? row[0] : undefined);
+      }
+      expect(index.quantities.some((q: Vec) => q.dimension !== undefined)).toBe(true);
       for (const q of index.quantities) {
         const series = read(join(p.root, q.data.path));
         expect(series.values).toEqual(directResults.data[q.name]);
-        expect(series.t).toEqual(directResults.time);
+        expect(series.schema).toBe("seed.quantity-data/0.2");
+        expect(series.kind).toBe("series");
+        expect(series.axis).toEqual({ name: "t", unit: "s" });
+        expect(series.x).toEqual(directResults.time);
+        expect(series.unit).toBe(q.unit);
+        expect(series.meta).toMatchObject({ kind: expect.any(String) });
         // Oracle agreement: the committed golden vector, within a tight relative tolerance.
         const want: number[] = p.g.expected.data[q.name];
         expect(series.values).toHaveLength(want.length);
