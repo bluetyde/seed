@@ -99,6 +99,18 @@ describe("FEED adapter: configuration", () => {
     expect(r.warnings).toEqual([]);
   });
 
+  it("describe passes the runner's declared transfers on, drops malformed ones, and says nothing when there are none", async () => {
+    const good = { field: "heating-to-pin", accepts: [{ dimension: "energy", normalization: "per-source-particle" }, { dimension: "power", normalization: "none" }], parameters: { time: "steady only" } };
+    useStub("ok", undefined, { FEED_STUB_TRANSFERS: JSON.stringify([good, { field: "bad field!", accepts: [{ dimension: "power" }] }, { field: "no-accepts", accepts: [] }, { field: "bad-norm", accepts: [{ dimension: "power", normalization: "per-banana" }] }, { field: "half", accepts: [{ dimension: "power" }, { normalization: "none" }] }]) });
+    const r = okReply(await ask(feedProject().root, { verb: "describe" }));
+    expect(r.ok).toBe(true);
+    expect(r.result.transfers).toEqual([good]);
+    expect(validate("adapter-reply", r)).toEqual({ ok: true });
+    delete process.env.FEED_STUB_TRANSFERS;
+    const none = okReply(await ask(feedProject().root, { verb: "describe" }));
+    expect("transfers" in none.result).toBe(false);
+  });
+
   it("describe: a missing solver is a warning, and run is then refused as setup required, with no job", async () => {
     useStub("ok", undefined, { FEED_STUB_SOLVER: "missing" });
     const p = feedProject();
