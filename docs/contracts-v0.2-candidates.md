@@ -10,7 +10,7 @@ Kinds: **schema** (needs v0.2 and a migration), **text** (clarify the contract t
 - **Item 5 (`run.seed`): option B.** A request seed must equal the model's seed; deterministic apps refuse. Implemented: OpenMC now accepts the project's own seed (it refused any), `E_REQUEST_CONFLICT` otherwise; text in contracts.md 12.1.
 - **Item 6 (`oraclePin`): keep it as it is; revisit for v0.3.**
 - Items 8 to 13: accepted, now written down as contracts.md section 12 (v0.1.1). Item 9: wall-clock is host-enforced, cores by OpenMC only, memory and disk advisory; host-side disk enforcement is a follow-up (TODO). Item 10: the host is to check settings against `describe.parameters` (TODO). Item 11: implemented: the shared start flow stores a payload hash and answers `E_REQUEST_CONFLICT` for the same request id with other inputs, settings or seed. Item 13: an unmappable path is `E_PATH_UNMAPPABLE` (OpenMC changed).
-- **Final sign-off of v0.1: not given yet.**
+- **Final sign-off of v0.1: given by the user on 2026-10-05** (with the v0.1.1 clarifications of contracts.md section 12). v0.2 starts from items 1 to 4 and 7; item 6 waits for v0.3.
 
 ## Schema changes
 
