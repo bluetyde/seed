@@ -282,6 +282,16 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       expect(existsSync(join(p.root, "runs", "direct", "native", "job.json"))).toBe(false);
     }, 300000);
 
+    it("an engine the adapter does not know is refused by the run verb before anything is reserved", async () => {
+      const p = praProject("pra-vote-exact", () => {}, { engine: "magic" });
+      mkdirSync(join(p.root, "runs", "direct", "inputs", "models"), { recursive: true });
+      writeFileSync(join(p.root, "runs", "direct", "inputs", p.modelPath), readFileSync(join(p.root, p.modelPath)));
+      const r = okReply(await ask(p.root, { verb: "run", requestId: "req-direct-engine", snapshot: { inputs: p.inputs }, runDir: "runs/direct", budget, settings: p.settings }));
+      expect(r.ok).toBe(false);
+      expect(r.errors[0]).toMatchObject({ code: "E_UNSUPPORTED", field: "/settings/engine", source: "seed" });
+      expect(existsSync(join(p.root, "runs", "direct", "native", "job.json"))).toBe(false);
+    }, 120000);
+
     it.skipIf(!haveScram)("cancel stops SCRAM inside WSL through the runner and the Windows processes, and collects nothing", async () => {
       const p = praProject("pra-vote-exact", m => slowTree(m, 17), { engine: "scram" });
       const mgr = manager(p.root);
