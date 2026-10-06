@@ -294,6 +294,19 @@ async function cancel(request, root, reply, fail) {
   return cancelJob({ request, root, reply, fail, ownsRunner, extraStatuses: EXTRA_STATUSES });
 }
 
+/**
+ * The dimension (docs/contracts-v0.2-data-shapes.md) of a recorded channel, from its quantity kind and unit; null when the pair is not one this
+ * adapter knows (the unit stays free text and the quantity is not offered to transfers).
+ */
+function channelDimension(kind, unit) {
+  const table = {
+    temperature: ["temperature", ["K", "degC"]], wallTemperature: ["temperature", ["K", "degC"]], HTTEMP: ["temperature", ["K", "degC"]], HTVAT: ["temperature", ["K", "degC"]],
+    pressure: ["pressure", ["Pa", "kPa", "MPa"]], massFlow: ["mass-flow", ["kg/s"]], HTHTC: ["heat-transfer-coefficient", ["W/m2/K"]], TIME: ["time", ["s"]],
+  };
+  const row = Object.prototype.hasOwnProperty.call(table, kind) ? table[kind] : null;
+  return row && row[1].includes(unit) ? row[0] : null;
+}
+
 function finiteNumbers(a) {
   return Array.isArray(a) && a.every((v) => typeof v === "number" && Number.isFinite(v));
 }
@@ -373,7 +386,8 @@ function collect(request, root, reply, fail) {
       return incomplete("a recorded channel is missing, duplicated, not finite or not as long as the time series", "/channels/" + k);
     }
     names.add(name);
-    const fileBody = { quantity: name, kind: ch.quantity, location: ch.location, unit: ch.unit, t: time, values: series };
+    // A seed.quantity-data/0.2 series over time (docs/contracts-v0.2-data-shapes.md); the channel's kind and location stay in meta.
+    const fileBody = { schema: "seed.quantity-data/0.2", quantity: name, kind: "series", unit: ch.unit, axis: { name: "t", unit: "s" }, x: time, values: series, meta: { kind: ch.quantity, location: ch.location } };
     const env = results.envelope && Object.prototype.hasOwnProperty.call(results.envelope, name) ? results.envelope[name] : undefined;
     if (env && finiteNumbers(env.min) && finiteNumbers(env.max) && env.min.length === time.length && env.max.length === time.length) {
       fileBody.min = env.min;
@@ -382,9 +396,11 @@ function collect(request, root, reply, fail) {
     const text = json(fileBody);
     const fileName = String(k).padStart(3, "0") + ".json";
     atomicWrite(path.join(nativeDir, "series", fileName), text);
+    const dimension = channelDimension(ch.quantity, ch.unit);
     quantities.push({
       name,
       unit: ch.unit,
+      ...(dimension ? { dimension } : {}),
       normalization: "none",
       provenance: { runId, inputRevisions },
       data: { path: request.runDir + "/native/series/" + fileName, sha256: sha256(text) },
@@ -405,7 +421,7 @@ function collect(request, root, reply, fail) {
       return typed(code, "", raw + ": " + (m.text || raw), "app-content");
     });
   const index = {
-    schema: "seed.results-index/0.1",
+    schema: "seed.results-index/0.2",
     runId,
     status: "completed",
     adapter: ADAPTER,
