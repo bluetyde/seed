@@ -10,6 +10,7 @@ const runtime = [
   "tests/nodal-adapter-review.test.ts",
   "tests/nodal-oracles.test.ts",
   "tests/openmc-adapter.test.ts",
+  "tests/openmc-oracles.test.ts",
   "tests/pra-adapter.test.ts",
   "tests/pra-oracles.test.ts",
   "tests/raft-adapter.test.ts",
