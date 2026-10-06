@@ -130,6 +130,13 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 
 Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' own plans).
 
+2026-10-05 note: not urgent (every single-app workflow works without it), but it is what makes the five apps a suite, and where silent scientific errors are most likely (OpenMC heating per source particle is not watts). The OpenMC result adapter now exists. Suggested order:
+- [ ] 1. Contracts v0.2 data shapes and units (candidates 3 and 4 in [contracts-v0.2-candidates.md](docs/contracts-v0.2-candidates.md)): a transfer reads result data generically, and today each adapter's data file differs.
+- [ ] 2. OpenMC heating: a source-strength or power normalization the adapter can carry (the Studio project has a `sourceRate` setting) and an oracle for the heating score; heating by cell is mapped to eV per source particle today, with no oracle coverage.
+- [ ] 3. Find out how far FEED F3 (reviewed heating and boundary mappings) is: FEED's own session owns it, and the first transfer depends on it.
+- [ ] 4. Transfer recipe schema, approval record (tier A3) and the refusal table of plan 08, built and tested against fake apps first, as the plan says.
+- [ ] 5. The real OpenMC-to-FEED transfer, then NODAL coolant into FEED (a time series mapped onto FEED's boundary condition: time mapping and the explicit boundary choice of plan 08).
+
 - [ ] Transfer recipe format and approval record (tier A3).
 - [ ] OpenMC heating to Fuel Performance Studio, one way, offline: refusals for wrong units, missing normalization, incomplete coverage, stale revision; conservation within a tolerance declared beforehand [A10].
 - [ ] Pipeline DAG: cycles refused at definition; downstream invalidated after an input change.
@@ -153,6 +160,17 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 
 - [ ] Choose a distribution model; check licenses and redistribution terms before bundling any engine.
 - [ ] Pre-release checklist; adapter authoring guide; make the repo public only when the user says so.
+
+## Remote and cloud agent sessions (idea, 2026-10-05)
+
+Question from the user: could a Claude cloud session be started with SEED and use this workflow to develop something novel or test things? Yes in principle (everything runs headless: files, a CLI and an MCP server over one core, each app reached through its own runner process, the runtimes are Linux); what stands in the way, in the order I would do it. What a cloud environment provides has not been checked.
+
+- [ ] A Linux container that runs the real-runner suites (OpenMC with its nuclear data, SCRAM, FEED's OFFBEAT solver, NODAL's Python, RAFT). Useful on its own as a regression check, and it exercises the adapters' non-Windows branches, which are untested today.
+- [ ] A way to regenerate an OpenMC script without Windows Electron (a virtual display for Electron, or the Playwright and Chromium variant the first version used).
+- [ ] **Trust boundary:** SEED's gates assume the agent reaches it only through the CLI and MCP and cannot edit host policy, oracle pins or tiers (decision D4 does not defend against an agent with shell access). A cloud session has a shell, so the host must run outside the sandbox with only MCP tools exposed: a remote MCP host (the MCP server is stdio only today).
+- [ ] Memory and disk budgets are advisory today (contracts.md 12.3): host-side enforcement before an agent is given a shared machine.
+- [ ] A review channel for the human conclusion (accepting a conclusion is a native click on the local desktop today).
+- [ ] E3 sweeps, replay and cache: without them an agent can run bounded single-app cases and verification campaigns, not parameter studies; transfers (E4) for coupled work.
 
 ## Ideas / later
 
