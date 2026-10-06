@@ -7,7 +7,7 @@ import { appendLine, writeFileAtomic } from "./atomicFile";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { isPortableRelative, resolveInside } from "./paths";
 import { checkResultsAgainstRecord, checkResultsIndex } from "./semantic";
-import { validate, type TypedError } from "./validate";
+import { RESULTS_INDEX_SCHEMAS, validate, type TypedError } from "./validate";
 
 export type Budget = {
   maxWallSeconds: number;
@@ -999,7 +999,7 @@ export class RunManager {
         if (!resolved.ok || !this.insideRun(runAbsDir, resolved.value) || !existsSync(resolved.value) ||
           sha256Hex(readFileSync(resolved.value)) !== output.sha256) throw Error("saved completed output changed; lease retained");
         try {
-          if (JSON.parse(readFileSync(resolved.value, "utf8")).schema === "seed.results-index/0.1") indexes.push(output);
+          if (RESULTS_INDEX_SCHEMAS.includes(JSON.parse(readFileSync(resolved.value, "utf8")).schema)) indexes.push(output);
         } catch { /* Non-index quantity formats are checked by the normal results validator. */ }
       }
       if (indexes.length !== 1) throw Error("saved completion must contain exactly one results index");

@@ -30,6 +30,9 @@ export const FAMILIES: readonly Family[] = [
   "oracle"
 ] as const;
 
+/** Index versions the host reads: v0.2 adds the optional `dimension` of a quantity. */
+export const RESULTS_INDEX_SCHEMAS: readonly string[] = ["seed.results-index/0.1", "seed.results-index/0.2"];
+
 const schemaDir = path.join(__dirname, "..", "..", "schema");
 
 let ajvInstance: Ajv2020 | null = null;
@@ -115,7 +118,8 @@ export function validate(
 
   const record = data as Record<string, unknown>;
   if (typeof record.schema === "string" && /^seed\.[a-z-]+\/[0-9]+\.[0-9]+$/.test(record.schema)) {
-    if (record.schema !== `seed.${family}/0.1`) {
+    const accepted = family === "results-index" ? RESULTS_INDEX_SCHEMAS.includes(record.schema) : record.schema === `seed.${family}/0.1`;
+    if (!accepted) {
       return {
         ok: false,
         errors: [

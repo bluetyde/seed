@@ -4,7 +4,7 @@
   "type": "object",
   "properties": {
     "schema": {
-      "const": "seed.results-index/0.1"
+      "enum": ["seed.results-index/0.1", "seed.results-index/0.2"]
     },
     "runId": {
       "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
@@ -106,6 +106,10 @@
           "verification": {
             "type": "string",
             "enum": ["verified", "unverified"]
+          },
+          "dimension": {
+            "type": "string",
+            "enum": ["length","time","temperature","pressure","energy","power","power-per-length","power-per-volume","heat-flux","mass-flow","probability","count","rate","dimensionless","other"]
           },
           "coordinates": {
             "type": "object",
