@@ -82,7 +82,15 @@ describe("recipe states", () => {
     expect(flat(p)).toEqual(["E_NOT_PERMITTED /approval"]);
     const a = w.approve();
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [a] })).state).toBe("approved");
-    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe) }] })).state).toBe("applied");
+    const applied = [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe), targetRevisionAfter: "rev-after" }];
+    const after = { "openmc-model": "rev-c", "pin-case": "rev-after" };
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied, currentRevisions: after })).state).toBe("applied");
+    // applied stands without a valid approval (it expired since), but not once the target moved on, nor once the source changed
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [], applied, currentRevisions: after })).state).toBe("applied");
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied, currentRevisions: { ...after, "pin-case": "rev-later" } })).state).toBe("stale");
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied, currentRevisions: { ...after, "openmc-model": "rev-new" } })).state).toBe("stale");
+    // before the target changed, a recipe with an applied record is still at its pinned revision
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied })).state).toBe("applied");
   });
 
   it("editing the recipe after approval voids the approval", () => {
@@ -379,7 +387,7 @@ describe("applying through the target command (fake apps)", () => {
   it("an applied recipe cannot be applied again", async () => {
     const w = world();
     const a = w.approve();
-    const out = await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe) }] }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: runWith("good") });
+    const out = await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe), targetRevisionAfter: "rev-after" }], currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-after" } }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: runWith("good") });
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.errors[0]!.code).toBe("E_EXISTS");
   });

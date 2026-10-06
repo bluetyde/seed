@@ -41,7 +41,8 @@ export type Approval = {
   approvedAt: string; expires: string; grantId: string;
 };
 
-export type AppliedRecord = { recipeId: string; recipeDigest: string };
+/** A transfer that was applied: the target's revision after it, so the target moving on by itself is told from the transfer's own change. */
+export type AppliedRecord = { recipeId: string; recipeDigest: string; targetRevisionAfter: string };
 export type TransferState = "proposed" | "approved" | "applied" | "stale" | "invalid";
 
 const err = (code: string, field: string, message: string, source: TypedError["source"] = "seed"): TypedError => ({ code, field, message, source });
@@ -168,12 +169,19 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
   r.source.revisionPins.forEach((p, i) => {
     if (view.currentRevisions[p.artifact] !== p.revision) stale.push(err("E_STALE_REVISION", `/source/revisionPins/${i}`, `${p.artifact} is not at the pinned revision`));
   });
-  if (view.currentRevisions[r.target.artifact] !== r.target.revision) stale.push(err("E_STALE_REVISION", "/target/revision", `${r.target.artifact} is not at the pinned revision`));
+  const appliedRec = view.applied.find((a) => a.recipeId === r.recipeId && a.recipeDigest === digest);
+  const targetNow = view.currentRevisions[r.target.artifact];
+  if (targetNow !== r.target.revision && !(appliedRec && targetNow === appliedRec.targetRevisionAfter)) {
+    stale.push(err("E_STALE_REVISION", "/target/revision", `${r.target.artifact} is not at the pinned revision`));
+  }
 
   if (invalid.length) return { state: "invalid", errors: [...invalid, ...stale], digest };
   if (stale.length) return { state: "stale", errors: stale, digest };
 
-  // Approval and application.
+  // An applied transfer stays applied while its source and the target it produced stand, whatever became of the approval since.
+  if (appliedRec) return { state: "applied", errors: [], digest };
+
+  // Approval.
   const mine = view.approvals.filter((a) => a.recipeId === r.recipeId && a.projectId === view.projectId && a.projectRoot === view.projectRoot);
   const good = mine.find((a) => a.recipeDigest === digest && a.approvedBy.kind === "human" && Date.parse(a.expires) > view.now.getTime() && sameRevisions(a.inputRevisions, recipeRevisions(r)));
   if (!good) {
@@ -183,7 +191,6 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
       : "the approval names other revisions than the recipe's";
     return { state: "proposed", errors: [err("E_NOT_PERMITTED", "/approval", why)], digest };
   }
-  if (view.applied.some((a) => a.recipeId === r.recipeId && a.recipeDigest === digest)) return { state: "applied", errors: [], digest, approval: good };
   return { state: "approved", errors: [], digest, approval: good };
 }
 
