@@ -12,7 +12,7 @@ import { applyTransfer, recordApproval, spawnTransferCommand, type Recipe, type 
 import { validate } from "../src/core/validate";
 
 // Heating from real OpenMC as a transfer source (E4 step 2). The Studio oracle project b10-heating-profile (a 4 cm B-10 slab, a 0.0253 eV beam
-// along +z, a cell heating tally and a 3 x 3 x 4 mesh tally, the beam down its middle voxel column) runs through the adapter and the run manager against real OpenMC in WSL. The mesh
+// along +z, a cell heating tally and a 3 x 3 x 5 mesh tally, the beam down its middle voxel column) runs through the adapter and the run manager against real OpenMC in WSL. The mesh
 // quantity must be a v0.2 table in the layout FEED's transfer reads, with each bin equal to the formula N kappa (integral of exp(-Sigma z)) within
 // 4 sigma of its predicted statistical error plus 0.4 % (kappa, N and Sigma from the library, via oracles/seed/xs); the bins must add up to the
 // cell tally; and, when FEED's build has a transfer command, a recipe on that table must set a real FEED case's heat rate to the value computed here.
@@ -78,7 +78,7 @@ function run() {
 
 // The formula, from the library numbers the Studio generator read (no transport).
 const XS = have ? JSON.parse(readFileSync(join(base, "xs", "b10-294K-0.0253eV.json"), "utf8")) : null;
-const RHO = 1e-3, NZ = 4, T = 4, N_HIST = 200000;
+const RHO = 1e-3, NZ = 5, T = 4, N_HIST = 200000;
 function profileBin(k: number) {
   const N = (RHO * XS.avogadro_per_mol) / XS.atomic_mass_amu * 1e-24;
   const S = N * XS.sigma_total_b;
@@ -117,14 +117,14 @@ describe.skipIf(!have)("OpenMC heating as a transfer source (real OpenMC)", () =
     ]);
     expect((t.meta as any).frame).toBe("openmc-model");
     expect(t.rows).toHaveLength(3 * 3 * NZ);
-    // Row order: x fastest, then y, then z. The voxel edges are -20, -6.667, 6.667, 20 in x and y, and 0, 1, 2, 3, 4 in z (cm).
+    // Row order: x fastest, then y, then z. The voxel edges are -20, -6.667, 6.667, 20 in x and y, and 0, 0.8, ..., 4 in z (cm): a voxel's height is not 1.
     const edge = [-20, -20 + 40 / 3, -20 + 80 / 3, 20];
     let sum = 0, beamColumn = 0;
     t.rows.forEach((row, n) => {
-      const i = n % 3, j = Math.floor(n / 3) % 3, k = Math.floor(n / 9);
+      const i = n % 3, j = Math.floor(n / 3) % 3, k = Math.floor(n / 9), dz = T / NZ;
       expect(row[0]).toBe(`${i + 1},${j + 1}`);
-      [edge[i], edge[i + 1], edge[j], edge[j + 1], k, k + 1].forEach((want, c) => expect(Math.abs((row[c + 1] as number) - want), `voxel ${row[0]} z ${k} coordinate ${c}`).toBeLessThan(1e-9));
-      expect(Math.abs((row[7] as number) - (40 / 3) ** 2)).toBeLessThan(1e-9);
+      [edge[i], edge[i + 1], edge[j], edge[j + 1], k * dz, (k + 1) * dz].forEach((want, c) => expect(Math.abs((row[c + 1] as number) - want), `voxel ${row[0]} z ${k} coordinate ${c}`).toBeLessThan(1e-9));
+      expect(Math.abs((row[7] as number) - (40 / 3) ** 2 * dz)).toBeLessThan(1e-9);
       const got = row[8] as number;
       sum += got;
       if (i === 1 && j === 1) {
