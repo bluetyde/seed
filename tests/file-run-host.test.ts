@@ -399,6 +399,10 @@ it("separate command-line processes share the engine lease", async () => {
     const limit = Date.now() + 10000; while (!existsSync(join(f.engineRoot, "lease")) && Date.now() < limit) await new Promise(r => setTimeout(r, 20));
     expect(existsSync(join(f.engineRoot, "lease"))).toBe(true);
     expect(cli(f.file, { ...f.request, requestId: "parallel" }).reply.errors[0].code).toBe("E_BUDGET_EXCEEDED");
+    // the refusal is recorded without the lease (Codex E0 review): who asked, for which case and budget, and the rule that stopped it
+    const refusals = readFileSync(join(f.state, "refusals.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({ schema: "seed.refusal/0.1", event: { phase: "engine-busy", requestId: "parallel", caseId: "approved", rule: "one active case per engine", actor: f.config.actor } });
     expect(await done).toBe(0); expect(JSON.parse(output).state).toBe("completed");
   } finally { if (child.exitCode === null) { child.kill(); await done; } }
 });

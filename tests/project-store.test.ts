@@ -329,6 +329,12 @@ describe("Project Store", () => {
     const contentAfterSave2 = readFileSync(join(dir, MANIFEST_FILE), "utf8");
     expect(contentAfterSave2).toBe(contentAfterSave1);
 
+    // The rejection is recorded in the project (acceptance case 6): what the second writer expected and what the project held
+    const conflicts = readFileSync(join(dir, ".seed", "conflicts.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({ code: "E_STALE_REVISION", expectedRevision: handle2.value.revision, observedRevision: save1.value.revision });
+    expect(Number.isFinite(Date.parse(conflicts[0].time))).toBe(true);
+
     // After reopening, handle 2 can save with the new revision
     const handle2Fresh = openProject(dir);
     expect(handle2Fresh.ok).toBe(true);

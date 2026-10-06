@@ -187,6 +187,27 @@ describe("runOracleSet", () => {
     run
   });
 
+  it("the whole set is snapshotted before any callback: a callback cannot change what a later entry is judged against (Codex E0 review)", async () => {
+    const second = entry({ oracleId: "pra-or", expected: { quantity: "p_top", value: 0.3, unit: "1" }, tolerance: { abs: 1e-9, rel: 0 } });
+    const entries = [indexed(entry()), indexed(second)];
+    const secondSha = entries[1]!.fileSha256; // as loaded, before the callback touches the object
+    const result = await runOracleSet(opts(async (e) => {
+      if (e.oracleId === "pra-and") {
+        // reach the caller's own objects and widen the later entry's tolerance, re-hashing it so the pin still verifies
+        const mine = entries[1]!.entry;
+        mine.tolerance = { abs: 1e9, rel: 1 };
+        mine.toleranceHash = sha256Hex(canonicalJson({ expected: mine.expected, tolerance: mine.tolerance }));
+        return { kind: "value", quantity: "p_top", value: 0.02, unit: "1" };
+      }
+      return { kind: "value", quantity: "p_top", value: 99, unit: "1" }; // wrong by a lot
+    }, entries));
+    expect(result.results.find((r) => r.oracleId === "pra-or")!.verdict).toBe("fail");
+    expect(result.verdict).toBe("fail");
+    expect(result.blocked).toBe(true);
+    // and the pins describe the entries as they were when the set started
+    expect(result.pins.oracleFiles.find((f) => f.oracleId === "pra-or")!.sha256).toBe(secondSha);
+  });
+
   it("a correct adapter passes and does not block", async () => {
     const r = await runOracleSet(opts(correct));
     expect(r.verdict).toBe("pass");
@@ -296,6 +317,22 @@ describe("pins", () => {
     expect(comparePins(a, pinsOf([indexed(entry()), indexed(badInput), indexed(limit)], "c1"))).toEqual(["new oracle entry pra-unsupported@1"]);
     expect(comparePins(a, pinsOf([indexed(entry())], "c1"))).toEqual(["oracle entry pra-bad-prob@1 removed"]);
   });
+  it("a human cannot accept changed content under an existing entry version: a changed tolerance or expectation is a new version (Codex E0 review)", () => {
+    const human = { kind: "human" as const, name: "u" };
+    const before = pinsOf([indexed(entry())], "c1");
+    const widened = entry({ tolerance: { abs: 1, rel: 1 } });
+    const sameVersion = pinsOf([indexed(widened)], "c1");
+    const refused = acceptPins(human, sameVersion, before);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.errors[0]).toMatchObject({ code: "E_ORACLE_VERSION" });
+    // the same change as a new version is accepted
+    const v2 = entry({ tolerance: { abs: 1, rel: 1 }, entryVersion: 2 });
+    expect(acceptPins(human, pinsOf([indexed(entry()), indexed(v2)], "c1"), before).ok).toBe(true);
+    // unchanged content, a changed commit, and a first acceptance (no previous pins) are all fine
+    expect(acceptPins(human, pinsOf([indexed(entry())], "c2"), before).ok).toBe(true);
+    expect(acceptPins(human, sameVersion).ok).toBe(true);
+  });
+
   it("a flagged change blocks run operations until a human accepts, and an agent cannot accept", () => {
     const study = { studyId: "s", tier: "A3" as const, budget: { maxWallSeconds: 1, maxCores: 1, maxMemoryMB: 1, maxDiskMB: 1 }, parameters: [] };
     const changed = pinsOf([indexed(entry()), indexed(badInput)], "c2");

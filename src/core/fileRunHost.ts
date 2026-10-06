@@ -20,6 +20,7 @@ import { type RunOutcome } from "./runManager";
 import { type AdapterSpec } from "./adapterClient";
 import {
   appendAdmission,
+  appendRefusal,
   inside,
   readAdmissions,
   readHostJson,
@@ -340,7 +341,17 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
         if (dispatched === undefined) audit("outcome", outcome);
         return outcome;
       }
-    });
+    }, () =>
+      appendRefusal(state, {
+        phase: "engine-busy",
+        actor: c.actor,
+        projectId: p.value.manifest.projectId,
+        requestId: (request as any)?.requestId,
+        caseId: (request as any)?.caseId,
+        rule: "one active case per engine",
+        budget: (request as any)?.budget,
+      }),
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : "host setup failed";
     return failed(message, message.startsWith("E_ENGINE_BUSY") ? "E_BUDGET_EXCEEDED" : "E_SETUP_REQUIRED");

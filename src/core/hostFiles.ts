@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   constants,
   closeSync,
   existsSync,
@@ -136,10 +137,20 @@ export function appendAdmission(root: string, event: unknown): AdmissionRow {
 }
 
 /** Crash leaves the lease in place; orphan engine work must be inspected before manual recovery. */
+/**
+ * A refused admission that never got the engine lease (so it cannot use the lease-protected journal): one line appended to
+ * `refusals.jsonl` in the state folder. A single small append is atomic enough for concurrent processes; the lines are not chained.
+ */
+export function appendRefusal(stateRoot: string, event: unknown): void {
+  const file = safeChild(stateRoot, "refusals.jsonl");
+  appendFileSync(file, JSON.stringify({ schema: "seed.refusal/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
+}
+
 export async function withEngineLease<T>(
   stateRoot: string,
   engineKey: string,
   fn: (engineRoot: string) => Promise<T>,
+  onBusy?: () => void,
 ): Promise<T> {
   const engines = safeChild(stateRoot, "engines", true);
   mkdirSync(engines, { recursive: true });
@@ -149,8 +160,14 @@ export async function withEngineLease<T>(
   try {
     mkdirSync(lease);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "EEXIST")
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      try {
+        onBusy?.();
+      } catch {
+        // recording a refusal must never change the refusal
+      }
       throw Error("E_ENGINE_BUSY: engine lease exists; it may be running or need human recovery");
+    }
     throw e;
   }
   const token = randomBytes(16).toString("hex");
