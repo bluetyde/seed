@@ -1115,7 +1115,15 @@ export class RunManager {
       );
     }
 
-    const indexBytes = readFileSync(resolvedIndex.value);
+    let indexBytes: Buffer;
+    try {
+      indexBytes = readFileSync(resolvedIndex.value);
+    } catch (e) {
+      return markCollectFailed(
+        [{ code: "E_OUTPUT_INCOMPLETE", field: "/resultsIndex", message: `resultsIndex file cannot be read (${(e as NodeJS.ErrnoException)?.code ?? "error"})`, source: "seed" }],
+        "resultsIndex file unreadable"
+      );
+    }
     const actualIndexSha = sha256Hex(indexBytes);
     if (actualIndexSha !== collectResult.resultsSha256) {
       return markCollectFailed(
@@ -1270,7 +1278,15 @@ export class RunManager {
         );
       }
 
-      const dataBytes = readFileSync(resolvedData.value);
+      let dataBytes: Buffer;
+      try {
+        dataBytes = readFileSync(resolvedData.value);
+      } catch (e) {
+        return markCollectFailed(
+          [{ code: "E_OUTPUT_INCOMPLETE", field: `/quantities/${i}/data/path`, message: `quantity data file cannot be read (${(e as NodeJS.ErrnoException)?.code ?? "error"})`, source: "seed" }],
+          "quantity data file unreadable"
+        );
+      }
       const actualDataSha = sha256Hex(dataBytes);
       if (actualDataSha !== q.data.sha256) {
         return markCollectFailed(
