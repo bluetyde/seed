@@ -8,6 +8,7 @@ import { loadOracleEntries, runOracleSet, unverifiedQuantities, comparePins, pin
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
+import { appTree, treeChanges } from "./helpers/appTree";
 
 // NODAL's own oracle entries (oracles/seed in the NODAL repo): four analytic cases whose expected values come from formulas and integrals that
 // do not use the solver, golden-vector regression cases, and bad inputs. They run through the adapter and the run manager. Needs the NODAL repo
@@ -30,7 +31,9 @@ const appCommit = (() => {
   return r.status === 0 ? r.stdout.trim() : "unknown";
 })();
 
+let treeBefore: Map<string, string> | undefined;
 beforeAll(() => {
+  if (have) treeBefore = appTree(repo);
   process.env.SEED_NODAL_PYTHON = python;
   process.env.SEED_NODAL_REPO = repo;
   process.env.SEED_NODAL_ORACLES = join(base, "entries");
@@ -161,5 +164,13 @@ describe.skipIf(!have)("NODAL oracle set through the SEED adapter", () => {
     const { entries } = loadOracleEntries(join(base, "entries"));
     const accepted = pinsOf(entries, appCommit);
     expect(comparePins(accepted, pinsOf(entries, "0".repeat(40)))).toEqual([`app commit ${appCommit} -> ${"0".repeat(40)}`]);
+  });
+});
+
+// E2 exit, "standalone launch of the app unchanged by its adapter": everything above ran the real NODAL through its adapter; its own folder must be as found.
+describe.skipIf(!have)("NODAL is left as the adapter found it", () => {
+  it("no file of the app's own folder was added, changed or removed by the runs above", () => {
+    expect(treeBefore).toBeDefined();
+    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
   });
 });
