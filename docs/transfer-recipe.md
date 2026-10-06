@@ -1,6 +1,6 @@
 # Transfer recipe and approval (proposal)
 
-Status 2026-10-06: **decided by the user (Q1 to Q4 all as recommended); core built (sections 2.1 to 2.8 without the gate wiring in the host and the study log, and without registering the applied revision in the project).** E4 step 4 of [TODO.md](../TODO.md), under [plan 08](plans/08-transfers-and-pipelines.md). It answers plan 08's open item "recipe file format and where it lives" and replaces FEED's provisional shapes (`feed.transfer-recipe/0.1`, FEED decision 0003). Data shapes and units it builds on: [contracts-v0.2-data-shapes.md](contracts-v0.2-data-shapes.md) (decided, built).
+Status 2026-10-06: **decided by the user (Q1 to Q4 all as recommended); core and host wiring built (section 6); not yet the study-log steps.** E4 step 4 of [TODO.md](../TODO.md), under [plan 08](plans/08-transfers-and-pipelines.md). It answers plan 08's open item "recipe file format and where it lives" and replaces FEED's provisional shapes (`feed.transfer-recipe/0.1`, FEED decision 0003). Data shapes and units it builds on: [contracts-v0.2-data-shapes.md](contracts-v0.2-data-shapes.md) (decided, built).
 
 ## 1. What already exists
 
@@ -108,3 +108,20 @@ A fake source app emitting a scripted heating field (a table with units, dimensi
 ## 5. FEED, the first target (2026-10-06)
 
 FEED built its `transfer` command on this recipe (FEED `docs/transfer-heating.md`; `node dist/cli/headless.js transfer`; `describe.transfers` lists `heating-to-pin`). Choices made there and confirmed here: `units.to` is `W` (FEED converts the bins to watts and slices them itself; it sets the case heat rate in W/m); a `total-power` normalization is the **pin's** total, not the core's, and the recipe states `pinBinCount` so a partial export cannot hand missing bins' power to the rest; `mapping.spatial` is FEED's vocabulary (`pin`, `frame`, `slices`, `applyTo`, `pinBinCount`, `columns`); the source table has a `pin` label, `z_min` and `z_max` coordinates (length), optionally `volume`, one value column and its `std`, and `meta.frame`. One transfer sets one slice (`applyTo`); several slices are several recipes. The SEED adapter passes `describe.transfers` through (`adapters/feed`), and `tests/feed-transfer.test.ts` runs the real command behind `applyTransfer` with expected heat rates computed independently from the bins.
+
+## 6. Host wiring (2026-10-06)
+
+`src/core/transferHost.ts`, with the CLI (`src/cli/seed.ts`), the admin CLI (`src/cli/admin.ts`) and the MCP server (`src/mcp/seed.ts`). Tests: `tests/transfer-host.test.ts` (fake source and target apps, real project store, real oracle evidence per app, real approval records, the real CLI entry points and the MCP tools in process).
+
+**Configuration** `seed.transfer-host/0.1` (`schema/transfer-host.schema.json`), selected by the trusted environment, never by a request: the project root, the state root (both outside each other; the configuration file outside the project), the actor and the study (tier, budget), and for every app its adapter identity, its hash-pinned oracle evidence and accepted pins, and, for a target, its `transfer` command and the transfer fields it declares (copied from `describe.transfers` by trusted setup). Agent: `SEED_TRANSFER_HOST_CONFIG`. Human approval: `SEED_ADMIN_TRANSFER_HOST_CONFIG`, whose actor must be a human.
+
+| Verb | Who | What it does |
+|---|---|---|
+| `transfer-propose` `{recipe}` (CLI, MCP `seed_propose_transfer`) | agent, tier A2 | Checks the recipe against the source run (read from the project's runs folder) and the target (units and dimension, normalization, revisions, the target's declared fields), refuses a cycle, applies the `propose_transfer` gate with the oracle flags of the source and target apps, and only then saves it in the project's `transfers/` folder. A recipe that is invalid or stale is refused and nothing is saved. |
+| `transfer-status` `{recipeId}` (CLI, MCP `seed_transfer_status`) | agent | The state (proposed, approved, applied, stale, invalid) and the reasons. Read only. |
+| `approve-transfer` `{recipeId, recipeDigest, expiresInHours?}` (admin CLI only, **no MCP tool**) | human | Records an approval for exactly the recipe content whose digest the reviewer read (at most 168 hours), for the proposer, bound to the exact source and target revisions. Refused for anything that is not a clean proposal. Written to host state, outside the project. |
+| `transfer-apply` `{recipeId}` (CLI, MCP `seed_apply_transfer`) | agent | The \`enable_transfer\` gate through the approval, the SEED-side checks, the oracle sets of both apps clear (writing a new target revision is a new revision in effect), the target's own \`transfer\` command (FEED's coverage and conservation checks decide), then the new target file is written, the artifact's revision becomes \`{hash of the new content, counter + 1}\` through the project store (the old file is put back if the project cannot record it), an applied record is saved in host state and the provenance returned. |
+
+Every decision (request, refusal, outcome) is appended to a hash-chained journal in the state folder (`transfer-journal/admissions.jsonl`, the same format as the run host's). An **applied** recipe stays applied while its source and the target it produced stand, whatever became of its approval; a later change of either makes it stale.
+
+Not done: a transfer does not yet appear as a step in the study log (the journal records it); cylindrical and other source shapes; a real FEED command behind the host test (the core is tested with real FEED in `tests/feed-transfer.test.ts` and `tests/openmc-heating.test.ts`, the host with a fake target).
