@@ -13,6 +13,7 @@ import {
 } from "./oracle";
 import { evaluateGate, issueGrant, type Actor, type Grant, type PolicyStudy } from "./policy";
 import { controlBinding } from "./hostControl";
+import { loadOracleAuthority } from "./oracleAuthority";
 import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runDispatcher";
 import { openProject } from "./projectStore";
 import { type RunOutcome } from "./runManager";
@@ -176,28 +177,12 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           },
           loadAuthority: async () => {
             unchanged();
-            regularFile(c.oracles.evidenceFile);
-            const bytes = readFileSync(c.oracles.evidenceFile);
-            if (sha256Hex(bytes) !== c.oracles.evidenceSha256)
-              throw Error("oracle evidence changed since host approval");
-            const result = JSON.parse(bytes.toString("utf8")) as SetResult;
-            const entries = loadOracleEntries(c.oracles.entriesDir);
-            if (entries.errors.length) throw Error("oracle entry could not be verified");
-            const currentEntries = latestEntries(entries.entries, c.adapter.id);
-            for (const item of currentEntries)
-              if (checkOracleInputs(item.entry, c.oracles.inputsRoot).length)
-                throw Error("oracle inputs changed");
-            const git = spawnSync("git", ["-C", c.oracles.repository, "rev-parse", "HEAD"], {
-              encoding: "utf8",
-              timeout: 10000,
-            });
-            if (git.status !== 0 || !/^[0-9a-f]{40}$/.test(git.stdout.trim()))
-              throw Error("could not determine app commit");
+            const authority = loadOracleAuthority(c.oracles, c.adapter.id);
             return {
               context: { study: c.study, grants: c.grants },
-              currentPins: pinsOf(currentEntries, git.stdout.trim()),
+              currentPins: authority.currentPins,
               acceptedPins: c.acceptedPins,
-              oracleResult: result,
+              oracleResult: authority.oracleResult,
             };
           },
           audit: async event => {

@@ -1,4 +1,5 @@
-import { comparePins, type PinSet, type SetResult } from "./oracle";
+import type { PinSet, SetResult } from "./oracle";
+import { oracleFlags } from "./oracleAuthority";
 import { evaluateGate, type Actor, type Budget, type Decision, type GateContext } from "./policy";
 import { withProjectLockAsync } from "./projectStore";
 import { RunManager, type RunManagerOptions, type RunOutcome, type StartRequest } from "./runManager";
@@ -137,28 +138,7 @@ export class RunDispatcher {
           })
         )
           return refusal("invalid host policy or registered parameters", "E_SCHEMA_INVALID");
-        const result = a.oracleResult;
-        const pinsChanged =
-          !a.acceptedPins ||
-          comparePins(a.acceptedPins, a.currentPins).length > 0 ||
-          !result ||
-          comparePins(result.pins, a.currentPins).length > 0;
-        const oracleBlocked =
-          !/^[0-9a-f]{40}$/.test(a.currentPins.appCommit) ||
-          a.currentPins.oracleFiles.some(
-            pin =>
-              !/^[0-9a-f]{64}$/.test(pin.sha256) ||
-              !result?.results.some(r => r.oracleId === pin.oracleId && r.entryVersion === pin.entryVersion),
-          ) ||
-          !result ||
-          result.blocked !== false ||
-          result.verdict !== "pass" ||
-          result.inputsVerified !== true ||
-          result.adapter !== o.manager.adapter.id ||
-          result.adapterVersion !== o.manager.adapter.version ||
-          !result.results.some(r => r.tag === "good" && r.verdict === "pass") ||
-          result.results.some(r => r.tag !== "known-limit" && r.verdict !== "pass") ||
-          a.currentPins.oracleFiles.length === 0;
+        const { pinsChanged, oracleBlocked } = oracleFlags(a, o.manager.adapter);
         const decision = evaluateGate(
           {
             operation: "run_case",
