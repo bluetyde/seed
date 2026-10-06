@@ -5,6 +5,7 @@ const mode = process.env.FAKE_TRANSFER_MODE || "good";
 const request = JSON.parse(fs.readFileSync(0, "utf8"));
 const reply = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 if (mode === "exit") process.exit(3);
+if (mode === "reply-then-exit") { reply({ ok: true, output: { content: "{}" } }); process.exit(1); }
 if (mode === "garbage") { process.stdout.write("not json\n"); process.exit(0); }
 if (mode === "refuse") { reply({ ok: false, errors: [{ code: "E_BOUNDARY_INCOMPLETE", field: "/mapping", message: "no boundary form" }, { code: "bad code", message: "x" }] }); process.exit(0); }
 const EV_J = 1.602176634e-19;

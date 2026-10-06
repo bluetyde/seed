@@ -133,7 +133,7 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
     if (!vi.ok) invalid.push(...vi.errors);
     else if (view.sourceRunState !== "completed") invalid.push(err("E_OUTPUT_INCOMPLETE", "/source/runId", `the source run is ${view.sourceRunState ?? "unknown"}, not completed`));
     else {
-      if (sha256Hex(view.sourceIndex) !== r.source.resultsSha256 || index.runId !== r.source.runId) stale.push(err("E_STALE_REVISION", "/source/resultsSha256", "the source results differ from the ones the recipe pinned"));
+      if (sha256Hex(view.sourceIndex) !== r.source.resultsSha256) stale.push(err("E_STALE_REVISION", "/source/resultsSha256", "the source results differ from the ones the recipe pinned"));
       q = index.quantities.find((x: { name: string }) => x.name === r.source.quantity);
       if (!q) invalid.push(err("E_NOT_FOUND", "/source/quantity", `the source run has no quantity ${JSON.stringify(r.source.quantity)}`));
       else {

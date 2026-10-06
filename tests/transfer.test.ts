@@ -94,6 +94,12 @@ describe("recipe states", () => {
     expect(e.errors[0]!.message).toMatch(/changed after/);
   });
 
+  it("an approval of another recipe is not this recipe's approval", () => {
+    const w = world();
+    const other = w.approve({ ...w.recipe, recipeId: "other-recipe" });
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [other] })).errors[0]!.message).toMatch(/no approval/);
+  });
+
   it("an expired approval, another project's approval and an approval for other revisions do not count", () => {
     const w = world();
     const expired = w.approve(w.recipe, "appr-old", 1);
@@ -124,6 +130,13 @@ describe("recipe states", () => {
     expect(flat(changed)).toContain("E_STALE_REVISION /source/resultsSha256");
     const dataChanged = evaluateTransfer(w.recipe, w.view({ readData: () => w.dataText.replace("1000000", "1000001") }));
     expect(flat(dataChanged)).toContain("E_STALE_REVISION /source/dataSha256");
+    expect(dataChanged.errors.find((e) => e.field === "/source/dataSha256")!.message).toMatch(/does not match the hash in the results index/);
+    const pinned = world({ recipe: (r) => { r.source.dataSha256 = "f".repeat(64); } });
+    const pe = evaluateTransfer(pinned.recipe, pinned.view());
+    expect(pe.state).toBe("stale");
+    expect(pe.errors.map((e) => e.message).join("|")).toMatch(/differ from the ones the recipe pinned/);
+    const norm = world({ recipe: (r) => { r.source.normalization = "per-fission"; } });
+    expect(flat(evaluateTransfer(norm.recipe, norm.view()))).toContain("E_STALE_REVISION /source/normalization");
   });
 });
 
@@ -139,6 +152,8 @@ describe("refusals SEED makes from its own records", () => {
     refused({ recipe: (r) => { r.source.unit = "furlong"; } }, "E_UNITS", "/source/unit");
     refused({ recipe: (r) => { r.source.unit = "W"; } }, "E_UNITS", "/source/unit");
     refused({ index: (i) => { delete i.quantities[0].dimension; } }, "E_UNITS", "/source/dimension");
+    const nd = world({ index: (i) => { delete i.quantities[0].dimension; } });
+    expect(evaluateTransfer(nd.recipe, nd.view()).errors.find((e) => e.field === "/source/dimension")!.message).toMatch(/declares no dimension/);
     refused({ recipe: (r) => { r.source.dimension = "power"; r.source.unit = "W"; } }, "E_UNITS", "/source/dimension");
     refused({ index: (i) => { i.quantities[0].unit = "keV"; } }, "E_UNITS", "/source/unit");
     refused({ recipe: (r) => { r.units.to = "W/m"; } }, "E_UNITS", "/units/to");
@@ -164,6 +179,14 @@ describe("refusals SEED makes from its own records", () => {
     refused({ recipe: (r) => { r.source.quantity = "Nope:heating"; } }, "E_NOT_FOUND", "/source/quantity");
     refused({}, "E_OUTPUT_INCOMPLETE", "/source/dataSha256", { readData: () => null });
     refused({ data: (d) => { d.rows[0][1] = "x"; } }, "E_SCHEMA_INVALID", "/rows/0/1");
+  });
+
+  it("a total-power normalization maps to power, power per length or power per volume", () => {
+    for (const to of ["W", "W/m", "W/m3", "kW/m"]) {
+      const w = world({ recipe: (r) => { r.normalization = { kind: "total-power", value: { value: 1e6, unit: "W" }, origin: "the model's power" }; r.units.to = to; } });
+      expect(evaluateTransfer(w.recipe, w.view()).state, to).toBe("proposed");
+    }
+    refused({ recipe: (r) => { r.normalization = { kind: "total-power", value: { value: 1e6, unit: "W" }, origin: "x" }; r.units.to = "K"; } }, "E_UNITS", "/units/to");
   });
 
   it("the target must declare the transfer and accept this source", () => {
@@ -236,9 +259,18 @@ describe("who may do what", () => {
     expect(a0.ok).toBe(false);
     const blocked = writeRecipe({ projectRoot: w.project, recipe: w.recipe, actor: agent, gate: gate({ oracleBlocked: true }), studyId: "study-1" });
     expect(blocked.ok).toBe(false);
+    writeFileSync(join(w.project, "transfers", "misnamed.json"), JSON.stringify(w.recipe));
+    expect(readRecipes(w.project).problems.map((p) => p.field)).toEqual(["/misnamed.json"]);
+    rmSync(join(w.project, "transfers", "misnamed.json"));
     const read = readRecipes(w.project);
     expect(read.problems).toEqual([]);
     expect(read.recipes).toEqual([w.recipe]);
+  });
+
+  it("reading recipes from a project without a transfers folder creates nothing", () => {
+    const w = world();
+    expect(readRecipes(w.project)).toEqual({ recipes: [], problems: [] });
+    expect(existsSync(join(w.project, "transfers"))).toBe(false);
   });
 
   it("the transfers folder must be a real folder inside the project", () => {
@@ -320,7 +352,7 @@ describe("applying through the target command (fake apps)", () => {
   });
 
   it("a command that exits, answers garbage or changes nothing is a refusal", async () => {
-    for (const mode of ["exit", "garbage", "nochange"]) {
+    for (const mode of ["exit", "garbage", "nochange", "reply-then-exit"]) {
       const out = await apply(world(), mode);
       expect(out.ok, mode).toBe(false);
       if (!out.ok) expect(out.errors[0]!.code).toBe("E_APP_FAILED");
