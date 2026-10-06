@@ -76,7 +76,7 @@ describe("RunManager lifecycle", () => {
     const flag = join(proj.root, "cancel-once"), wrapper = join(proj.root, "timeout-adapter.cjs");
     writeFileSync(wrapper, `const fs=require('node:fs'),{spawnSync}=require('node:child_process');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>{const verb=process.argv[2];if(verb==='cancel'&&!fs.existsSync(${JSON.stringify(flag)})){fs.writeFileSync(${JSON.stringify(flag)},'once');setInterval(()=>{},1000);}else{const p=spawnSync(process.execPath,[${JSON.stringify(cliPath)},verb],{input:text,encoding:'utf8',env:process.env});process.stdout.write(p.stdout);process.stderr.write(p.stderr);process.exitCode=p.status;}});`);
     let launched = false;
-    const mgr = new RunManager({ projectRoot: proj.root, runsFolder: "runs", adapter: { ...adapterSpec, args: [wrapper] }, pollMs: 50, callTimeoutMs: 1000,
+    const mgr = new RunManager({ projectRoot: proj.root, runsFolder: "runs", adapter: { ...adapterSpec, args: [wrapper] }, pollMs: 50, callTimeoutMs: 3000, // the second cancel starts two Node processes: 1000 ms was too tight under load (a full-suite flake)
       onLaunch: identity => { if (identity.jobId) launched = true; } });
     const pending = mgr.start({ requestId: "timeout-cancel", actor, inputs, artifact, budget, settings: { scenario: "success", delayMs: 10000 } });
     const deadline = Date.now() + 10000;
