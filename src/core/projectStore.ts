@@ -544,6 +544,16 @@ export function saveProject(
   return result;
 }
 
+/** Saves while the caller already holds the writer lock (inside withProjectLock or withProjectLockAsync): one critical section for a file change and its revision. */
+export function saveProjectHeld(
+  dir: string,
+  manifest: Record<string, unknown>,
+  expectedRevision: string,
+  opts?: LockOptions & { now?: () => Date }
+): StoreResult<Project> {
+  return saveLocked(dir, manifest, expectedRevision, opts);
+}
+
 function saveLocked(
   dir: string,
   manifest: Record<string, unknown>,

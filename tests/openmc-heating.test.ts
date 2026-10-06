@@ -155,7 +155,7 @@ describe.skipIf(!have)("OpenMC heating as a transfer source (real OpenMC)", () =
     const rate = 5e13, EV_J = 1.602176634e-19;
     const recipe: Recipe = {
       schema: "seed.transfer-recipe/0.2", recipeId: "openmc-heat-1", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
-      source: { runId, resultsSha256: sha256Hex(indexText), quantity: mesh.name, dataSha256: mesh.data.sha256, unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: "rev-model" }] },
+      source: { runId, resultsSha256: sha256Hex(indexText), quantity: mesh.name, dataSha256: mesh.data.sha256, unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: index.inputHashes[0].sha256 }] },
       target: { app: "feed", artifact: "pin-case", revision: "rev-case", field: "heating-to-pin" },
       units: { to: "W" },
       normalization: { kind: "source-rate", value: { value: rate, unit: "1/s" }, origin: "a source rate chosen for the test" },
@@ -169,7 +169,7 @@ describe.skipIf(!have)("OpenMC heating as a transfer source (real OpenMC)", () =
     const view: TransferView = {
       projectId: "proj-1", projectRoot: root, now: NOW, sourceIndex: indexText, sourceRunState: "completed",
       readData: (p) => (existsSync(join(root, p)) ? readFileSync(join(root, p), "utf8") : null),
-      currentRevisions: { "openmc-model": "rev-model", "pin-case": "rev-case" }, targetTransfers: feedDescribe.transfers, approvals: [approval.approval], applied: [],
+      currentRevisions: { "openmc-model": index.inputHashes[0].sha256, "pin-case": "rev-case" }, artifactPaths: { "openmc-model": index.inputHashes[0].path, "pin-case": "c.json" }, targetTransfers: feedDescribe.transfers, approvals: [approval.approval], applied: [],
     };
     const out = await applyTransfer({ recipe, view, actor: agent, gate, studyId: "study-1", targetContent: readFileSync(feedCase, "utf8"), run: (r) => spawnTransferCommand(process.execPath, [feedBundle, "transfer"], r, 60000) });
     expect(out.ok, JSON.stringify(out)).toBe(true);

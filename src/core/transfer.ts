@@ -82,6 +82,8 @@ export type TransferView = {
   targetTransfers?: { field: string; accepts: { dimension: string; normalization?: string; additional?: { role: string; dimension: string }[] }[] }[];
   approvals: readonly Approval[];
   applied: readonly AppliedRecord[];
+  /** The project path of every artifact: a recipe's source pins must be inputs of the source run, which records paths and hashes. */
+  artifactPaths: Record<string, string>;
 };
 
 type Eval = { state: TransferState; errors: TypedError[]; digest: string; approval?: Approval };
@@ -188,6 +190,15 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
     else {
       if (sha256Hex(view.sourceIndex) !== r.source.resultsSha256) stale.push(err("E_STALE_REVISION", "/source/resultsSha256", "the source results differ from the ones the recipe pinned"));
       q = checkQuantity(r, index, r.source, "/source", false, view, invalid, stale);
+      // The pins say which revisions the run came from: each must be one of the run's own recorded inputs, never merely a current revision the
+      // request names (a stale run would otherwise look current).
+      r.source.revisionPins.forEach((p, i) => {
+        const path = view.artifactPaths[p.artifact];
+        if (path === undefined) invalid.push(err("E_NOT_FOUND", `/source/revisionPins/${i}`, `the project has no artifact ${JSON.stringify(p.artifact)}`));
+        else if (!index.inputHashes.some((h: { path: string; sha256: string }) => h.path === path && h.sha256 === p.revision)) {
+          invalid.push(err("E_STALE_REVISION", `/source/revisionPins/${i}`, `the source run was not produced from this revision of ${p.artifact}`));
+        }
+      });
       const roles = new Set<string>(), names = new Set<string>([r.source.quantity]);
       (r.source.additional ?? []).forEach((a, i) => {
         const at = `/source/additional/${i}`;
@@ -294,7 +305,10 @@ function transfersFolder(projectRoot: string, folder: string): string {
     const s = lstatSync(dir);
     if (s.isSymbolicLink() || !s.isDirectory()) throw Error("the transfers folder must be a real folder");
   } else mkdirSync(dir, { recursive: true });
-  return realpathSync(dir);
+  const real = realpathSync(dir);
+  // A linked ancestor (project/linked -> elsewhere, with linked/transfers a real folder) must not move the folder out of the project.
+  if (!inside(root, real) || real === root) throw Error("the transfers folder leaves the project");
+  return real;
 }
 
 /** An agent (or human) writes a recipe proposal. Needs the propose_transfer gate; the proposer must be the actor. */

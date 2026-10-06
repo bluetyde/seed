@@ -10,6 +10,7 @@ import {
 } from "../src/core/transfer";
 import { validate } from "../src/core/validate";
 
+const PIN_A = "a".repeat(64); // the input hash the fixture runs record (index.inputHashes)
 const tmp = mkdtempSync(join(tmpdir(), "seed-transfer-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 let n = 0;
@@ -47,7 +48,7 @@ function world(over: Over = {}) {
   const indexText = JSON.stringify(indexDoc);
   const recipe: any = {
     schema: "seed.transfer-recipe/0.2", recipeId: "heat-to-pin-1", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
-    source: { runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "Fuel:heating", dataSha256: sha256Hex(dataText), unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: "rev-c" }] },
+    source: { runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "Fuel:heating", dataSha256: sha256Hex(dataText), unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: PIN_A }] },
     target: { app: "feed", artifact: "pin-case", revision: "rev-d", field: "heating-to-pin" },
     units: { to: "W" },
     normalization: { kind: "source-rate", value: { value: 1.5e17, unit: "1/s" }, origin: "1 MW over 200 MeV per fission, from the model's power" },
@@ -60,9 +61,9 @@ function world(over: Over = {}) {
     projectId: "proj-1", projectRoot: w.project, now: NOW,
     sourceIndex: over.indexText ? over.indexText(indexText) : indexText, sourceRunState: "completed",
     readData: (p) => (p === "runs/run-001/native/000.json" ? dataText : null),
-    currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-d" },
+    currentRevisions: { "openmc-model": PIN_A, "pin-case": "rev-d" },
     targetTransfers: [{ field: "heating-to-pin", accepts: [{ dimension: "energy", normalization: "per-source-particle" }] }],
-    approvals: [], applied: [], ...extra
+    approvals: [], applied: [], artifactPaths: { "openmc-model": "m.json", "nodal-model": "m.json", "pin-case": "c.json" }, ...extra
   });
   const approve = (r: Recipe = recipe, id = "appr-1", expiresInH = 24): Approval => {
     const out = recordApproval({ stateRoot: w.state, projectRoot: w.project, projectId: "proj-1", studyId: "study-1", recipe: r, approver: human, grantedTo: agent, approvalId: id, now: NOW, expires: new Date(NOW.getTime() + expiresInH * 3600e3) });
@@ -83,7 +84,7 @@ describe("recipe states", () => {
     const a = w.approve();
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [a] })).state).toBe("approved");
     const applied = [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe), targetRevisionAfter: "rev-after" }];
-    const after = { "openmc-model": "rev-c", "pin-case": "rev-after" };
+    const after = { "openmc-model": PIN_A, "pin-case": "rev-after" };
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], applied, currentRevisions: after })).state).toBe("applied");
     // applied stands without a valid approval (it expired since), but not once the target moved on, nor once the source changed
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [], applied, currentRevisions: after })).state).toBe("applied");
@@ -114,7 +115,7 @@ describe("recipe states", () => {
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [expired], now: new Date(NOW.getTime() + 2 * 3600e3) })).errors[0]!.message).toMatch(/expired/);
     const a = w.approve();
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], projectId: "proj-2" })).state).toBe("proposed");
-    const other: Approval = { ...a, inputRevisions: [{ artifact: "openmc-model", revision: "rev-c" }, { artifact: "pin-case", revision: "rev-x" }] };
+    const other: Approval = { ...a, inputRevisions: [{ artifact: "openmc-model", revision: PIN_A }, { artifact: "pin-case", revision: "rev-x" }] };
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [other] })).errors[0]!.message).toMatch(/other revisions/);
     const byAgent = { ...a, approvedBy: { kind: "agent", name: "claude" } } as unknown as Approval;
     expect(evaluateTransfer(w.recipe, w.view({ approvals: [byAgent] })).state).toBe("proposed");
@@ -124,11 +125,11 @@ describe("recipe states", () => {
     const w = world();
     const a = w.approve();
     for (const [artifact, field] of [["openmc-model", "/source/revisionPins/0"], ["pin-case", "/target/revision"]] as const) {
-      const e = evaluateTransfer(w.recipe, w.view({ approvals: [a], currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-d", [artifact]: "rev-new" } }));
+      const e = evaluateTransfer(w.recipe, w.view({ approvals: [a], currentRevisions: { "openmc-model": PIN_A, "pin-case": "rev-d", [artifact]: "rev-new" } }));
       expect(e.state).toBe("stale");
       expect(flat(e)).toEqual([`E_STALE_REVISION ${field}`]);
     }
-    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], currentRevisions: { "openmc-model": "rev-c" } })).state).toBe("stale");
+    expect(evaluateTransfer(w.recipe, w.view({ approvals: [a], currentRevisions: { "openmc-model": PIN_A } })).state).toBe("stale");
   });
 
   it("source results or data that differ from the pins are stale", () => {
@@ -380,14 +381,14 @@ describe("applying through the target command (fake apps)", () => {
     expect((await run({ recipe: edited })).ok).toBe(false);
     expect((await run({ actor: { ...agent, name: "someone-else" } })).ok).toBe(false);
     expect((await run({ view: w.view({ approvals: [w.approve(w.recipe, "appr-e", 1)], now: new Date(NOW.getTime() + 2 * 3600e3) }) })).ok).toBe(false);
-    expect((await run({ view: w.view({ approvals: [w.approve(w.recipe, "appr-s")], currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-other" } }) })).ok).toBe(false);
+    expect((await run({ view: w.view({ approvals: [w.approve(w.recipe, "appr-s")], currentRevisions: { "openmc-model": PIN_A, "pin-case": "rev-other" } }) })).ok).toBe(false);
     expect(calls).toEqual([]);
   });
 
   it("an applied recipe cannot be applied again", async () => {
     const w = world();
     const a = w.approve();
-    const out = await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe), targetRevisionAfter: "rev-after" }], currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-after" } }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: runWith("good") });
+    const out = await applyTransfer({ recipe: w.recipe, view: w.view({ approvals: [a], applied: [{ recipeId: w.recipe.recipeId, recipeDigest: recipeDigest(w.recipe), targetRevisionAfter: "rev-after" }], currentRevisions: { "openmc-model": PIN_A, "pin-case": "rev-after" } }), actor: agent, gate: gate(), studyId: "study-1", targetContent: "{}", run: runWith("good") });
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.errors[0]!.code).toBe("E_EXISTS");
   });
@@ -426,7 +427,7 @@ describe("a coolant boundary: two quantities of one run and a chosen sample (fak
       schema: "seed.transfer-recipe/0.2", recipeId: "boundary-1", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
       source: {
         runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "coolant T", dataSha256: sha256Hex(T), unit: "K", dimension: "temperature", normalization: "none",
-        revisionPins: [{ artifact: "nodal-model", revision: "rev-n" }],
+        revisionPins: [{ artifact: "nodal-model", revision: PIN_A }],
         additional: [{ role: "heat-transfer-coefficient", quantity: "wall htc", dataSha256: sha256Hex(H), unit: "W/m2/K", dimension: "heat-transfer-coefficient", normalization: "none", unitTo: "W/m2/K" }],
       },
       target: { app: "feed", artifact: "pin-case", revision: "rev-d", field: "coolant-boundary" },
@@ -439,7 +440,7 @@ describe("a coolant boundary: two quantities of one run and a chosen sample (fak
     const w = fresh();
     const view = (extra: Partial<TransferView> = {}): TransferView => ({
       projectId: "proj-1", projectRoot: w.project, now: NOW, sourceIndex: indexText, sourceRunState: "completed", readData: (p) => files[p] ?? null,
-      currentRevisions: { "nodal-model": "rev-n", "pin-case": "rev-d" }, targetTransfers: over.targetTransfers ?? accepts, approvals: [], applied: [], ...extra,
+      currentRevisions: { "nodal-model": PIN_A, "pin-case": "rev-d" }, targetTransfers: over.targetTransfers ?? accepts, approvals: [], applied: [], artifactPaths: { "openmc-model": "m.json", "nodal-model": "m.json", "pin-case": "c.json" }, ...extra,
     });
     let given: Approval | undefined;
     const approve = (): Approval => {
