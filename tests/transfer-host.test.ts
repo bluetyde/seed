@@ -360,3 +360,56 @@ describe("the entry points", () => {
     await withT.close();
   });
 });
+
+describe("the trusted configuration is held to its rules", () => {
+  it("a configuration or state folder inside the project is refused, and a config file inside the project cannot be saved", async () => {
+    const f = await fixture();
+    const inside = f.config(f.agent);
+    inside.stateRoot = join(f.project, "state");
+    mkdirSync(inside.stateRoot, { recursive: true });
+    const file = join(f.root, "inside-state.json");
+    saveTransferHostConfig(file, inside);
+    const out = await transferStatus(file, { recipeId: "heat-1" });
+    expect(out.ok).toBe(false);
+    expect(JSON.stringify(out)).toContain("outside the project");
+    expect(() => saveTransferHostConfig(join(f.project, "host.json"), f.config(f.agent))).toThrow(/outside the project/);
+  });
+
+  it("pins changed since a human accepted them stop a proposal", async () => {
+    const f = await fixture();
+    const c = f.config(f.agent);
+    c.apps.dstapp!.acceptedPins = { ...c.apps.dstapp!.acceptedPins, appCommit: "0".repeat(40) };
+    const file = join(f.root, "pins-changed.json");
+    saveTransferHostConfig(file, c);
+    const out = await proposeTransfer(file, { recipe: f.recipe });
+    expect(out.ok).toBe(false);
+    expect(codes(out as any)).toContain("E_NOT_PERMITTED /operation");
+    expect(existsSync(join(f.project, "transfers"))).toBe(false);
+  });
+
+  it("an applied record of another project in the state folder does not count", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f);
+    const dir = join(f.state, "transfer-applied", sha256Hex("proj\n" + f.project));
+    const p = openProject(f.project) as any;
+    const right = join(f.state, "transfer-applied", sha256Hex(p.value.manifest.projectId + "\n" + f.project));
+    mkdirSync(right, { recursive: true });
+    writeFileSync(join(right, "fake.json"), JSON.stringify({ schema: "seed.transfer-applied/0.2", projectId: "another-project", recipeId: "heat-1", recipeDigest: recipeDigest(f.recipe), targetRevisionAfter: sha256Hex(f.dstCase) }));
+    expect(dir).not.toBe(right);
+    expect(await transferStatus(f.agentFile, { recipeId: "heat-1" })).toMatchObject({ ok: true, state: "approved" });
+  });
+
+  it("applying to an app with no transfer command says so", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f);
+    const c = f.config(f.agent);
+    delete c.apps.dstapp!.transfer;
+    const file = join(f.root, "no-command.json");
+    saveTransferHostConfig(file, c);
+    const out = await applyTransferFromHost(file, { recipeId: "heat-1" });
+    expect(codes(out as any)).toContain("E_SETUP_REQUIRED /target/app");
+    expect(readFileSync(dstFile(f), "utf8")).toBe(f.dstCase);
+  });
+});
