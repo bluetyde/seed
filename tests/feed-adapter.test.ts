@@ -109,6 +109,10 @@ describe("FEED adapter: configuration", () => {
     delete process.env.FEED_STUB_TRANSFERS;
     const none = okReply(await ask(feedProject().root, { verb: "describe" }));
     expect("transfers" in none.result).toBe(false);
+    process.env.FEED_STUB_TRANSFERS = JSON.stringify(Array.from({ length: 25 }, (_, i) => ({ field: "t" + i, accepts: [{ dimension: "power" }] })));
+    const many = okReply(await ask(feedProject().root, { verb: "describe" }));
+    expect(many.result.transfers).toHaveLength(20);
+    expect(validate("adapter-reply", many)).toEqual({ ok: true });
   });
 
   it("describe: a missing solver is a warning, and run is then refused as setup required, with no job", async () => {
