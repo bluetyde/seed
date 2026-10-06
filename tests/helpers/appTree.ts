@@ -40,6 +40,12 @@ export function hasUncommittedEdits(root: string): boolean {
   return r.status === 0 && r.stdout.trim() !== "";
 }
 
+/** What git sees in the folder right now (edits and untracked files that are not ignored), as one string; "" outside a checkout. */
+export function gitStatus(root: string): string {
+  const r = spawnSync("git", ["-c", "safe.directory=*", "-C", root, "status", "--porcelain", "--untracked-files=all"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout : "";
+}
+
 /** What changed between two fingerprints, as readable lines (empty when nothing did). A changed file in `tolerated` is not reported. */
 export function treeChanges(before: Map<string, string>, after: Map<string, string>, tolerated: Set<string> = new Set()): string[] {
   const lines: string[] = [];

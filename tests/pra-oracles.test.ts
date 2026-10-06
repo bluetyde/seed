@@ -8,7 +8,7 @@ import { loadOracleEntries, runOracleSet, unverifiedQuantities, comparePins, pin
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // SNEED's own oracle entries (oracles/seed in the SNEED repository): hand-derived exact top-event probabilities (checked there against an
 // exhaustive enumeration) and bad-input refusals. They run through the adapter and the run manager. Needs the SNEED checkout built with
@@ -32,10 +32,12 @@ const appCommit = (() => {
 
 let treeBefore: Map<string, string> | undefined;
 let editedBefore = false;
+let statusBefore = "";
 beforeAll(() => {
   if (have) {
     treeBefore = appTree(repo);
     editedBefore = hasUncommittedEdits(repo);
+    statusBefore = gitStatus(repo);
   }
   process.env.SEED_PRA_REPO = repo;
   process.env.SEED_PRA_ORACLES = join(base, "entries");
@@ -174,8 +176,9 @@ describe.skipIf(!have)("SNEED is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", (ctx) => {
     expect(treeBefore).toBeDefined();
     const changes = treeChanges(treeBefore!, appTree(repo), trackedFiles(repo));
-    // someone was already editing the app when the runs began (another session on this machine): the changes cannot be told from theirs
-    if (changes.length > 0 && editedBefore) return ctx.skip();
+    // someone was editing the app when the runs began, or changed what git sees in it while they ran (another session on this machine):
+    // the changes cannot be told from theirs
+    if (changes.length > 0 && (editedBefore || gitStatus(repo) !== statusBefore)) return ctx.skip();
     expect(changes).toEqual([]);
   });
 });

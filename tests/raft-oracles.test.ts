@@ -26,7 +26,7 @@ import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
 // adapter and the run manager. Needs the RAFT repo with the built headless runner and the entries; skipped otherwise.
@@ -47,10 +47,12 @@ const appCommit = (() => {
 
 let treeBefore: Map<string, string> | undefined;
 let editedBefore = false;
+let statusBefore = "";
 beforeAll(() => {
   if (have) {
     treeBefore = appTree(repo);
     editedBefore = hasUncommittedEdits(repo);
+    statusBefore = gitStatus(repo);
   }
   process.env.SEED_RAFT_HEADLESS = bundle;
   process.env.SEED_RAFT_ORACLES = join(base, "entries");
@@ -808,8 +810,9 @@ describe.skipIf(!have)("RAFT is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", (ctx) => {
     expect(treeBefore).toBeDefined();
     const changes = treeChanges(treeBefore!, appTree(repo), trackedFiles(repo));
-    // someone was already editing the app when the runs began (another session on this machine): the changes cannot be told from theirs
-    if (changes.length > 0 && editedBefore) return ctx.skip();
+    // someone was editing the app when the runs began, or changed what git sees in it while they ran (another session on this machine):
+    // the changes cannot be told from theirs
+    if (changes.length > 0 && (editedBefore || gitStatus(repo) !== statusBefore)) return ctx.skip();
     expect(changes).toEqual([]);
   });
 });
