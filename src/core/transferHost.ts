@@ -14,7 +14,7 @@ import { loadOracleAuthority, oracleFlags, type OracleSource } from "./oracleAut
 import type { PinSet } from "./oracle";
 import { resolveInside } from "./paths";
 import type { Actor, GateContext, PolicyStudy } from "./policy";
-import { openProject, saveProject } from "./projectStore";
+import { openProject, saveProjectHeld, withProjectLockAsync } from "./projectStore";
 import {
   applyTransfer, checkPipeline, evaluateTransfer, listApprovals, readRecipes, recipeDigest, recipeRevisions, recordApproval, spawnTransferCommand, writeRecipe,
   type AppliedRecord, type Recipe, type TransferView
@@ -100,10 +100,19 @@ function open(file: string): Ctx {
 
 const audit = (x: Ctx, phase: string, event: unknown) => appendAdmission(x.journal, { phase, actor: x.c.actor, projectId: x.projectId, configHash: x.configHash, event });
 
-function readText(abs: string): string | null {
+/** A regular file that is not a link and whose real location is inside the project: a linked ancestor does not get a read or write out. */
+function realInside(project: string, abs: string): boolean {
+  try {
+    return inside(realpathSync(project), realpathSync(abs));
+  } catch {
+    return false;
+  }
+}
+
+function readText(abs: string, project: string): string | null {
   try {
     const s = lstatSync(abs);
-    if (!s.isFile() || s.isSymbolicLink() || s.size > MAX_TEXT) return null;
+    if (!s.isFile() || s.isSymbolicLink() || s.size > MAX_TEXT || !realInside(project, abs)) return null;
     return readFileSync(abs, "utf8");
   } catch {
     return null;
@@ -140,9 +149,9 @@ function sourceRun(x: Ctx, runId: string): { indexText: string | null; state: st
   const runs = (x.manifest.folders as { runs: string }).runs;
   const dir = resolveInside(x.project, runs + "/" + runId);
   if (!dir.ok) return { indexText: null, state: null };
-  const indexText = readText(join(dir.value, "results.json"));
+  const indexText = readText(join(dir.value, "results.json"), x.project);
   let state: string | null = null;
-  const rec = readText(join(dir.value, "run-record.json"));
+  const rec = readText(join(dir.value, "run-record.json"), x.project);
   if (rec) { try { state = String(JSON.parse(rec).state); } catch { state = null; } }
   return { indexText, state };
 }
@@ -153,9 +162,10 @@ function viewOf(x: Ctx, recipe: Recipe, approvals = listApprovals(x.state, x.pro
     projectId: x.projectId, projectRoot: x.project, now: new Date(), sourceIndex: run.indexText, sourceRunState: run.state,
     readData: (rel) => {
       const abs = resolveInside(x.project, rel);
-      return abs.ok ? readText(abs.value) : null;
+      return abs.ok ? readText(abs.value, x.project) : null;
     },
     currentRevisions: currentRevisions(x),
+    artifactPaths: Object.fromEntries((x.manifest.artifacts as any[]).map((a) => [a.id, a.path])),
     targetTransfers: x.c.apps[recipe.target.app]?.transfer?.fields,
     approvals, applied: listApplied(x)
   };
@@ -276,7 +286,7 @@ export function applyTransferFromHost(file: string, request: unknown): Promise<H
     if (!target) return fail("E_NOT_FOUND", `the target artifact ${recipe.target.artifact} is not in the project`, "/target/artifact");
     const abs = resolveInside(x.project, target.path);
     if (!abs.ok) return { ok: false, errors: [err(abs.error.code, "/target/artifact", abs.error.message)] };
-    const targetContent = readText(abs.value);
+    const targetContent = readText(abs.value, x.project);
     if (targetContent === null) return fail("E_NOT_FOUND", "the target file cannot be read", "/target/artifact");
     if (sha256Hex(targetContent) !== target.revision.hash) return fail("E_STALE_REVISION", "the target file does not match the revision the project records", "/target/revision");
     const view = viewOf(x, recipe);
@@ -296,37 +306,68 @@ export function applyTransferFromHost(file: string, request: unknown): Promise<H
       audit(x, "apply-refused", { recipeId: id, errors: out.errors });
       return { ok: false, errors: out.errors };
     }
-    // Write the new target and its revision; anything that goes wrong puts the old file back.
+    // The commit is one critical section under the project's writer lock: everything the approval stood on (every source pin, the target, the data,
+    // the approval itself) is checked again against fresh state, then the file and its revision change together. Nothing else can commit in
+    // between, so a rollback can only ever undo this call's own write.
     const tmp = abs.value + ".transfer-" + randomBytes(6).toString("hex");
-    try {
-      const fresh = openProject(x.project);
-      if (!fresh.ok) throw Error("the project cannot be reopened");
-      const art = (fresh.value.manifest.artifacts as any[]).find((a) => a.id === recipe.target.artifact);
-      if (!art || art.revision.hash !== target.revision.hash) throw Object.assign(Error("the target changed while the transfer ran"), { code: "E_STALE_REVISION" });
-      writeFileSync(tmp, out.content, { flag: "wx" });
-      renameSync(tmp, abs.value);
-      const manifest = structuredClone(fresh.value.manifest) as Record<string, any>;
-      const entry = (manifest.artifacts as any[]).find((a) => a.id === recipe.target.artifact);
-      entry.revision = { hash: out.contentSha256, counter: art.revision.counter + 1 };
-      const saved = saveProject(x.project, manifest, fresh.value.revision);
-      if (!saved.ok) {
-        writeFileSync(abs.value + ".restore", targetContent, { flag: "w" });
-        renameSync(abs.value + ".restore", abs.value);
-        throw Object.assign(Error("the project could not record the new revision: " + (saved.errors[0]?.message ?? "")), { code: saved.errors[0]?.code });
+    let committed = false;
+    let failure: HostOutcome | undefined;
+    const locked = await withProjectLockAsync(x.project, async () => {
+      try {
+        const now = open(file);
+        const ev2 = evaluateTransfer(recipe, viewOf(now, recipe));
+        if (ev2.state !== "approved") {
+          failure = { ok: false, errors: ev2.errors.length ? ev2.errors : [err("E_STALE_REVISION", "/recipeId", `the recipe is ${ev2.state}, not approved, at the moment of the commit`)] };
+          return;
+        }
+        const fresh = openProject(x.project);
+        if (!fresh.ok) throw Error("the project cannot be reopened");
+        const art = (fresh.value.manifest.artifacts as any[]).find((a) => a.id === recipe.target.artifact);
+        if (!art || art.revision.hash !== target.revision.hash || !realInside(x.project, abs.value) || readText(abs.value, x.project) !== targetContent) {
+          throw Object.assign(Error("the target changed while the transfer ran"), { code: "E_STALE_REVISION" });
+        }
+        writeFileSync(tmp, out.content, { flag: "wx" });
+        renameSync(tmp, abs.value);
+        const manifest = structuredClone(fresh.value.manifest) as Record<string, any>;
+        const entry = (manifest.artifacts as any[]).find((a) => a.id === recipe.target.artifact);
+        entry.revision = { hash: out.contentSha256, counter: art.revision.counter + 1 };
+        const saved = saveProjectHeld(x.project, manifest, fresh.value.revision);
+        if (!saved.ok) {
+          writeFileSync(abs.value + ".restore", targetContent, { flag: "w" });
+          renameSync(abs.value + ".restore", abs.value);
+          throw Object.assign(Error("the project could not record the new revision: " + (saved.errors[0]?.message ?? "")), { code: saved.errors[0]?.code });
+        }
+        committed = true;
+      } finally {
+        if (existsSync(tmp)) rmSync(tmp, { force: true });
       }
-    } catch (e) {
-      if (existsSync(tmp)) rmSync(tmp, { force: true });
-      audit(x, "apply-failed", { recipeId: id, message: e instanceof Error ? e.message : String(e) });
-      const code = (e as { code?: unknown })?.code;
-      return fail(typeof code === "string" && /^[EW]_[A-Z0-9_]{2,40}$/.test(code) ? code : "E_INTERNAL", e instanceof Error ? e.message : "the transfer could not be written");
+    }).catch((e) => ({ ok: false as const, errors: [err(typeof (e as any)?.code === "string" && /^[EW]_[A-Z0-9_]{2,40}$/.test((e as any).code) ? (e as any).code : "E_INTERNAL", "", e instanceof Error ? e.message : "the transfer could not be written")] }));
+    if (failure) {
+      audit(x, "apply-refused", { recipeId: id, errors: (failure as { errors: TypedError[] }).errors, at: "commit" });
+      return failure;
     }
+    // Releasing the lock can fail after the work was committed: that is a committed transfer with a warning, not a failed one.
+    if (!committed) {
+      audit(x, "apply-failed", { recipeId: id, errors: (locked as { errors?: TypedError[] }).errors });
+      return { ok: false, errors: (locked as { errors?: TypedError[] }).errors ?? [err("E_INTERNAL", "", "the transfer could not be written")] };
+    }
+    const incomplete: string[] = [];
+    if (!locked.ok) incomplete.push("the writer lock could not be released cleanly: " + (locked.errors[0]?.message ?? ""));
     const record = {
       schema: "seed.transfer-applied/0.2", projectId: x.projectId, ...out.provenance, appliedAt: new Date().toISOString(), actor: x.c.actor,
       checks: out.checks ?? null, targetPath: target.path, resultSha256: sha256Hex(canonicalJson(out.provenance))
     };
-    const dir = appliedFolder(x, true)!;
-    writeHostJson(safeChild(dir, `${id}-${out.provenance.recipeDigest.slice(0, 16)}.json`), record);
-    audit(x, "apply-outcome", { ok: true, ...out.provenance });
-    return { ok: true, recipeId: id, state: "applied", provenance: out.provenance, checks: out.checks ?? null, target: { artifact: recipe.target.artifact, path: target.path, revision: { hash: out.contentSha256, counter: target.revision.counter + 1 } } };
+    try {
+      const dir = appliedFolder(x, true)!;
+      writeHostJson(safeChild(dir, `${id}-${out.provenance.recipeDigest.slice(0, 16)}.json`), record);
+    } catch (e) {
+      incomplete.push("the applied record could not be written (the recipe will show as stale until it is): " + (e instanceof Error ? e.message : String(e)));
+    }
+    try {
+      audit(x, "apply-outcome", { ok: true, ...out.provenance, ...(incomplete.length ? { incomplete } : {}) });
+    } catch (e) {
+      incomplete.push("the journal entry could not be appended: " + (e instanceof Error ? e.message : String(e)));
+    }
+    return { ok: true, recipeId: id, state: "applied", ...(incomplete.length ? { incomplete } : {}), provenance: out.provenance, checks: out.checks ?? null, target: { artifact: recipe.target.artifact, path: target.path, revision: { hash: out.contentSha256, counter: target.revision.counter + 1 } } };
   });
 }

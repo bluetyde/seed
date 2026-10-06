@@ -58,7 +58,7 @@ function world(over: { table?: (t: any) => void; recipe?: (r: any) => void } = {
   const indexText = JSON.stringify(index);
   const recipe: any = {
     schema: "seed.transfer-recipe/0.2", recipeId: "heat-to-pin-1", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
-    source: { runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "Fuel:heating", dataSha256: sha256Hex(dataText), unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: "rev-c" }] },
+    source: { runId: "run-001", resultsSha256: sha256Hex(indexText), quantity: "Fuel:heating", dataSha256: sha256Hex(dataText), unit: "eV", dimension: "energy", normalization: "per-source-particle", revisionPins: [{ artifact: "openmc-model", revision: "a".repeat(64) }] },
     target: { app: "feed", artifact: "pin-case", revision: "rev-d", field: "heating-to-pin" },
     units: { to: "W" },
     normalization: { kind: "source-rate", value: { value: RATE, unit: "1/s" }, origin: "a source rate chosen for the test" },
@@ -69,7 +69,7 @@ function world(over: { table?: (t: any) => void; recipe?: (r: any) => void } = {
   const view = (approvals: TransferView["approvals"]): TransferView => ({
     projectId: "proj-1", projectRoot: project, now: NOW, sourceIndex: indexText, sourceRunState: "completed",
     readData: (p) => (p === "runs/run-001/native/000.json" ? dataText : null),
-    currentRevisions: { "openmc-model": "rev-c", "pin-case": "rev-d" },
+    currentRevisions: { "openmc-model": "a".repeat(64), "pin-case": "rev-d" }, artifactPaths: { "openmc-model": "m.json", "pin-case": "c.json" },
     targetTransfers: runnerDescribe.transfers, approvals, applied: []
   });
   let given: ReturnType<typeof recordApproval> | undefined;

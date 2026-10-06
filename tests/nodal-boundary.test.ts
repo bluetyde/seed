@@ -67,7 +67,7 @@ async function transfer(select: { kind: "last" | "at"; t?: number }) {
   const recipe: Recipe = {
     schema: "seed.transfer-recipe/0.2", recipeId: "boundary-nodal", proposedBy: agent, proposedAt: "2026-10-06T10:00:00Z",
     source: {
-      runId, resultsSha256: sha256Hex(indexText), quantity: "t_out", dataSha256: T.data.sha256, unit: T.unit, dimension: T.dimension, normalization: "none", revisionPins: [{ artifact: "nodal-model", revision: "rev-n" }],
+      runId, resultsSha256: sha256Hex(indexText), quantity: "t_out", dataSha256: T.data.sha256, unit: T.unit, dimension: T.dimension, normalization: "none", revisionPins: [{ artifact: "nodal-model", revision: index.inputHashes[0].sha256 }],
       additional: [{ role: "heat-transfer-coefficient", quantity: "h_surf", dataSha256: H.data.sha256, unit: H.unit, dimension: H.dimension, normalization: "none" }],
     },
     target: { app: "feed", artifact: "pin-case", revision: "rev-d", field: "coolant-boundary" },
@@ -82,7 +82,7 @@ async function transfer(select: { kind: "last" | "at"; t?: number }) {
   const view: TransferView = {
     projectId: "proj-1", projectRoot: root, now: NOW, sourceIndex: indexText, sourceRunState: "completed",
     readData: (p) => (existsSync(join(root, p)) ? readFileSync(join(root, p), "utf8") : null),
-    currentRevisions: { "nodal-model": "rev-n", "pin-case": "rev-d" }, targetTransfers: accepts, approvals: [a.approval], applied: [],
+    currentRevisions: { "nodal-model": index.inputHashes[0].sha256, "pin-case": "rev-d" }, artifactPaths: { "nodal-model": index.inputHashes[0].path, "pin-case": "c.json" }, targetTransfers: accepts, approvals: [a.approval], applied: [],
   };
   const state = evaluateTransfer(recipe, view).state;
   const out = await applyTransfer({ recipe, view, actor: agent, gate, studyId: "study-1", targetContent: "{}", run: (r) => spawnTransferCommand(process.execPath, [boundaryCmd], r, 30000) });

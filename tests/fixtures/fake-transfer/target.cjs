@@ -3,6 +3,7 @@
 const fs = require("fs");
 const mode = process.env.FAKE_TRANSFER_MODE || "good";
 const request = JSON.parse(fs.readFileSync(0, "utf8"));
+if (process.env.FAKE_TRANSFER_DELAY_MS) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.FAKE_TRANSFER_DELAY_MS));
 const reply = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 if (mode === "exit") process.exit(3);
 if (mode === "reply-then-exit") { reply({ ok: true, output: { content: "{}" } }); process.exit(1); }

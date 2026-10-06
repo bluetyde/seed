@@ -165,13 +165,32 @@ describe("propose and status", () => {
   it("a recipe that would close a cycle is refused", async () => {
     const f = await fixture();
     expect((await propose(f)).ok).toBe(true);
-    // the target's artifact feeding the source's artifact would close the loop: build the reverse recipe against the same run
+    // a second run that was produced from the first recipe's target (dst-case): its result feeding src-model would close the loop
+    const run1 = JSON.parse(f.indexText);
+    const run2 = { ...run1, runId: "run-002", inputHashes: [{ path: "models/dst-case.json", sha256: sha256Hex(f.dstCase) }], quantities: run1.quantities.map((q: any) => ({ ...q, provenance: { ...q.provenance, runId: "run-002", inputRevisions: [sha256Hex(f.dstCase)] }, data: { ...q.data, path: "runs/run-002/native/quantities/000.json" } })) };
+    const run2Text = JSON.stringify(run2);
+    mkdirSync(join(f.project, "runs/run-002/native/quantities"), { recursive: true });
+    writeFileSync(join(f.project, "runs/run-002/native/quantities/000.json"), f.dataText);
+    writeFileSync(join(f.project, "runs/run-002/results.json"), run2Text);
+    writeFileSync(join(f.project, "runs/run-002/run-record.json"), JSON.stringify({ schema: "seed.run-record/0.1", runId: "run-002", state: "completed" }));
     const back: any = structuredClone(f.recipe);
     back.recipeId = "back-1";
+    back.source.runId = "run-002";
+    back.source.resultsSha256 = sha256Hex(run2Text);
     back.source.revisionPins = [{ artifact: "dst-case", revision: sha256Hex(f.dstCase) }];
     back.target = { ...back.target, artifact: "src-model", revision: sha256Hex(f.srcModel) };
     const out = await propose(f, back);
-    expect(codes(out as any).some((c) => c.startsWith("E_RECIPE_CYCLE"))).toBe(true);
+    expect(codes(out as any).some((c) => c.startsWith("E_RECIPE_CYCLE")), JSON.stringify(out)).toBe(true);
+  });
+
+  it("pins that are not inputs of the source run are refused: a stale run cannot look current", async () => {
+    const f = await fixture();
+    const r: any = structuredClone(f.recipe);
+    r.source.revisionPins = [{ artifact: "dst-case", revision: sha256Hex(f.dstCase) }]; // current, but run-001 was not made from it
+    expect(codes((await propose(f, r)) as any)).toContain("E_STALE_REVISION /source/revisionPins/0");
+    const unknown: any = structuredClone(f.recipe);
+    unknown.source.revisionPins = [{ artifact: "no-such-artifact", revision: sha256Hex(f.srcModel) }];
+    expect(codes((await propose(f, unknown)) as any)).toContain("E_NOT_FOUND /source/revisionPins/0");
   });
 
   it("an exact recipe that is already approved is not proposed again", async () => {
@@ -411,5 +430,101 @@ describe("the trusted configuration is held to its rules", () => {
     const out = await applyTransferFromHost(file, { recipeId: "heat-1" });
     expect(codes(out as any)).toContain("E_SETUP_REQUIRED /target/app");
     expect(readFileSync(dstFile(f), "utf8")).toBe(f.dstCase);
+  });
+});
+
+describe("the commit is one critical section, and nothing leaves the project (Codex review, E0 exit)", () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("two applies of one approved recipe: one commits, the other is refused, and the target and its revision agree", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f);
+    process.env.FAKE_TRANSFER_DELAY_MS = "700";
+    const [a, b] = await Promise.all([applyTransferFromHost(f.agentFile, { recipeId: "heat-1" }), applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })]);
+    delete process.env.FAKE_TRANSFER_DELAY_MS;
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
+    const loser = (a.ok ? b : a) as { ok: false; errors: { code: string }[] };
+    expect(loser.errors[0]!.code).toMatch(/^E_(STALE_REVISION|EXISTS)$/);
+    const doc = JSON.parse(readFileSync(dstFile(f), "utf8"));
+    expect(doc.from).toBe(recipeDigest(f.recipe));
+    expect(dstRevision(f)).toEqual({ hash: sha256Hex(readFileSync(dstFile(f))), counter: 2 });
+    expect(await transferStatus(f.agentFile, { recipeId: "heat-1" })).toMatchObject({ state: "applied" });
+  });
+
+  it("a source revision that changes while the mapper runs stops the commit and leaves the target alone", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f);
+    process.env.FAKE_TRANSFER_DELAY_MS = "1500";
+    const pending = applyTransferFromHost(f.agentFile, { recipeId: "heat-1" });
+    await sleep(500);
+    const p = openProject(f.project) as any;
+    const m = structuredClone(p.value.manifest);
+    m.artifacts[0].revision = { hash: sha256Hex("the source moved"), counter: 2 };
+    expect(saveProject(f.project, m, p.value.revision).ok).toBe(true);
+    const out = await pending;
+    delete process.env.FAKE_TRANSFER_DELAY_MS;
+    expect(out.ok).toBe(false);
+    expect(codes(out as any).some((c) => c.startsWith("E_STALE_REVISION"))).toBe(true);
+    expect(readFileSync(dstFile(f), "utf8")).toBe(f.dstCase);
+    expect(dstRevision(f)).toEqual({ hash: sha256Hex(f.dstCase), counter: 1 });
+  });
+
+  it("an approval that expires while the mapper runs is not honoured at the commit", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f, { expiresInHours: 0.0002 }); // 0.72 s
+    process.env.FAKE_TRANSFER_DELAY_MS = "1500";
+    const out = await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" });
+    delete process.env.FAKE_TRANSFER_DELAY_MS;
+    expect(out.ok).toBe(false);
+    expect(readFileSync(dstFile(f), "utf8")).toBe(f.dstCase);
+  });
+
+  it("an applied record that cannot be written does not turn a committed transfer into a failure; it is reported", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f);
+    const p = openProject(f.project) as any;
+    const dir = join(f.state, "transfer-applied", sha256Hex(p.value.manifest.projectId + "\n" + f.project));
+    mkdirSync(join(dir, `heat-1-${recipeDigest(f.recipe).slice(0, 16)}.json`), { recursive: true });
+    const out = await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, state: "applied" });
+    expect((out as any).incomplete.join(" ")).toMatch(/applied record could not be written/);
+    expect(JSON.parse(readFileSync(dstFile(f), "utf8")).from).toBe(recipeDigest(f.recipe));
+    expect(dstRevision(f).counter).toBe(2);
+    expect(f.journal().some((r: any) => r.event.phase === "apply-outcome" && r.event.event.incomplete)).toBe(true);
+  });
+
+  it("a linked ancestor does not move the recipe folder out of the project", async () => {
+    const f = await fixture();
+    const external = join(f.root, "external");
+    mkdirSync(join(external, "transfers"), { recursive: true });
+    try { symlinkSync(external, join(f.project, "linked"), "junction"); } catch { return; }
+    const c = f.config(f.agent);
+    c.transfersFolder = "linked/transfers";
+    const file = join(f.root, "linked-folder.json");
+    saveTransferHostConfig(file, c);
+    const out = await proposeTransfer(file, { recipe: f.recipe });
+    expect(out.ok).toBe(false);
+    expect(readdirSync(join(external, "transfers"))).toEqual([]);
+  });
+
+  it("a target reached through a linked ancestor is neither read nor written", async () => {
+    const f = await fixture();
+    await propose(f);
+    await approve(f);
+    const external = join(f.root, "external-target");
+    mkdirSync(external, { recursive: true });
+    writeFileSync(join(external, "dst-case.json"), f.dstCase);
+    try { symlinkSync(external, join(f.project, "linkdir"), "junction"); } catch { return; }
+    const p = openProject(f.project) as any;
+    const m = structuredClone(p.value.manifest);
+    m.artifacts[1].path = "linkdir/dst-case.json";
+    expect(saveProject(f.project, m, p.value.revision).ok).toBe(true);
+    const out = await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" });
+    expect(out.ok).toBe(false);
+    expect(readFileSync(join(external, "dst-case.json"), "utf8")).toBe(f.dstCase);
   });
 });
