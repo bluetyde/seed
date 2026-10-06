@@ -188,19 +188,26 @@ async function describe(reply, fail) {
   const d = parseLast(res.stdout);
   if (res.code !== 0 || !d || d.ok !== true || !d.engine || !d.modelFormat || !Array.isArray(d.quantities)) return fail(appFailed("the SNEED runner could not describe itself", res));
   const scram = d.scram && typeof d.scram === "object" ? d.scram : {};
-  const warnings = scram.installed === true ? [] : [typed("W_SOLVER_MISSING", "", "the SCRAM runtime is not installed: validate works, run will be refused", "seed")];
+  // The runner says which engine it uses by default and which are available; an older runner has SCRAM only.
+  const engines = d.engines && typeof d.engines === "object" ? d.engines : null;
+  const builtin = engines && engines.builtin && typeof engines.builtin === "object" ? engines.builtin : null;
+  const useBuiltin = !!engines && engines.default === "builtin" && !!builtin && builtin.available === true && typeof builtin.name === "string";
+  const available = [...(builtin && builtin.available === true ? ["builtin"] : []), ...(scram.installed === true ? ["scram"] : [])];
+  const warnings = useBuiltin || scram.installed === true ? [] : [typed("W_SOLVER_MISSING", "", "no analysis engine is available: the SCRAM runtime is not installed and the runner reports no built-in engine; validate works, run will be refused", "seed")];
   const methods = Array.isArray(d.methods) ? d.methods.map(String) : [];
   reply({
     ok: true,
     warnings,
     result: {
       app: { id: "pra", name: "SNEED", version: String(d.engine.version) },
-      engine: { name: "SCRAM", version: String(scram.version || "not installed") },
+      engine: useBuiltin ? { name: String(builtin.name).slice(0, 80), version: String(builtin.version || "unknown").slice(0, 40) } : { name: "SCRAM", version: String(scram.version || "not installed") },
       formats: [{ id: String(d.modelFormat.format), version: String(d.modelFormat.version) }],
       capabilities: [...(Array.isArray(d.capabilities) ? d.capabilities.map(String) : []), "validate", "run", "cancel", "collect"],
       parameters: [
         { id: "method", type: "string", enum: methods },
         { id: "limitOrder", type: "integer", min: 1, max: 1000 },
+        // Omitted: the runner's default engine (reported as the describe engine). Named: that engine or a refusal.
+        { id: "engine", type: "string", enum: engines ? available : ["scram"] },
         ...(Array.isArray(d.parameters) ? d.parameters.filter((p) => p && p.id === "event.probability").map((p) => ({ id: "event.probability", type: "number", unit: "1", min: 0, max: 1 })) : []),
       ],
       quantities: d.quantities.map((q) => ({ name: String(q.name), unit: String(q.unit), normalization: "none" })),
@@ -237,6 +244,9 @@ async function validate(request, root, reply, fail) {
 }
 
 const METHODS = ["exact", "rare-event", "mcub"];
+const ENGINES = ["builtin", "scram"];
+/** A requested engine and the engine a result names: SCRAM is named "SCRAM"; the built-in engine is anything else the runner calls itself. */
+const engineMatches = (requested, name) => (requested === "scram" ? name === "SCRAM" : name !== "SCRAM");
 
 async function run(request, root, reply, fail) {
   const cfg = config();
@@ -252,8 +262,8 @@ async function run(request, root, reply, fail) {
   }
 
   const settings = request.settings || {};
-  const unknown = Object.keys(settings).find((k) => !["model", "method", "limitOrder"].includes(k));
-  if (unknown !== undefined) return fail(typed("E_UNSUPPORTED", "/settings/" + unknown, "unknown setting; this adapter takes model, method and limitOrder"));
+  const unknown = Object.keys(settings).find((k) => !["model", "method", "limitOrder", "engine"].includes(k));
+  if (unknown !== undefined) return fail(typed("E_UNSUPPORTED", "/settings/" + unknown, "unknown setting; this adapter takes model, method, limitOrder and engine"));
   // The analysis is deterministic: there is no seed to set.
   if (request.seed !== undefined) return fail(typed("E_UNSUPPORTED", "/seed", "the analysis is deterministic; a seed does nothing, so a request that sets one is refused"));
   let modelPath = typeof settings.model === "string" ? settings.model : null;
@@ -267,6 +277,8 @@ async function run(request, root, reply, fail) {
     if (!Number.isInteger(settings.limitOrder) || settings.limitOrder < 1 || settings.limitOrder > 1000) return fail(typed("E_BOUNDS_EXCEEDED", "/settings/limitOrder", "limitOrder must be a whole number from 1 to 1000"));
     limitOrder = settings.limitOrder;
   }
+  if (settings.engine !== undefined && !ENGINES.includes(settings.engine)) return fail(typed("E_UNSUPPORTED", "/settings/engine", "engine must be one of " + ENGINES.join(", ")));
+  const engine = settings.engine;
   // Only the wall-clock budget is enforced (SCRAM is single-threaded; memory and disk are not limited by the runner).
   const budget = request.budget || {};
   const timeoutSeconds = Math.min(Math.max(Number.isInteger(budget.maxWallSeconds) ? budget.maxWallSeconds : 60, 10), 86400);
@@ -283,10 +295,10 @@ async function run(request, root, reply, fail) {
   if (preOut.ok !== true) return fail(...(mapErrors(preOut.errors).length > 0 ? mapErrors(preOut.errors) : [typed("E_APP_FAILED", "", "the runner refused the model without giving a reason", "app-content")]));
 
   const outAbs = path.join(absRunDir, "native", "out");
-  const runArgs = ["run", modelAbs, "--out", outAbs, "--run-id", RUN_ID, "--method", method, ...(limitOrder !== undefined ? ["--limit-order", String(limitOrder)] : []), "--timeout-seconds", String(timeoutSeconds)];
+  const runArgs = ["run", modelAbs, "--out", outAbs, "--run-id", RUN_ID, "--method", method, ...(engine !== undefined ? ["--engine", engine] : []), ...(limitOrder !== undefined ? ["--limit-order", String(limitOrder)] : []), "--timeout-seconds", String(timeoutSeconds)];
   return startJob({
     root, request, absRunDir, reply, fail,
-    record: { model: modelPath, method, limitOrder, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) },
+    record: { model: modelPath, method, limitOrder, engine, inputs: inputs.map((i) => ({ path: i.path, sha256: i.sha256 })) },
     runSpec: launchSpec(cfg, runArgs),
     cancelSpec: launchSpec(cfg, ["cancel", "--out", outAbs]),
     stopNative: () => stopNative(cfg, path.join(absRunDir, "native")),
@@ -410,13 +422,18 @@ function collect(request, root, reply, fail) {
 
   const caveats = Array.isArray(results.caveats) ? results.caveats.map((c) => String(c).slice(0, 300)).slice(0, 20) : [];
   const warnings = [...mapWarnings(results.warnings), ...caveats.map((c) => typed("W_PRA_CAVEAT", "", c, "app-content"))];
+  // The engine is what the result says it was made by, not what this adapter expects: the runner's default can change.
   const eng = results.engine && typeof results.engine === "object" ? results.engine : {};
+  const meng = manifest.engine && typeof manifest.engine === "object" ? manifest.engine : {};
+  if (typeof eng.name !== "string" || eng.name.length === 0 || eng.name.length > 80 || typeof eng.version !== "string" || eng.version.length === 0 || eng.version.length > 40) return incomplete("the result does not name its engine and version", "/engine");
+  if (meng.name !== eng.name || meng.version !== eng.version) return incomplete("the manifest and the result name different engines", "/engine");
+  if (job.engine !== undefined && !engineMatches(job.engine, eng.name)) return incomplete("the result was made by " + eng.name + ", not the requested engine " + job.engine, "/engine");
   const index = {
     schema: "seed.results-index/0.1",
     runId,
     status: "completed",
     adapter: ADAPTER,
-    engine: { name: "SCRAM", version: String(eng.version || "unknown") },
+    engine: { name: eng.name, version: eng.version },
     inputHashes: job.inputs.map((i) => ({ path: i.path, sha256: i.sha256 })),
     nativeStatus: { status: "finished", detail: "SNEED " + job.method + " analysis completed: " + sets.length + " minimal cut sets" },
     quantities,

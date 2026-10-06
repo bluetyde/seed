@@ -18,9 +18,13 @@ const repo = candidates.find(p => p && existsSync(join(p, "dist", "node", "cli",
 const runner = join(repo, "dist", "node", "cli", "headless.js");
 const modelsDir = join(repo, "oracles", "seed", "models");
 const describeOut = repo ? spawnSync(process.execPath, [runner, "describe"], { encoding: "utf8" }) : null;
-const haveScram = !!describeOut && describeOut.status === 0 && JSON.parse(describeOut.stdout.trim().split("\n").pop() ?? "{}").scram?.installed === true;
+const runnerDescribe: Record<string, any> = describeOut && describeOut.status === 0 ? JSON.parse(describeOut.stdout.trim().split("\n").pop() ?? "{}") : {};
+const haveScram = runnerDescribe.scram?.installed === true;
+const haveBuiltin = runnerDescribe.engines?.builtin?.available === true;
 const haveModels = repo !== "" && existsSync(join(modelsDir, "pra-vote-exact.json"));
-const havePra = haveScram && haveModels;
+const havePra = (haveScram || haveBuiltin) && haveModels;
+/** What the runner itself calls its default engine: the adapter must report this, never a name of its own. */
+const defaultEngine = runnerDescribe.engines?.default === "builtin" ? { name: runnerDescribe.engines.builtin.name, version: runnerDescribe.engines.builtin.version } : { name: "SCRAM", version: runnerDescribe.scram?.version };
 
 const spec = { command: process.execPath, args: [join(__dirname, "..", "adapters", "pra", "cli.cjs")], id: "pra", version: "0.1.0" };
 const actor = { kind: "human" as const, name: "tester" };
@@ -125,7 +129,8 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       const r = okReply(await ask(tmpDir(), { verb: "describe" }));
       expect(r.ok).toBe(true);
       expect(r.result.app).toMatchObject({ id: "pra", name: "SNEED" });
-      expect(r.result.engine.name).toBe("SCRAM");
+      expect(r.result.engine).toEqual(defaultEngine);
+      expect(r.result.parameters.find((p: Vec) => p.id === "engine").enum).toEqual([...(haveBuiltin ? ["builtin"] : []), ...(haveScram ? ["scram"] : [])]);
       expect(r.result.formats).toEqual([{ id: "sneed.fault-tree", version: "1" }]);
       expect(r.result.parameters.find((p: Vec) => p.id === "method").enum).toEqual(["exact", "rare-event", "mcub"]);
       expect(r.result.quantities.map((q: Vec) => q.name)).toEqual(["top_event_probability", "minimal_cut_sets", "approximation_value"]);
@@ -171,7 +176,9 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       expect(validate("results-index", index)).toEqual({ ok: true });
       expect(checkResultsIndex(index)).toEqual([]);
       expect(checkResultsAgainstRecord(index, out.record)).toEqual([]);
-      expect(index.engine.name).toBe("SCRAM");
+      const native = read(join(p.root, "runs", out.runId, "native", "out", "pra", "results.json"));
+      expect(index.engine).toEqual({ name: native.engine.name, version: native.engine.version });
+      expect(index.engine).toEqual(defaultEngine);
       expect(index.quantities.map((q: Vec) => q.name)).toEqual(["top_event_probability", "minimal_cut_sets"]);
       for (const q of index.quantities) {
         expect(q).toMatchObject({ unit: "1", normalization: "none", verification: "unverified" });
@@ -188,6 +195,47 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       expect(index.extensions.pra.documentHash).toBe(p.inputs[0]!.sha256);
       expect(index.extensions.pra.meaning).toContain("Not a frequency");
     }, 300000);
+
+    describe("the engine label is the runner's, not the adapter's", () => {
+      const engines = [...(haveBuiltin ? ["builtin"] : []), ...(haveScram ? ["scram"] : [])];
+      it.each(engines)("a run with engine %s is labelled by what that engine reports", async (engine) => {
+        const p = praProject("pra-vote-exact", () => {}, { engine });
+        const out = await start(p, "req-engine-" + engine);
+        if (!out.ok) throw new Error(JSON.stringify(out.errors));
+        expect(out.state).toBe("completed");
+        const index = read(join(p.root, "runs", out.runId, "results.json"));
+        const native = read(join(p.root, "runs", out.runId, "native", "out", "pra", "results.json"));
+        expect(index.engine).toEqual({ name: native.engine.name, version: native.engine.version });
+        expect(index.engine.name === "SCRAM").toBe(engine === "scram");
+      }, 300000);
+
+      it("an engine the adapter does not know is refused before a job exists", async () => {
+        const p = praProject("pra-vote-exact", () => {}, { engine: "magic" });
+        const out = await start(p, "req-engine-bad");
+        expect(out.ok).toBe(false);
+        if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_UNSUPPORTED", field: "/settings/engine" });
+        expect(readdirSync(join(p.root, "runs"))).toEqual([]);
+      }, 120000);
+
+      it.skipIf(!haveBuiltin)("collect refuses a result made by another engine than the one requested", async () => {
+        const p = praProject("pra-vote-exact", () => {}, { engine: "builtin" });
+        const out = await start(p, "req-engine-mismatch");
+        if (!out.ok) throw new Error("refused");
+        const runDir = join(p.root, "runs", out.runId), outDir = join(runDir, "native", "out", "pra");
+        const res = read(join(outDir, "results.json")), man = read(join(outDir, "manifest.json"));
+        res.engine = { ...res.engine, name: "SCRAM" };
+        man.engine = { ...man.engine, name: "SCRAM" };
+        const text = JSON.stringify(res, null, 2) + "\n";
+        writeFileSync(join(outDir, "results.json"), text);
+        man.files.find((f: Vec) => f.path === "results.json").sha256 = sha256Hex(text);
+        writeFileSync(join(outDir, "manifest.json"), JSON.stringify(man, null, 2));
+        const jobId = read(join(runDir, "native", "job.json")).jobId;
+        const r = okReply(await ask(p.root, { verb: "collect", jobId, runDir: `runs/${out.runId}` }));
+        expect(r.ok).toBe(false);
+        expect(r.errors[0]?.code).toBe("E_OUTPUT_INCOMPLETE");
+        expect(r.errors[0]?.message).toContain("not the requested engine");
+      }, 300000);
+    });
 
     it("an approximation method adds the approximation value, and says which method made it", async () => {
       const p = praProject("pra-vote-exact", () => {}, { method: "rare-event" });
@@ -241,8 +289,8 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       expect(existsSync(join(p.root, "runs", "direct", "native", "job.json"))).toBe(false);
     }, 300000);
 
-    it("cancel stops SCRAM inside WSL through the runner and the Windows processes, and collects nothing", async () => {
-      const p = praProject("pra-vote-exact", m => slowTree(m));
+    it.skipIf(!haveScram)("cancel stops SCRAM inside WSL through the runner and the Windows processes, and collects nothing", async () => {
+      const p = praProject("pra-vote-exact", m => slowTree(m), { engine: "scram" });
       const mgr = manager(p.root);
       const started = mgr.start({ requestId: "req-cancel", actor, artifact: p.artifact, inputs: p.inputs, budget, settings: p.settings });
       const runId = await waitForChild(p.root);
@@ -284,6 +332,8 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
         ["a truncated result (re-hashed)", outDir => rehash(outDir, r => { r.completeness = "truncated"; }), "completed, complete"],
         ["a probability above one (re-hashed)", outDir => rehash(outDir, r => { r.top_event_probability = 1.5; }), "outside [0, 1]"],
         ["a result for other settings than requested (re-hashed)", outDir => rehash(outDir, r => { r.settings.method = "mcub"; }), "other settings"],
+        ["a result that names a different engine than its manifest (re-hashed)", outDir => rehash(outDir, r => { r.engine.name = r.engine.name === "SCRAM" ? "sneed-bdd" : "SCRAM"; }), "different engines"],
+        ["a result with no engine name (re-hashed)", outDir => rehash(outDir, r => { delete r.engine.name; }), "does not name its engine"],
         ["a malformed cut set (re-hashed)", outDir => rehash(outDir, r => { r.minimal_cut_sets[0].events = []; }), "cut sets"],
       ];
       for (const [what, edit, message] of edits) {
@@ -300,8 +350,8 @@ describe.skipIf(!havePra)("PRA adapter against the real runner", () => {
       }
     }, 900000);
 
-    it("a request id already bound to another run folder is refused and the first job is untouched", async () => {
-      const p = praProject("pra-vote-exact", m => slowTree(m));
+    it.skipIf(!haveScram)("a request id already bound to another run folder is refused and the first job is untouched", async () => {
+      const p = praProject("pra-vote-exact", m => slowTree(m), { engine: "scram" });
       for (const d of ["runs/original", "runs/second"]) {
         mkdirSync(join(p.root, d, "inputs", "models"), { recursive: true });
         writeFileSync(join(p.root, d, "inputs", p.modelPath), readFileSync(join(p.root, p.modelPath)));
