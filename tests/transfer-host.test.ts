@@ -155,7 +155,7 @@ describe("propose and status", () => {
 
   it("the gate decides: tier A1 may not propose, and a target whose oracle set fails blocks it", async () => {
     const lowTier = await fixture({ tier: "A1" });
-    expect(codes((await propose(lowTier)) as any)).toContain("E_NOT_PERMITTED ");
+    expect(codes((await propose(lowTier)) as any)).toContain("E_NOT_PERMITTED /operation");
     const blocked = await fixture({ blockedTarget: true });
     const out = await propose(blocked);
     expect(out.ok).toBe(false);
@@ -219,7 +219,7 @@ describe("approval is human and exact", () => {
     const edited = { ...f.recipe, tolerance: { ...f.recipe.tolerance, conservation: 0.5 } };
     writeFileSync(join(f.project, "transfers/heat-1.json"), JSON.stringify(edited));
     expect(await transferStatus(f.agentFile, { recipeId: "heat-1" })).toMatchObject({ ok: true, state: "proposed" });
-    expect(codes((await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })) as any)).toContain("E_NOT_PERMITTED /approval");
+    expect(codes((await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })) as any)).toContain("E_NOT_PERMITTED /operation");
   });
 });
 
@@ -260,7 +260,7 @@ describe("apply", () => {
     expect((await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })).ok).toBe(false);
     await approve(f, { expiresInHours: 0.00002 });
     await new Promise((r) => setTimeout(r, 250));
-    expect(codes((await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })) as any)).toContain("E_NOT_PERMITTED /approval");
+    expect(codes((await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })) as any)).toContain("E_NOT_PERMITTED /operation");
     // a source change after approval
     const g = await fixture();
     await propose(g);
