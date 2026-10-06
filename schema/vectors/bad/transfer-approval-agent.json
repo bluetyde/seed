@@ -3,6 +3,7 @@
   "approvalId": "appr-1",
   "projectId": "proj-1",
   "projectRoot": "C:/projects/demo",
+  "studyId": "study-1",
   "recipeId": "heat-to-pin-1",
   "recipeDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
   "inputRevisions": [
@@ -16,6 +17,11 @@
     }
   ],
   "approvedBy": {
+    "kind": "agent",
+    "name": "claude"
+  },
+  "grantedTo": {
+    "model": "opus",
     "kind": "agent",
     "name": "claude"
   },
