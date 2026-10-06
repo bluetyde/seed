@@ -26,7 +26,7 @@ E2 is **not ready to exit**. What the milestone asked for is largely done and be
 - Done since the milestone was written: the first real adapter and four more (RAFT, FEED, NODAL, OpenMC Studio, SNEED), each with app-owned oracle entries, a hash-pinned oracle set recorded with the app commit, direct-agreement tests (RAFT `raft-direct-agreement`, parity with the direct runner for the others), guarded CLI and stdio MCP, owner-mediated cancel and human recovery, and report export. The contracts were signed off final on 2026-10-05 (the TODO line that says the user has not said yes is stale).
 - **Open 1, closed 2026-10-06:** "standalone launch of the app unchanged by its adapter" is now checked against the real apps: every real oracle run leaves the app's own folder as found (a fingerprint test at the end of each oracle file) and each registered app starts with its own command, without SEED variables, and answers its health path (`tests/standalone-launch.test.ts`).
 - **Open 2, closed 2026-10-06:** per-adapter resource figures are measured and reported in `describe.resources` (contracts section 12.3). They are information; the host still enforces only wall time, and memory and disk stay advisory.
-- **Open 3:** the concurrency limits of the run manager and project store that Codex found again (L4 to L6 below) were already known after the first review and are not yet closed.
+- **Open 3, closed 2026-10-06 (L4 reduced, L6 wall limit pending your decision; see "Closed after the sign-off"):** the concurrency limits of the run manager and project store that Codex found again (L4 to L6 below) were already known after the first review and are not yet closed.
 - **Open 4:** the study record and report limits (L7 to L9), and a failed oracle evaluation having no durable transition (L1).
 
 ## What Codex found, and what was done
@@ -78,9 +78,9 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 - **L1** A failed oracle evaluation of unchanged inputs has no durable transition (see above).
 - **L2** Accepting changed oracle pins records no approval (identity, reason).
 - **L3** Material acceptance has no host operation and so no record (E1).
-- **L4** Lock takeover by age (paused contender; foreign host after 600 s).
-- **L5** Recovery can remove a live manager's reservation.
-- **L6** Direct multi-process `RunManager` use: idempotency lookup order, request map, wall limit outside the payload hash.
+- **L4** Lock takeover by age (paused contender; foreign host after 600 s). **Reduced 2026-10-06**: heartbeat, and a writer that lost its lock is refused (see Closed after the sign-off).
+- **L5** Recovery can remove a live manager's reservation. **Closed 2026-10-06.**
+- **L6** Direct multi-process `RunManager` use: idempotency lookup order, request map, wall limit outside the payload hash. **Order and map closed 2026-10-06; the wall limit stays as it is, pending your decision.**
 - **L7** `report.md` is not in the receipt.
 - **L8** The report builder library does not itself verify the chain length or the plotted values.
 - **L9** The builder appends runs that no study step references.
@@ -91,6 +91,17 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 **E0 is signed off.** The user, in chat on 2026-10-06 after each limit had been explained one by one: "accept all ten, sign off E0". Limits L1 to L10 are accepted as known limits of E0; they stay listed here and in TODO.md so they are not forgotten (the strongest candidate to close first is L1, the durable oracle-failure transition; L2 is small once a reviewer record exists; L3 is E1 work). Material preservation moves to E1. A change to a contract from here is a new schema version with a migration, as for the v0.1 sign-off of 2026-10-05.
 
 **E2 stays open** (the four open items above); the user has not decided its order yet. Suggested order, with the reasons given in chat: the standalone-launch check, the resource limits in `describe`, one concurrency task for L4 to L6, then L7.
+
+## Closed after the sign-off
+
+**L4 to L6 (2026-10-06, E2 step 3, tests in `tests/project-store.test.ts` and `tests/concurrency.test.ts`, each fix shown to be needed by a mutation):**
+
+- **L4, lock takeover by age.** A holder that waits asynchronously (`withProjectLockAsync`) now writes a heartbeat (`.seed/lock/beat`, every staleMs / 4, at most 30 s); a lock of another host counts as abandoned only after staleMs of silence, not after staleMs from its acquisition, so a long adapter call is no longer taken over. A writer that did lose its lock is stopped: `saveProjectHeld` looks at the lock's owner token just before it writes and refuses (`E_PROJECT_LOCKED`, "nothing was saved") when the lock is no longer this writer's or was never held. Not closed, and cannot be without operating-system locks: a holder that is silent for staleMs on another host while still alive loses its lock, and the window between the last look and the rename of the manifest is small but not zero. The revision check (stale saves are refused) still guards the data in that window.
+- **L5, recovery deletes a live reservation.** A request reservation now records its holder (`owner.json`: process, host, time). `recover()` removes only a reservation whose holder is dead on this host, or that has no owner and is older than 5 s; a reservation of another host is never judged abandoned there (a process id says nothing about it).
+- **L6, idempotency and request map.** The request log is read again once the reservation is held, so a request that another manager finished in between is replayed (same run) instead of started twice, and a changed payload is still a conflict. Adding to the request log runs under a short lock (`requests.json.lock`: owner recorded, dead owner taken over, waits up to 10 s, then refuses), so two processes cannot overwrite each other's entries (three processes adding 40 entries each lose none).
+- **L6, wall limit outside the payload hash: left as it is, for your decision.** A retry with the same request id and a different wall limit joins the run that exists, because the limit is deliberately not part of the payload hash. The alternative is to make it part of the hash (a changed limit becomes a conflict). I recommend leaving it: the limit bounds the run and does not change what it computes.
+
+L1 to L3 and L7 to L10 are unchanged.
 
 ## What I ask
 
