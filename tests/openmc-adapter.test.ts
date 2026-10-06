@@ -187,6 +187,20 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       }
     }, 300000);
 
+    it("the project's source rate is passed on as information (and absent when the project has none)", async () => {
+      const without = openmcProject();
+      const o1 = await start(without, "req-no-rate");
+      if (!o1.ok) throw new Error(JSON.stringify(o1.errors));
+      expect(read(join(without.root, "runs", o1.runId, "results.json")).extensions.openmc.sourceRate).toBeUndefined();
+      const withRate = openmcProject(p => { p.settings.sourceRate = 2.5e9; });
+      const o2 = await start(withRate, "req-rate");
+      if (!o2.ok) throw new Error(JSON.stringify(o2.errors));
+      const index = read(join(withRate.root, "runs", o2.runId, "results.json"));
+      expect(index.extensions.openmc.sourceRate).toEqual({ value: 2.5e9, unit: "1/s", origin: "the project's Source emission rate setting" });
+      expect(index.extensions.openmc.frame).toBe("openmc-model");
+      expect(validate("results-index", index)).toEqual({ ok: true });
+    }, 600000);
+
     it("a hand-edited script is refused before anything is reserved or run", async () => {
       const p = openmcProject();
       const edited = readFileSync(join(p.root, p.modelPath), "utf8") + "\nopen('evil.txt','w').write('x')\n";
