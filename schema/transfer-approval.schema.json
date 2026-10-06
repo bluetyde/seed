@@ -7,6 +7,7 @@
     "approvalId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
     "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
     "projectRoot": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "studyId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
     "recipeId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
     "recipeDigest": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256" },
     "inputRevisions": {
@@ -31,10 +32,11 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 80 }
       }
     },
+    "grantedTo": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor" },
     "approvedAt": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" },
     "expires": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" },
     "grantId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" }
   },
-  "required": ["schema", "approvalId", "projectId", "projectRoot", "recipeId", "recipeDigest", "inputRevisions", "approvedBy", "approvedAt", "expires", "grantId"],
+  "required": ["schema", "approvalId", "projectId", "projectRoot", "studyId", "recipeId", "recipeDigest", "inputRevisions", "approvedBy", "grantedTo", "approvedAt", "expires", "grantId"],
   "additionalProperties": false
 }
