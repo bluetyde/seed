@@ -255,6 +255,32 @@
                   }
                 }
               },
+              "transfers": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "required": ["field", "accepts"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
+                    "accepts": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "required": ["dimension"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "dimension": { "type": "string", "minLength": 1, "maxLength": 40 },
+                          "normalization": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/normalization" }
+                        }
+                      }
+                    },
+                    "parameters": { "type": "object" }
+                  }
+                }
+              },
               "oraclePin": {
                 "type": "object",
                 "required": ["sha256", "commit"],

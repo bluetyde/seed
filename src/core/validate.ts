@@ -18,7 +18,9 @@ export type Family =
   | "run-record"
   | "project"
   | "study"
-  | "oracle";
+  | "oracle"
+  | "transfer-recipe"
+  | "transfer-approval";
 
 export const FAMILIES: readonly Family[] = [
   "adapter-request",
@@ -27,11 +29,16 @@ export const FAMILIES: readonly Family[] = [
   "run-record",
   "project",
   "study",
-  "oracle"
+  "oracle",
+  "transfer-recipe",
+  "transfer-approval"
 ] as const;
 
 /** Index versions the host reads: v0.2 adds the optional `dimension` of a quantity. */
 export const RESULTS_INDEX_SCHEMAS: readonly string[] = ["seed.results-index/0.1", "seed.results-index/0.2"];
+
+/** Families that start at v0.2 (they did not exist in v0.1). */
+const FIRST_VERSION: Partial<Record<Family, string>> = { "transfer-recipe": "0.2", "transfer-approval": "0.2" };
 
 const schemaDir = path.join(__dirname, "..", "..", "schema");
 
@@ -118,7 +125,7 @@ export function validate(
 
   const record = data as Record<string, unknown>;
   if (typeof record.schema === "string" && /^seed\.[a-z-]+\/[0-9]+\.[0-9]+$/.test(record.schema)) {
-    const accepted = family === "results-index" ? RESULTS_INDEX_SCHEMAS.includes(record.schema) : record.schema === `seed.${family}/0.1`;
+    const accepted = family === "results-index" ? RESULTS_INDEX_SCHEMAS.includes(record.schema) : record.schema === `seed.${family}/${FIRST_VERSION[family] ?? "0.1"}`;
     if (!accepted) {
       return {
         ok: false,

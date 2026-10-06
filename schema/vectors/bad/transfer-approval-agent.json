@@ -1,0 +1,25 @@
+{
+  "schema": "seed.transfer-approval/0.2",
+  "approvalId": "appr-1",
+  "projectId": "proj-1",
+  "projectRoot": "C:/projects/demo",
+  "recipeId": "heat-to-pin-1",
+  "recipeDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "inputRevisions": [
+    {
+      "artifact": "openmc-model",
+      "revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "artifact": "pin-case",
+      "revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "approvedBy": {
+    "kind": "agent",
+    "name": "claude"
+  },
+  "approvedAt": "2026-10-06T11:00:00Z",
+  "expires": "2026-10-07T11:00:00Z",
+  "grantId": "grant-1"
+}

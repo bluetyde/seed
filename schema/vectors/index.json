@@ -1484,5 +1484,87 @@
     "file": "good/study-full-conclusion.json",
     "family": "study",
     "valid": true
+  },
+  {
+    "file": "good/transfer-recipe-full.json",
+    "family": "transfer-recipe",
+    "valid": true
+  },
+  {
+    "file": "good/transfer-approval-full.json",
+    "family": "transfer-approval",
+    "valid": true
+  },
+  {
+    "file": "bad/transfer-recipe-unknown-prop.json",
+    "family": "transfer-recipe",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/surprise"
+    }
+  },
+  {
+    "file": "bad/transfer-recipe-extrapolation-allowed.json",
+    "family": "transfer-recipe",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/mapping/extrapolation"
+    }
+  },
+  {
+    "file": "bad/transfer-recipe-tolerance-zero.json",
+    "family": "transfer-recipe",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/tolerance/conservation"
+    }
+  },
+  {
+    "file": "bad/transfer-recipe-no-normalization.json",
+    "family": "transfer-recipe",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/normalization"
+    }
+  },
+  {
+    "file": "bad/transfer-recipe-no-pins.json",
+    "family": "transfer-recipe",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/source/revisionPins"
+    }
+  },
+  {
+    "file": "bad/transfer-approval-agent.json",
+    "family": "transfer-approval",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/approvedBy/kind"
+    }
+  },
+  {
+    "file": "bad/transfer-approval-no-digest.json",
+    "family": "transfer-approval",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/recipeDigest"
+    }
+  },
+  {
+    "file": "bad/transfer-approval-one-revision.json",
+    "family": "transfer-approval",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/inputRevisions"
+    }
   }
 ]

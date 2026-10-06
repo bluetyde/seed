@@ -1,0 +1,40 @@
+{
+  "$id": "https://seed.invalid/schema/transfer-approval.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "seed.transfer-approval/0.2" },
+    "approvalId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
+    "projectId": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "projectRoot": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "recipeId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
+    "recipeDigest": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256" },
+    "inputRevisions": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["artifact", "revision"],
+        "additionalProperties": false,
+        "properties": {
+          "artifact": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
+          "revision": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    },
+    "approvedBy": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "human" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "approvedAt": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" },
+    "expires": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" },
+    "grantId": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" }
+  },
+  "required": ["schema", "approvalId", "projectId", "projectRoot", "recipeId", "recipeDigest", "inputRevisions", "approvedBy", "approvedAt", "expires", "grantId"],
+  "additionalProperties": false
+}
