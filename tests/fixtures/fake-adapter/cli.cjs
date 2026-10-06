@@ -835,6 +835,8 @@ process.stdin.on("end", async () => {
             path:
               collectMode === "missing-data-file"
                 ? `${request.runDir}/native/nope.json`
+                : collectMode === "directory-data"
+                  ? `${request.runDir}/native`
                 : collectMode === "outside-run-data"
                   ? inputHashes[0].path
                   : `${request.runDir}/native/out.json`,
@@ -858,7 +860,7 @@ process.stdin.on("end", async () => {
       result: {
         jobId: request.jobId,
         lifecycle: "completed",
-        resultsIndex: `${request.runDir}/results.json`,
+        resultsIndex: collectMode === "directory-index" ? `${request.runDir}/native` : `${request.runDir}/results.json`,
         resultsSha256: collectMode === "bad-index-hash" ? "0".repeat(64) : resultsSha256,
       },
     });

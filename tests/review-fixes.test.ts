@@ -211,6 +211,9 @@ describe("run manager: filesystem containment (review: symlinks, outputs outside
     ["outside-run-data", "/quantities/0/data/path"],
     ["bad-input-hashes", "/inputHashes"],
     ["bad-provenance", "/quantities/0/provenance/inputRevisions"],
+    // an output that exists but cannot be read (here a folder where a file should be): a failed run with the cause on the record, never a run left "running"
+    ["directory-data", "/quantities/0/data/path"],
+    ["directory-index", "/resultsIndex"],
   ] as const) {
     it("a collect with " + mode + " ends failed with E_OUTPUT_INCOMPLETE at " + field, async () => {
       const { proj, req, mgr } = modelProject();
