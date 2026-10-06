@@ -159,7 +159,7 @@ describe.skipIf(!have)("OpenMC heating as a transfer source (real OpenMC)", () =
       target: { app: "feed", artifact: "pin-case", revision: "rev-case", field: "heating-to-pin" },
       units: { to: "W" },
       normalization: { kind: "source-rate", value: { value: rate, unit: "1/s" }, origin: "a source rate chosen for the test" },
-      mapping: { spatial: { pin: "2,2", frame: "openmc-model", slices: [{ id: "s1", z: { min: 0, max: 0.02 } }, { id: "s2", z: { min: 0.02, max: 0.04 } }], applyTo: "s1", columns: { pin: "xy" } }, time: { kind: "steady" }, extrapolation: "refused" },
+      mapping: { spatial: { pin: "2,2", frame: "openmc-model", slices: [{ id: "s1", z: { min: 0, max: 0.016 } }, { id: "s2", z: { min: 0.016, max: 0.04 } }], applyTo: "s1", columns: { pin: "xy" } }, time: { kind: "steady" }, extrapolation: "refused" },
       tolerance: { conservation: 1e-6, fixedBefore: "mapping" },
     };
     const stateRoot = mkdtempSync(join(tmpdir(), "seed openmc heating state "));
@@ -174,7 +174,7 @@ describe.skipIf(!have)("OpenMC heating as a transfer source (real OpenMC)", () =
     const out = await applyTransfer({ recipe, view, actor: agent, gate, studyId: "study-1", targetContent: readFileSync(feedCase, "utf8"), run: (r) => spawnTransferCommand(process.execPath, [feedBundle, "transfer"], r, 60000) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     if (!out.ok) return;
-    const expected = ((bins[0]! + bins[1]!) * rate * EV_J) / 0.02;
+    const expected = ((bins[0]! + bins[1]!) * rate * EV_J) / 0.016; // the first slice is the first two bins of 0.8 cm
     const got = JSON.parse(out.content).power.linearHeatRate;
     expect(got.unit).toBe("W/m");
     expect(Math.abs(got.value - expected) / expected).toBeLessThan(1e-9);
