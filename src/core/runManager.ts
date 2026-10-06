@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { callAdapter, type AdapterSpec } from "./adapterClient";
 import { appendLine, writeFileAtomic } from "./atomicFile";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { isPortableRelative, resolveInside } from "./paths";
+import { isAlive } from "./procTree";
 import { checkResultsAgainstRecord, checkResultsIndex } from "./semantic";
 import { RESULTS_INDEX_SCHEMAS, validate, type TypedError } from "./validate";
 
@@ -26,6 +28,8 @@ export type RunManagerOptions = {
   callTimeoutMs?: number;
   /** Trusted host records launch intent and the adapter-issued native identity outside project files. */
   onLaunch?: (identity: { requestId: string; runId: string; jobId?: string; nativeProcesses?: number[] }) => void;
+  /** Test hook: runs after the request log was read and before the request id is reserved (to make another manager finish in between). */
+  testHooks?: { beforeReserve?: () => Promise<void> | void };
 };
 
 export type StartRequest = {
@@ -163,7 +167,78 @@ function computePayloadHash(req: StartRequest): string {
   return sha256Hex(canonicalJson(sanitized));
 }
 
-function updateRequestsFile(
+const sleepMs = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/**
+ * Runs `fn` with exclusive use of the request log. Two managers (two processes) that each read the log, add their own entry and write it
+ * back would lose one entry, and a lost entry lets that request id start a second run. The lock is a folder next to the log, held for
+ * milliseconds; its owner is recorded, and a lock whose owner is gone (this host) or silent for `staleMs` is taken over.
+ */
+export function withRequestsLock<T>(requestsJsonPath: string, fn: () => T, opts?: { waitMs?: number; staleMs?: number }): T {
+  const lockDir = requestsJsonPath + ".lock";
+  const waitMs = opts?.waitMs ?? 10000;
+  const staleMs = opts?.staleMs ?? 30000;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString() }));
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (reservationAbandoned(lockDir, staleMs)) {
+        rmSync(lockDir, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) throw new Error("the request log is in use by another manager (" + lockDir + ")");
+      sleepMs(10);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * True when the owner of a folder-based claim (a request reservation or the request-log lock) is gone: on this host its process is dead,
+ * or it names no owner and the folder is older than `graceMs` (a folder is created before its owner file is written). A claim of
+ * another host is never judged abandoned here, because a process id says nothing about it; it ends when its manager ends it.
+ */
+function reservationAbandoned(dir: string, graceMs: number): boolean {
+  let owner: { pid?: unknown; host?: unknown } | null = null;
+  try {
+    owner = JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")) as { pid?: unknown; host?: unknown } | null;
+  } catch {
+    owner = null;
+  }
+  if (owner !== null && typeof owner === "object" && typeof owner.pid === "number" && typeof owner.host === "string") {
+    if (owner.host !== os.hostname()) return false;
+    try {
+      return !isAlive(owner.pid);
+    } catch {
+      return false;
+    }
+  }
+  try {
+    return Date.now() - statSync(dir).mtimeMs > graceMs;
+  } catch {
+    return false;
+  }
+}
+
+export function updateRequestsFile(
+  requestsJsonPath: string,
+  requestId: string,
+  entry: { payloadHash: string; runId: string }
+): void {
+  withRequestsLock(requestsJsonPath, () => updateRequestsFileLocked(requestsJsonPath, requestId, entry));
+}
+
+function updateRequestsFileLocked(
   requestsJsonPath: string,
   requestId: string,
   entry: { payloadHash: string; runId: string }
@@ -188,6 +263,7 @@ export class RunManager {
   private readonly pollMs: number;
   private readonly callTimeoutMs: number;
   private readonly onLaunch?: RunManagerOptions["onLaunch"];
+  private readonly testHooks?: RunManagerOptions["testHooks"];
 
   private inFlightByRequestId = new Map<string, InFlightRequest>();
   private inFlightRuns = new Map<string, InFlightRun>();
@@ -201,6 +277,7 @@ export class RunManager {
     this.pollMs = opts.pollMs ?? 200;
     this.callTimeoutMs = opts.callTimeoutMs ?? 15000;
     this.onLaunch = opts.onLaunch;
+    this.testHooks = opts.testHooks;
   }
 
   public transition(runId: string, to: string, reason: string): void {
@@ -383,56 +460,15 @@ export class RunManager {
     }
     const requestsMap = requestsRead.map;
 
-    const existingEntry = Object.hasOwn(requestsMap, req.requestId) ? requestsMap[req.requestId] : undefined;
-    if (existingEntry) {
-      if (existingEntry.payloadHash !== payloadHash) {
-        return {
-          ok: false,
-          errors: [
-            {
-              code: "E_REQUEST_CONFLICT",
-              field: "/requestId",
-              message: `Request conflict for requestId ${req.requestId}`,
-              source: "seed",
-            },
-          ],
-        };
-      }
-      const inFlightRun = this.inFlightRuns.get(existingEntry.runId);
-      if (inFlightRun) {
-        const outcome = await inFlightRun.promise;
-        if (outcome.ok) {
-          return { ...outcome, replayed: true };
-        }
-        return outcome;
-      }
-      const recPath = join(runsDir, existingEntry.runId, "run-record.json");
-      if (!existsSync(recPath)) {
-        return internalRefusal(
-          "/requests",
-          "the request log refers to run " + existingEntry.runId + " whose record is missing; use a new requestId or recover the run"
-        );
-      }
-      let replayed: Record<string, unknown>;
-      try {
-        replayed = JSON.parse(readFileSync(recPath, "utf8")) as Record<string, unknown>;
-      } catch {
-        return internalRefusal("/requests", "the record of run " + existingEntry.runId + " is unreadable");
-      }
-      const replayCheck = validate("run-record", replayed);
-      if (!replayCheck.ok || replayed.runId !== existingEntry.runId) {
-        return internalRefusal("/requests", "the record of run " + existingEntry.runId + " is invalid");
-      }
-      return {
-        ok: true,
-        runId: existingEntry.runId,
-        state: replayed.state as string,
-        record: replayed,
-        replayed: true,
-      };
+    // no await before the reservation unless there is something to wait for: two calls of one manager in the same tick must reach the
+    // in-flight registration in order
+    if (Object.hasOwn(requestsMap, req.requestId)) {
+      const replay = await this.replayKnownRequest(req, payloadHash, requestsMap, runsDir);
+      if (replay !== null) return replay;
     }
 
     // Reserve the request id on disk before any asynchronous work, so two managers on one project cannot both start it.
+    if (this.testHooks?.beforeReserve) await this.testHooks.beforeReserve();
     const reservation = join(runsDir, ".reserve-" + sha256Hex(req.requestId).slice(0, 24));
     try {
       mkdirSync(reservation);
@@ -451,6 +487,22 @@ export class RunManager {
         };
       }
       throw err;
+    }
+
+    // The reservation records who holds it, so that recover() in another manager can tell a live holder from a stopped one.
+    try {
+      writeFileSync(join(reservation, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: this.now().toISOString() }));
+    } catch (err) {
+      rmSync(reservation, { recursive: true, force: true });
+      throw err;
+    }
+    // The first look at the request log was before the reservation: a manager that finished this same request in between has recorded it
+    // by now, and starting it again would run it twice. Look again, now that no other manager can start it.
+    const again = readRequestsMap(requestsJsonPath);
+    const late = !again.ok ? internalRefusal("/requests", again.message + "; refusing to start a run") : Object.hasOwn(again.map, req.requestId) ? await this.replayKnownRequest(req, payloadHash, again.map, runsDir) : null;
+    if (late !== null) {
+      rmSync(reservation, { recursive: true, force: true });
+      return late;
     }
 
     // Register in flight promise for this requestId
@@ -487,6 +539,65 @@ export class RunManager {
       this.inFlightByRequestId.delete(req.requestId);
       rmSync(reservation, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * What a request id that the request log already knows means: a different payload is a conflict, a run still going is joined, a finished
+   * one is replayed from its record. null when the log does not know the id.
+   */
+  private async replayKnownRequest(
+    req: StartRequest,
+    payloadHash: string,
+    requestsMap: Record<string, RequestEntry>,
+    runsDir: string
+  ): Promise<RunOutcome | null> {
+    const existingEntry = Object.hasOwn(requestsMap, req.requestId) ? requestsMap[req.requestId] : undefined;
+    if (!existingEntry) return null;
+    if (existingEntry.payloadHash !== payloadHash) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_REQUEST_CONFLICT",
+            field: "/requestId",
+            message: `Request conflict for requestId ${req.requestId}`,
+            source: "seed",
+          },
+        ],
+      };
+    }
+    const inFlightRun = this.inFlightRuns.get(existingEntry.runId);
+    if (inFlightRun) {
+      const outcome = await inFlightRun.promise;
+      if (outcome.ok) {
+        return { ...outcome, replayed: true };
+      }
+      return outcome;
+    }
+    const recPath = join(runsDir, existingEntry.runId, "run-record.json");
+    if (!existsSync(recPath)) {
+      return internalRefusal(
+        "/requests",
+        "the request log refers to run " + existingEntry.runId + " whose record is missing; use a new requestId or recover the run"
+      );
+    }
+    let replayed: Record<string, unknown>;
+    try {
+      replayed = JSON.parse(readFileSync(recPath, "utf8")) as Record<string, unknown>;
+    } catch {
+      return internalRefusal("/requests", "the record of run " + existingEntry.runId + " is unreadable");
+    }
+    const replayCheck = validate("run-record", replayed);
+    if (!replayCheck.ok || replayed.runId !== existingEntry.runId) {
+      return internalRefusal("/requests", "the record of run " + existingEntry.runId + " is invalid");
+    }
+    return {
+      ok: true,
+      runId: existingEntry.runId,
+      state: replayed.state as string,
+      record: replayed,
+      replayed: true,
+    };
   }
 
   private async executeRun(
@@ -1510,8 +1621,10 @@ export class RunManager {
     const liveReservations = new Set(
       Array.from(this.inFlightByRequestId.keys()).map((id) => ".reserve-" + sha256Hex(id).slice(0, 24))
     );
+    // Only a reservation whose holder is gone goes: another manager that is running right now keeps its request (a reservation on this host
+    // whose process is dead, or one that names no owner and is older than a few seconds; a reservation of another host is never judged here).
     for (const entry of entries) {
-      if (entry.isDirectory() && entry.name.startsWith(".reserve-") && !liveReservations.has(entry.name)) {
+      if (entry.isDirectory() && entry.name.startsWith(".reserve-") && !liveReservations.has(entry.name) && reservationAbandoned(join(runsDir, entry.name), 5000)) {
         rmSync(join(runsDir, entry.name), { recursive: true, force: true });
       }
     }
