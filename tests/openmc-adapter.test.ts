@@ -178,9 +178,12 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       const directTallies = read(join(directDir, "d", "results.json")).tallies;
       for (const q of index.quantities) {
         const body = read(join(p.root, q.data.path));
-        const tally = directTallies.find((t: Vec) => t.name === body.tally);
-        const rows = tally.rows.filter((r: Vec) => r.score === body.score);
-        expect(body.bins.map((b: Vec) => [b.mean, b.std])).toEqual(rows.map((r: Vec) => [r.mean, r.std]));
+        expect(body.schema).toBe("seed.quantity-data/0.2");
+        expect(body.kind).toBe("table");
+        const tally = directTallies.find((t: Vec) => t.name === body.meta.tally);
+        const rows = tally.rows.filter((r: Vec) => r.score === body.meta.score);
+        // a table row is [labels, mean, std] (columns bin, mean, std)
+        expect(body.rows.map((r: unknown[]) => [r[1], r[2]])).toEqual(rows.map((r: Vec) => [r.mean, r.std]));
       }
     }, 300000);
 

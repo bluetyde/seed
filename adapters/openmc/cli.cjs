@@ -292,6 +292,17 @@ async function describe(reply, fail) {
   });
 }
 
+const FRAME = "openmc-model";
+const MAX_MESH_VOXELS = 20000;
+
+/** The dimension (docs/contracts-v0.2-data-shapes.md) of a unit this adapter writes, or null when none applies (the unit stays free text). */
+function scoreDimension(unit) {
+  if (unit === "cm") return "length";
+  if (unit === "eV") return "energy";
+  if (["reaction", "particle", "event"].includes(unit)) return "count";
+  return null;
+}
+
 /** The unit of a tally score per source particle, or null when the adapter does not know it (then collect refuses instead of guessing). */
 function scoreUnit(score) {
   if (typeof score !== "string") return null;
@@ -542,35 +553,99 @@ function collect(request, root, reply, fail) {
   const quantities = [];
   const warnings = [];
   let k = 0;
+  // Every quantity's data file is a seed.quantity-data/0.2 table (docs/contracts-v0.2-data-shapes.md). A regular mesh tally is one row per voxel
+  // in the layout FEED's transfer reads (docs/transfer-heating.md in FEED): an "xy" label column naming the voxel column ("i,j", 1-based), z_min and
+  // z_max coordinates in cm, the voxel volume, the value and its absolute std; meta.frame names the coordinate frame (the model's own).
+  const addQuantity = (name, unit, body, extra = {}) => {
+    if (quantities.length >= MAX_QUANTITIES) return "too many quantities";
+    const text = json(body);
+    const fileName = String(k++).padStart(3, "0") + ".json";
+    atomicWrite(path.join(qDir, fileName), text);
+    const dimension = scoreDimension(unit);
+    quantities.push({
+      name,
+      unit,
+      ...(dimension ? { dimension } : {}),
+      normalization: "per-source-particle",
+      provenance: { runId, inputRevisions },
+      data: { path: request.runDir + "/native/" + dirName + "/" + fileName, sha256: sha256(text) },
+      verification: "unverified",
+      ...extra,
+    });
+    return null;
+  };
   for (const t of results.tallies) {
-    if (!t || t.kind !== "table" || !Array.isArray(t.rows) || !Array.isArray(t.scores)) return fail(typed("E_UNSUPPORTED", "", "tally " + JSON.stringify(String(t && t.name).slice(0, 60)) + " is not a table tally (mesh and dose tallies are not supported in this adapter version)"));
+    const tallyLabel = JSON.stringify(String(t && t.name).slice(0, 60));
+    if (t && t.kind === "mesh") {
+      if (t.mesh_type !== "regular") return fail(typed("E_UNSUPPORTED", "", "tally " + tallyLabel + " is a " + String(t.mesh_type).slice(0, 20) + " mesh tally; only regular meshes are supported in this adapter version"));
+      const dims = t.dims, lower = t.lower, upper = t.upper;
+      const okVec = (v, n) => Array.isArray(v) && v.length === n && v.every(finite);
+      if (!okVec(dims, 3) || !dims.every((d) => Number.isInteger(d) && d >= 1) || !okVec(lower, 3) || !okVec(upper, 3) || !lower.every((lo, i) => lo < upper[i])) return incomplete("mesh tally " + tallyLabel + " has no valid dimensions or bounds");
+      const n = dims[0] * dims[1] * dims[2];
+      if (n > MAX_MESH_VOXELS) return fail(typed("E_UNSUPPORTED", "", "mesh tally " + tallyLabel + " has " + n + " voxels; this adapter version handles at most " + MAX_MESH_VOXELS));
+      const d = [0, 1, 2].map((a) => (upper[a] - lower[a]) / dims[a]);
+      for (const score of t.scores) {
+        const unit = scoreUnit(score);
+        if (!unit) return fail(typed("E_UNSUPPORTED", "", "the score " + JSON.stringify(String(score).slice(0, 40)) + " has no unit mapping in this adapter version"));
+        const vals = t.values && t.values[score], sds = t.std && t.std[score];
+        if (!Array.isArray(sds)) return incomplete("mesh tally " + tallyLabel + " has no absolute standard deviation (the Studio runner is too old for transfers)");
+        if (!Array.isArray(vals) || vals.length !== n || sds.length !== n || !vals.every(finite) || !sds.every((x) => finite(x) && x >= 0)) return incomplete("mesh tally " + tallyLabel + " has missing or non-finite values for " + score);
+        const name = (String(t.name || "tally") + ":" + score).slice(0, 80);
+        if (names.has(name)) return incomplete("two tally results are named " + name);
+        names.add(name);
+        const rows = [];
+        for (let kz = 0; kz < dims[2]; kz++) {
+          for (let jy = 0; jy < dims[1]; jy++) {
+            for (let ix = 0; ix < dims[0]; ix++) {
+              const idx = ix + dims[0] * (jy + dims[1] * kz);
+              const x0 = lower[0] + ix * d[0], y0 = lower[1] + jy * d[1], z0 = lower[2] + kz * d[2];
+              rows.push([ix + 1 + "," + (jy + 1), x0, x0 + d[0], y0, y0 + d[1], z0, z0 + d[2], d[0] * d[1] * d[2], vals[idx], sds[idx]]);
+            }
+          }
+        }
+        const body = {
+          schema: "seed.quantity-data/0.2", quantity: name, kind: "table", unit,
+          columns: [
+            { name: "xy", unit: "1", role: "label" },
+            { name: "x_min", unit: "cm", role: "coordinate" }, { name: "x_max", unit: "cm", role: "coordinate" },
+            { name: "y_min", unit: "cm", role: "coordinate" }, { name: "y_max", unit: "cm", role: "coordinate" },
+            { name: "z_min", unit: "cm", role: "coordinate" }, { name: "z_max", unit: "cm", role: "coordinate" },
+            { name: "volume", unit: "cm3", role: "coordinate" },
+            { name: "mean", unit, role: "value" }, { name: "std", unit, role: "std", of: "mean" },
+          ],
+          rows,
+          meta: { frame: FRAME, tally: t.name, score, normalization: "per-source-particle", mesh: { type: "regular", dims, lower, upper, unit: "cm" }, summedOver: Array.isArray(t.summed_over) ? t.summed_over : [] },
+        };
+        const problem = addQuantity(name, unit, body, { coordinates: { system: "regular-mesh", axes: [{ name: "x", unit: "cm" }, { name: "y", unit: "cm" }, { name: "z", unit: "cm" }] } });
+        if (problem) return incomplete(problem);
+      }
+      continue;
+    }
+    if (!t || t.kind !== "table" || !Array.isArray(t.rows) || !Array.isArray(t.scores)) return fail(typed("E_UNSUPPORTED", "", "tally " + tallyLabel + " is not a table or regular mesh tally (cylindrical mesh and dose tallies are not supported in this adapter version)"));
     for (const score of t.scores) {
       const unit = scoreUnit(score);
       if (!unit) return fail(typed("E_UNSUPPORTED", "", "the score " + JSON.stringify(String(score).slice(0, 40)) + " has no unit mapping in this adapter version"));
       const rows = t.rows.filter((r) => r && r.score === score);
-      if (rows.length === 0 || rows.some((r) => !finite(r.mean) || !finite(r.std) || !Array.isArray(r.labels))) return incomplete("tally " + JSON.stringify(String(t.name).slice(0, 60)) + " has missing or non-finite values for " + score);
+      if (rows.length === 0 || rows.some((r) => !finite(r.mean) || !finite(r.std) || r.std < 0 || !Array.isArray(r.labels))) return incomplete("tally " + tallyLabel + " has missing or non-finite values for " + score);
       const name = (String(t.name || "tally") + ":" + score).slice(0, 80);
       if (names.has(name)) return incomplete("two tally results are named " + name);
       names.add(name);
-      if (quantities.length >= MAX_QUANTITIES) return incomplete("too many quantities");
-      const body = { quantity: name, tally: t.name, score, unit, normalization: "per-source-particle", filters: t.filters, bins: rows.map((r) => ({ labels: r.labels, mean: r.mean, std: r.std })) };
-      const text = json(body);
-      const fileName = String(k++).padStart(3, "0") + ".json";
-      atomicWrite(path.join(qDir, fileName), text);
-      quantities.push({
-        name,
-        unit,
-        normalization: "per-source-particle",
-        provenance: { runId, inputRevisions },
-        data: { path: request.runDir + "/native/" + dirName + "/" + fileName, sha256: sha256(text) },
-        verification: "unverified",
+      const body = {
+        schema: "seed.quantity-data/0.2", quantity: name, kind: "table", unit,
+        columns: [{ name: "bin", unit: "1", role: "label" }, { name: "mean", unit, role: "value" }, { name: "std", unit, role: "std", of: "mean" }],
+        rows: rows.map((r) => [r.labels.map(String), r.mean, r.std]),
+        meta: { tally: t.name, score, normalization: "per-source-particle", filters: Array.isArray(t.filters) ? t.filters : [] },
+      };
+      const problem = addQuantity(name, unit, body, {
         coordinates: { system: "tally-bins", axes: [{ name: "bin", unit: "1" }] },
         ...(rows.length === 1 ? { uncertainty: { kind: "statistical", value: rows[0].std, unit } } : {}),
       });
+      if (problem) return incomplete(problem);
     }
   }
+  const sourceRate = project.settings && finite(project.settings.sourceRate) && project.settings.sourceRate > 0 ? { value: project.settings.sourceRate, unit: "1/s", origin: "the project's Source emission rate setting" } : null;
   const index = {
-    schema: "seed.results-index/0.1",
+    schema: "seed.results-index/0.2",
     runId,
     status: "completed",
     adapter: ADAPTER,
@@ -588,6 +663,9 @@ function collect(request, root, reply, fail) {
         nuclearData: env.nuclear_data,
         runtime: { platform: env.platform, python: env.python, openmc: env.openmc },
         normalization: "per source particle; a physical rate needs an explicit source strength",
+        // What the project says its source emits, to help write a transfer recipe; a recipe states its own normalization and where it came from.
+        ...(sourceRate ? { sourceRate } : {}),
+        frame: FRAME,
       },
     },
   };
