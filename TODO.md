@@ -105,7 +105,8 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 - [ ] 2026-10-05 **Contracts follow-ups** (decisions in [contracts-v0.2-candidates.md](docs/contracts-v0.2-candidates.md), text in [contracts.md section 12](docs/contracts.md)): final sign-off of v0.1 (the user has not said yes yet); v0.2 schema work for items 1 to 4 and 7 (validate takes the run's inputs and settings, oracle entries carry settings, standard result data shapes with units, input roles) with a migration; `describe.oraclePin` revisited for v0.3.
 - [ ] 2026-10-05 Host checks run settings against `describe.parameters` (type, bounds, enum) so adapters need not each re-implement it (contracts.md 12.4).
 - [ ] 2026-10-05 Host-side enforcement of `maxDiskMB` (watch the run folder's size and cancel over the limit) and, later, `maxMemoryMB`; both are advisory today (contracts.md 12.3).
-- [ ] 2026-10-05 OpenMC adapter: oracle entries (an independent analytic case with tolerances fixed first); mesh and dose tallies; use `E_SCRIPT_MISMATCH` instead of `E_STALE_REVISION` for a script that differs from the regeneration.
+- [x] 2026-10-05 OpenMC oracle entries: 5 analytic good + 3 bad-input in the Studio repo (`oracles/seed`), tolerances fixed before the first run, all pass through the adapter ([adapter-openmc.md](docs/adapter-openmc.md)).
+- [ ] 2026-10-05 OpenMC adapter: more oracle coverage (current, heating, reaction rates, energy bins, mesh tallies); mesh and dose tallies in collect; use `E_SCRIPT_MISMATCH` instead of `E_STALE_REVISION` for a script that differs from the regeneration.
 - [ ] 2026-10-05 Cross-app links, not started: OpenMC heating into FEED, NODAL coolant into FEED.
 
 ## Next desktop lesson work (in order)

@@ -51,7 +51,16 @@ Not yet tested: the identity race fixed here (child is still a fork of the runne
 - Cancel: the runner's own `cancel` stops OpenMC's process group inside WSL first, then the wrapper and `wsl.exe` after their command lines prove they are this job's; a cancel is confirmed only when the native run is gone. The wrapper does the same before it stops itself.
 - Collect: every manifest file re-hashed, exactly one statepoint, the run's script and project equal the snapshot's, statepoint settings equal the project's, one quantity per tally score (unit from a fixed score table; an unknown score or a mesh/dose tally is refused, not guessed), all `per-source-particle` and `unverified`.
 - Mutation checks (6 of 6 caught): script comparison, native cancel, ownership check, manifest hash check, seed refusal, budget cores.
-- Not done: oracle entries (an independent analytic case with tolerances fixed first), Linux/macOS native run, a deterministic test for the cancel-after-wrapper-death branch, the shared adapter module.
+- Not done: Linux/macOS native run, a deterministic test for the cancel-after-wrapper-death branch, the shared adapter module.
+
+## Oracle entries (2026-10-05)
+
+App-owned, in the OpenMC Studio repository (`oracles/seed`, README there; merged into Studio main, 7ef8990), run through this adapter by `tests/openmc-oracles.test.ts` (10 tests, real OpenMC in WSL). Five analytic good entries and three bad-input ones:
+- A void ball's track length (exactly 4 cm per source particle: pure geometry, tolerance 1e-9) and, for a thin (4 cm) and a thick (12 cm) slab of pure B-10 hit by a 0.0253 eV beam, the absorption probability and the beam's track length, from closed formulas and the library's own B-10 cross sections (read by `studio/tools/seed_oracle_xs.py`, library file hashes recorded).
+- Tolerances are 4 sigma of the predicted statistical error for the case's 200,000 histories plus 0.4 % for neglected elastic scattering, computed by the generator and committed before the first run (Studio commit 5c9a05b). First run: all five within one sigma (+0.06 %, +0.06 %, -0.05 %, -0.05 %, exact).
+- Bad input: an eigenvalue project (`E_UNSUPPORTED`), two million particles (`E_BOUNDS_EXCEEDED`), no tally (`E_SCHEMA_INVALID`).
+- Sensitivity, measured: a 3 % higher number density in the thin slab fails both its entries; 2 % in the thick slab fails its flux entry (its absorption is saturated and blind). The wrong-output tests (a 2 % high absorption, a void-ball flux off by 1e-6, a swapped unit, a dropped or wrong refusal) each fail the set and block the study.
+- Not covered: other scores (current, heating, reaction rates), mesh tallies, energy bins, eigenvalue runs: those quantities stay `unverified`.
 
 ## Open points
 
