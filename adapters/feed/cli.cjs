@@ -186,6 +186,21 @@ function oracleCoverage() {
   return out;
 }
 
+const NORMALIZATIONS = ["none", "per-source-particle", "per-fission", "per-demand", "per-hour", "per-second", "per-watt"];
+/** The transfers the runner declares, passed on as the SEED describe reply allows; a malformed entry is dropped, never repaired. */
+function cleanTransfers(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const t of list.slice(0, 20)) {
+    if (!t || typeof t.field !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(t.field) || !Array.isArray(t.accepts) || t.accepts.length === 0) continue;
+    const accepts = t.accepts.filter((a) => a && typeof a.dimension === "string" && a.dimension.length > 0 && a.dimension.length <= 40 && (a.normalization === undefined || NORMALIZATIONS.includes(a.normalization)))
+      .map((a) => (a.normalization === undefined ? { dimension: a.dimension } : { dimension: a.dimension, normalization: a.normalization }));
+    if (accepts.length !== t.accepts.length) continue;
+    out.push({ field: t.field, accepts, ...(t.parameters && typeof t.parameters === "object" && !Array.isArray(t.parameters) ? { parameters: t.parameters } : {}) });
+  }
+  return out;
+}
+
 async function describe(reply, fail) {
   const bundle = bundlePath();
   if (!bundle) return fail(setupError());
@@ -204,6 +219,7 @@ async function describe(reply, fail) {
       parameters: PARAMETERS,
       quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
       oracleCoverage: oracleCoverage(),
+      ...(cleanTransfers(d.transfers).length > 0 ? { transfers: cleanTransfers(d.transfers) } : {}),
     },
   });
 }
