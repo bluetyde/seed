@@ -86,6 +86,12 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 - **L9** The builder appends runs that no study step references.
 - **L10** Two defensive checks in the transfer host are redundant with each other and so cannot be tested one at a time (reading a project file through a link, and writing it); a failure to release the project lock after a commit is untested (no hook).
 
+## Sign-off (2026-10-06)
+
+**E0 is signed off.** The user, in chat on 2026-10-06 after each limit had been explained one by one: "accept all ten, sign off E0". Limits L1 to L10 are accepted as known limits of E0; they stay listed here and in TODO.md so they are not forgotten (the strongest candidate to close first is L1, the durable oracle-failure transition; L2 is small once a reviewer record exists; L3 is E1 work). Material preservation moves to E1. A change to a contract from here is a new schema version with a migration, as for the v0.1 sign-off of 2026-10-05.
+
+**E2 stays open** (the four open items above); the user has not decided its order yet. Suggested order, with the reasons given in chat: the standalone-launch check, the resource limits in `describe`, one concurrency task for L4 to L6, then L7.
+
 ## What I ask
 
 - **E0:** accept L1 to L10 as known limits (or name the ones to fix first) and sign off the milestone. Contracts v0.1 are already signed off; material preservation moves to E1.
