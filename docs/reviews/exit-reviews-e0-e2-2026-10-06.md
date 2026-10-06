@@ -27,7 +27,7 @@ E2 is **not ready to exit**. What the milestone asked for is largely done and be
 - **Open 1, closed 2026-10-06:** "standalone launch of the app unchanged by its adapter" is now checked against the real apps: every real oracle run leaves the app's own folder as found (a fingerprint test at the end of each oracle file) and each registered app starts with its own command, without SEED variables, and answers its health path (`tests/standalone-launch.test.ts`).
 - **Open 2, closed 2026-10-06:** per-adapter resource figures are measured and reported in `describe.resources` (contracts section 12.3). They are information; the host still enforces only wall time, and memory and disk stay advisory.
 - **Open 3, closed 2026-10-06 (L4 reduced, L6 wall limit pending your decision; see "Closed after the sign-off"):** the concurrency limits of the run manager and project store that Codex found again (L4 to L6 below) were already known after the first review and are not yet closed.
-- **Open 4:** the study record and report limits (L7 to L9), and a failed oracle evaluation having no durable transition (L1).
+- **Open 4:** the study record and report limits (L8 and L9; L7 closed 2026-10-06), and a failed oracle evaluation having no durable transition (L1).
 
 ## What Codex found, and what was done
 
@@ -81,7 +81,7 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 - **L4** Lock takeover by age (paused contender; foreign host after 600 s). **Reduced 2026-10-06**: heartbeat, and a writer that lost its lock is refused (see Closed after the sign-off).
 - **L5** Recovery can remove a live manager's reservation. **Closed 2026-10-06.**
 - **L6** Direct multi-process `RunManager` use: idempotency lookup order, request map, wall limit outside the payload hash. **Order and map closed 2026-10-06; the wall limit stays as it is, pending your decision.**
-- **L7** `report.md` is not in the receipt.
+- **L7** `report.md` is not in the receipt. **Closed 2026-10-06** (receipt 0.2).
 - **L8** The report builder library does not itself verify the chain length or the plotted values.
 - **L9** The builder appends runs that no study step references.
 - **L10** Two defensive checks in the transfer host are redundant with each other and so cannot be tested one at a time (reading a project file through a link, and writing it); a failure to release the project lock after a commit is untested (no hook).
@@ -101,7 +101,9 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 - **L6, idempotency and request map.** The request log is read again once the reservation is held, so a request that another manager finished in between is replayed (same run) instead of started twice, and a changed payload is still a conflict. Adding to the request log runs under a short lock (`requests.json.lock`: owner recorded, dead owner taken over, waits up to 10 s, then refuses), so two processes cannot overwrite each other's entries (three processes adding 40 entries each lose none).
 - **L6, wall limit outside the payload hash: left as it is, for your decision.** A retry with the same request id and a different wall limit joins the run that exists, because the limit is deliberately not part of the payload hash. The alternative is to make it part of the hash (a changed limit becomes a conflict). I recommend leaving it: the limit bounds the run and does not change what it computes.
 
-L1 to L3 and L7 to L10 are unchanged.
+**L7 (2026-10-06, E2 step 4, tests in `tests/report-receipt.test.ts` and the tamper loop of `tests/raft-oracles.test.ts`, each part shown needed by a mutation).** The report receipt is `seed.report-receipt/0.2` and binds `report.md` (a first report: exactly four files; a revised report: `report.md` among its files); `prepareReport` refuses a receipt without it; both readers accept 0.1 and 0.2, and a changed Markdown makes the saved report refuse to display. A 0.1 receipt stays valid and its Markdown stays unprotected until the report is exported again. Details: docs/study-report.md, Receipt versions.
+
+L1 to L3 and L8 to L10 are unchanged.
 
 ## What I ask
 
