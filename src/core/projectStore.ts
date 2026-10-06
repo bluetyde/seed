@@ -598,8 +598,6 @@ export function saveProjectHeld(
       return lost("it is gone or unreadable");
     }
   };
-  const first = fence();
-  if (first !== null) return { ok: false, errors: [first] };
   return saveLocked(dir, manifest, expectedRevision, opts, fence);
 }
 
