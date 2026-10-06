@@ -34,6 +34,12 @@ export function trackedFiles(root: string): Set<string> {
   return r.status === 0 ? new Set(r.stdout.split("\0").filter(Boolean)) : new Set();
 }
 
+/** True when git reports edits to tracked files that are not committed: someone is working in the folder. */
+export function hasUncommittedEdits(root: string): boolean {
+  const r = spawnSync("git", ["-c", "safe.directory=*", "-C", root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" });
+  return r.status === 0 && r.stdout.trim() !== "";
+}
+
 /** What changed between two fingerprints, as readable lines (empty when nothing did). A changed file in `tolerated` is not reported. */
 export function treeChanges(before: Map<string, string>, after: Map<string, string>, tolerated: Set<string> = new Set()): string[] {
   const lines: string[] = [];

@@ -71,3 +71,19 @@ describe("trackedFiles in a real checkout", () => {
     expect([...trackedFiles(d)]).toEqual(["src/a.txt"]);
   });
 });
+
+describe("hasUncommittedEdits", () => {
+  it("is false for a clean checkout and true once a tracked file is edited; untracked files do not count", async () => {
+    const { git } = await import("./helpers/repo");
+    const { hasUncommittedEdits } = await import("./helpers/appTree");
+    const d = app();
+    git(d, "init", "-b", "main");
+    git(d, "add", "-A");
+    git(d, "commit", "-m", "first");
+    expect(hasUncommittedEdits(d)).toBe(false);
+    writeFileSync(join(d, "src", "untracked.txt"), "x");
+    expect(hasUncommittedEdits(d)).toBe(false);
+    writeFileSync(join(d, "src", "a.txt"), "edited");
+    expect(hasUncommittedEdits(d)).toBe(true);
+  });
+});
