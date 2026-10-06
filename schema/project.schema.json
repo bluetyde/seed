@@ -41,6 +41,9 @@
         },
         "oracles": {
           "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
+        },
+        "transfers": {
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/relPath"
         }
       }
     },

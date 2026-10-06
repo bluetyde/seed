@@ -1,0 +1,62 @@
+{
+  "schema": "seed.transfer-recipe/0.2",
+  "recipeId": "heat-to-pin-1",
+  "proposedBy": {
+    "kind": "agent",
+    "name": "claude",
+    "model": "opus"
+  },
+  "proposedAt": "2026-10-06T10:00:00Z",
+  "source": {
+    "runId": "run-001",
+    "resultsSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "quantity": "Fuel:heating",
+    "dataSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "unit": "eV",
+    "dimension": "energy",
+    "normalization": "per-source-particle",
+    "revisionPins": []
+  },
+  "target": {
+    "app": "feed",
+    "artifact": "pin-case",
+    "revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "field": "heating-to-pin"
+  },
+  "units": {
+    "to": "W"
+  },
+  "normalization": {
+    "kind": "source-rate",
+    "value": {
+      "value": 150000000000000000,
+      "unit": "1/s"
+    },
+    "origin": "1 MW / 200 MeV per fission, from the reactor power in the model"
+  },
+  "mapping": {
+    "spatial": {
+      "pin": "pin-1",
+      "slices": [
+        {
+          "id": "s1",
+          "z": {
+            "min": 0,
+            "max": 0.5
+          }
+        }
+      ]
+    },
+    "time": {
+      "kind": "steady"
+    },
+    "extrapolation": "refused"
+  },
+  "tolerance": {
+    "conservation": 0.01,
+    "fixedBefore": "mapping"
+  },
+  "applicability": {
+    "note": "steady state only"
+  }
+}
