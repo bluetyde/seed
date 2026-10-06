@@ -8,7 +8,7 @@ import { loadOracleEntries, runOracleSet, unverifiedQuantities, comparePins, pin
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, treeChanges } from "./helpers/appTree";
+import { appTree, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // NODAL's own oracle entries (oracles/seed in the NODAL repo): four analytic cases whose expected values come from formulas and integrals that
 // do not use the solver, golden-vector regression cases, and bad inputs. They run through the adapter and the run manager. Needs the NODAL repo
@@ -114,6 +114,7 @@ describe.skipIf(!have)("NODAL oracle set through the SEED adapter", () => {
     const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "req-d", actor }, { projectRoot: tmpdir(), timeoutMs: 60000 });
     if (!o.ok) throw new Error("transport");
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
+    expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).nodal);
     expect(cov.length).toBe(19); // distinct (quantity, domain) pairs of the 20 good entries: the two A2 cases share w_in and a domain
     expect(cov.map(c => c.quantity)).toEqual(expect.arrayContaining(["w_in", "p_mid"]));
   });
@@ -171,6 +172,6 @@ describe.skipIf(!have)("NODAL oracle set through the SEED adapter", () => {
 describe.skipIf(!have)("NODAL is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", () => {
     expect(treeBefore).toBeDefined();
-    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
+    expect(treeChanges(treeBefore!, appTree(repo), trackedFiles(repo))).toEqual([]);
   });
 });

@@ -42,6 +42,7 @@ const {
   typed,
   jobState,
 } = require("../shared/util.cjs");
+const { resourcesFor } = require("../shared/resources.cjs");
 const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
 
 const ADAPTER = { id: "openmc", version: "0.1.0" };
@@ -288,6 +289,7 @@ async function describe(reply, fail) {
         { name: "tally:energy", unit: "eV", normalization: "per-source-particle" },
       ],
       oracleCoverage: oracleCoverage(),
+      resources: resourcesFor("openmc"),
     },
   });
 }

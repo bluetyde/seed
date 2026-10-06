@@ -9,7 +9,7 @@ import { callAdapter } from "../src/core/adapterClient";
 import { loadOracleEntries, runOracleSet, unverifiedQuantities, type Observed, type OracleEntry } from "../src/core/oracle";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, treeChanges } from "./helpers/appTree";
+import { appTree, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // FEED's own oracle entries (oracles/seed in the FEED repo, closed-form expected values) run through the adapter and the run
 // manager against the real headless runner and the real OFFBEAT solver. Needs the FEED repo with `npm run build`, its entries,
@@ -106,6 +106,7 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
     const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "req-d", actor }, { projectRoot: tmpdir(), timeoutMs: 60000 });
     if (!o.ok) throw new Error(JSON.stringify(o.errors));
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
+    expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).feed);
     expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(["energy_balance_residual", "energy_deposited", "heat_flux_outer", "temperature_peak", "temperature_peak_max", "temperature_surface"]);
   });
 
@@ -156,6 +157,6 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
 describe.skipIf(!have)("FEED is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", () => {
     expect(treeBefore).toBeDefined();
-    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
+    expect(treeChanges(treeBefore!, appTree(repo), trackedFiles(repo))).toEqual([]);
   });
 });

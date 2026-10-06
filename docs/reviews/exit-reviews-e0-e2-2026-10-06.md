@@ -25,7 +25,7 @@ E2 is **not ready to exit**. What the milestone asked for is largely done and be
 
 - Done since the milestone was written: the first real adapter and four more (RAFT, FEED, NODAL, OpenMC Studio, SNEED), each with app-owned oracle entries, a hash-pinned oracle set recorded with the app commit, direct-agreement tests (RAFT `raft-direct-agreement`, parity with the direct runner for the others), guarded CLI and stdio MCP, owner-mediated cancel and human recovery, and report export. The contracts were signed off final on 2026-10-05 (the TODO line that says the user has not said yes is stale).
 - **Open 1, closed 2026-10-06:** "standalone launch of the app unchanged by its adapter" is now checked against the real apps: every real oracle run leaves the app's own folder as found (a fingerprint test at the end of each oracle file) and each registered app starts with its own command, without SEED variables, and answers its health path (`tests/standalone-launch.test.ts`).
-- **Open 2:** per-adapter resource limits (wall clock, cores, memory) measured and recorded in `describe`: not done (the host enforces wall time; only OpenMC uses cores; memory and disk are advisory, documented in contracts section 12).
+- **Open 2, closed 2026-10-06:** per-adapter resource figures are measured and reported in `describe.resources` (contracts section 12.3). They are information; the host still enforces only wall time, and memory and disk stay advisory.
 - **Open 3:** the concurrency limits of the run manager and project store that Codex found again (L4 to L6 below) were already known after the first review and are not yet closed.
 - **Open 4:** the study record and report limits (L7 to L9), and a failed oracle evaluation having no durable transition (L1).
 

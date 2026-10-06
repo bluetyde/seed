@@ -8,7 +8,7 @@ import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantit
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, treeChanges } from "./helpers/appTree";
+import { appTree, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // OpenMC Studio's own oracle entries (oracles/seed in the OpenMC repository): analytic cases whose expected values come from formulas and from
 // cross sections read out of the nuclear data library (a void ball's track length, absorption and track length in a pure B-10 slab), with
@@ -120,6 +120,7 @@ describe.skipIf(!have)("OpenMC oracle set through the SEED adapter (real OpenMC)
     const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "req-d", actor }, { projectRoot: tmpdir(), timeoutMs: 180000 });
     if (!o.ok) throw new Error("transport");
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
+    expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).openmc);
     expect(cov.length).toBe(6); // distinct (quantity, domain) pairs of the 6 good entries
     expect(cov.map(c => c.quantity)).toEqual(expect.arrayContaining(["Void ball:flux", "B-10 thin slab:absorption", "B-10 thick slab:flux"]));
   }, 240000);
@@ -178,6 +179,6 @@ describe.skipIf(!have)("OpenMC oracle set through the SEED adapter (real OpenMC)
 describe.skipIf(!have)("OpenMC Studio is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", () => {
     expect(treeBefore).toBeDefined();
-    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
+    expect(treeChanges(treeBefore!, appTree(repo), trackedFiles(repo))).toEqual([]);
   });
 });

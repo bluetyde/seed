@@ -8,7 +8,7 @@ import { loadOracleEntries, runOracleSet, unverifiedQuantities, comparePins, pin
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, treeChanges } from "./helpers/appTree";
+import { appTree, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // SNEED's own oracle entries (oracles/seed in the SNEED repository): hand-derived exact top-event probabilities (checked there against an
 // exhaustive enumeration) and bad-input refusals. They run through the adapter and the run manager. Needs the SNEED checkout built with
@@ -111,6 +111,7 @@ describe.skipIf(!have)("SNEED oracle set through the SEED adapter", () => {
     const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "req-d", actor }, { projectRoot: tmpdir(), timeoutMs: 120000 });
     if (!o.ok) throw new Error("transport");
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
+    expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).pra);
     expect(cov.length).toBe(11); // distinct (quantity, domain) pairs of the 11 good entries
     expect(new Set(cov.map(c => c.quantity))).toEqual(new Set(["top_event_probability"]));
   });
@@ -168,6 +169,6 @@ describe.skipIf(!have)("SNEED oracle set through the SEED adapter", () => {
 describe.skipIf(!have)("SNEED is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", () => {
     expect(treeBefore).toBeDefined();
-    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
+    expect(treeChanges(treeBefore!, appTree(repo), trackedFiles(repo))).toEqual([]);
   });
 });

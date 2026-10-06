@@ -33,6 +33,7 @@ const {
   typed,
   jobState,
 } = require("../shared/util.cjs");
+const { resourcesFor } = require("../shared/resources.cjs");
 const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
 
 const ADAPTER = { id: "pra", version: "0.1.0" };
@@ -212,6 +213,7 @@ async function describe(reply, fail) {
       ],
       quantities: d.quantities.map((q) => ({ name: String(q.name), unit: String(q.unit), normalization: "none" })),
       oracleCoverage: oracleCoverage(),
+      resources: resourcesFor("pra"),
     },
   });
 }

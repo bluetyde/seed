@@ -1,0 +1,112 @@
+{
+  "raft": {
+    "wallSeconds": {
+      "typical": 1.3,
+      "max": 4
+    },
+    "cores": 1,
+    "memoryMB": {
+      "peak": 215
+    },
+    "diskMB": {
+      "peak": 0.13
+    },
+    "measured": {
+      "platform": "Windows 11 (win32 10.0.26300)",
+      "date": "2026-10-06",
+      "basis": "18 good oracle cases of the app run one at a time through the adapter and the run manager"
+    },
+    "notes": [
+      "Measured by scripts/measure-resources.cjs. Memory is sampled every 0.4 s, so it is a lower bound of the true peak. Figures describe the oracle-sized cases, not a guarantee for larger studies.",
+      "The cases are the app's own oracle cases (short transients). Longer transients cost more time, not much more memory."
+    ]
+  },
+  "nodal": {
+    "wallSeconds": {
+      "typical": 4.7,
+      "max": 9.1
+    },
+    "cores": 1,
+    "memoryMB": {
+      "peak": 307
+    },
+    "diskMB": {
+      "peak": 0.57
+    },
+    "measured": {
+      "platform": "Windows 11 (win32 10.0.26300)",
+      "date": "2026-10-06",
+      "basis": "20 good oracle cases of the app run one at a time through the adapter and the run manager"
+    },
+    "notes": [
+      "Measured by scripts/measure-resources.cjs. Memory is sampled every 0.4 s, so it is a lower bound of the true peak. Figures describe the oracle-sized cases, not a guarantee for larger studies.",
+      "The cases are the app's own oracle cases (small loops and short transients); a larger network or a longer transient costs more time."
+    ]
+  },
+  "pra": {
+    "wallSeconds": {
+      "typical": 1.6,
+      "max": 3.3
+    },
+    "cores": 1,
+    "memoryMB": {
+      "peak": 280
+    },
+    "diskMB": {
+      "peak": 0.01
+    },
+    "measured": {
+      "platform": "Windows 11 (win32 10.0.26300)",
+      "date": "2026-10-06",
+      "basis": "11 good oracle cases of the app run one at a time through the adapter and the run manager"
+    },
+    "notes": [
+      "Measured by scripts/measure-resources.cjs. Memory is sampled every 0.4 s, so it is a lower bound of the true peak. Figures describe the oracle-sized cases, not a guarantee for larger studies.",
+      "The cases are the app's own oracle cases (small fault trees); the built-in engine's cost grows with the number of cut sets."
+    ]
+  },
+  "feed": {
+    "wallSeconds": {
+      "typical": 3.9,
+      "max": 11.2
+    },
+    "cores": 1,
+    "memoryMB": {
+      "peak": 564
+    },
+    "diskMB": {
+      "peak": 6.46
+    },
+    "measured": {
+      "platform": "Windows 11 (win32 10.0.26300) with WSL2",
+      "date": "2026-10-06",
+      "basis": "22 good oracle cases of the app run one at a time through the adapter and the run manager (real OFFBEAT solver)"
+    },
+    "notes": [
+      "Measured by scripts/measure-resources.cjs. Memory is sampled every 0.4 s, so it is a lower bound of the true peak. Figures describe the oracle-sized cases, not a guarantee for larger studies.",
+      "Memory is the peak of the Windows processes plus the peak rise of the WSL machine that runs the solver, added (the two peaks need not coincide, so this is an upper estimate of the sum). The cases are the app's own oracle cases; a finer mesh or a longer history costs more time and memory."
+    ]
+  },
+  "openmc": {
+    "wallSeconds": {
+      "typical": 19.1,
+      "max": 19.5
+    },
+    "cores": 1,
+    "memoryMB": {
+      "peak": 1015
+    },
+    "diskMB": {
+      "peak": 0.11
+    },
+    "measured": {
+      "platform": "Windows 11 (win32 10.0.26300) with WSL2",
+      "date": "2026-10-06",
+      "basis": "6 good oracle cases of the app run one at a time through the adapter and the run manager (real OpenMC)"
+    },
+    "notes": [
+      "Measured by scripts/measure-resources.cjs. Memory is sampled every 0.4 s, so it is a lower bound of the true peak. Figures describe the oracle-sized cases, not a guarantee for larger studies.",
+      "Memory is the peak of the Windows processes plus the peak rise of the WSL machine that runs OpenMC, added. Measured with settings.threads 1. Time scales with particles times batches; the cases are small analytic problems, not production runs."
+    ]
+  }
+}

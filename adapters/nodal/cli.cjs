@@ -36,6 +36,7 @@ const {
   typed,
   jobState,
 } = require("../shared/util.cjs");
+const { resourcesFor } = require("../shared/resources.cjs");
 const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
 
 const ADAPTER = { id: "nodal", version: "0.1.0" };
@@ -189,6 +190,7 @@ async function describe(reply, fail) {
       // These are the quantity kinds a model output can have; a result carries the outputs the model names.
       quantities: Object.keys(d.quantities).sort().map((q) => ({ name: q, unit: String(d.quantities[q]), normalization: "none" })),
       oracleCoverage: oracleCoverage(),
+      resources: resourcesFor("nodal"),
     },
   });
 }
