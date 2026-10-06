@@ -5,12 +5,12 @@ const mismatch = (u: string, d: Dimension) => unitMismatch(u, d);
 
 describe("unit grammar", () => {
   it("reads products, quotients, powers, prefixes and counted things", () => {
-    for (const u of ["1", "cm", "W/m^3", "eV", "keV", "reaction/particle", "MW/m", "degC", "mm", "mb", "event/hour", "kg/s", "Pa", "1/s"]) {
+    for (const u of ["1", "cm", "W/m^3", "eV", "keV", "reaction/particle", "MW/m", "degC", "mm", "mb", "event/hour", "kg/s", "Pa", "1/s", "W/m2/K", "m2", "m^-2", "W/m/s"]) {
       expect(parseUnit(u).ok, u).toBe(true);
     }
   });
 
-  it.each(["", "W/m/s", "furlong", "W m", "m^", "m^0", "xW", "kparticle", "mhour", "W*", "*W", "degC/s", "a".repeat(41)])("refuses %j", (u) => {
+  it.each(["", "furlong", "W m", "m^", "m^0", "xW", "kparticle", "mhour", "W*", "*W", "degC/s", "a".repeat(41)])("refuses %j", (u) => {
     expect(parseUnit(u).ok).toBe(false);
   });
 
@@ -23,6 +23,9 @@ describe("unit grammar", () => {
     expect(toSI(1, "eV", "energy")).toBe(1.602176634e-19);
     expect(toSI(1, "hour", "time")).toBe(3600);
     expect(toSI(1, "kg/hour", "mass-flow")).toBeCloseTo(1 / 3600, 15);
+    expect(toSI(1, "W/cm2", "heat-flux")).toBeCloseTo(1e4, 6);
+    expect(parseUnit("W/m2/K")).toEqual(parseUnit("W/m^2/K"));
+    expect(parseUnit("W/m2/K")).toMatchObject({ ok: true, vector: { kg: 1, s: -3, K: -1 } });
     expect(() => toSI(1, "bar", "pressure")).toThrow();
   });
 

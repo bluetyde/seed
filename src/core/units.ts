@@ -1,7 +1,8 @@
 /**
  * Unit grammar and dimensions of contracts v0.2 (docs/contracts-v0.2-data-shapes.md section 3).
  *
- * A unit is a product or quotient of tokens: `W/m^3`, `eV`, `reaction/particle`, `1`. Every token has a factor to its SI
+ * A unit is a product or quotient of tokens: `W/m^3`, `W/m2/K`, `eV`, `reaction/particle`, `1`. An exponent is `^n` or
+ * digits right after the token (`m2`); every term after the first "/" divides. Every token has a factor to its SI
  * base and an exponent vector; a counted thing (`particle`, `reaction`, ...) is its own axis, so `reaction/particle` is
  * not dimensionless. The only conversion the host performs goes through these tables. An unknown token is a refusal,
  * never a pass-through.
@@ -70,7 +71,7 @@ function parseToken(tok: string): { f: number; v: Vec } | null {
 function parseTerms(text: string, sign: 1 | -1, vector: Vec): { factor: number } | string {
   let factor = 1;
   for (const term of text.split("*")) {
-    const m = /^([A-Za-z]+|1)(?:\^(-?[1-9][0-9]?))?$/.exec(term);
+    const m = /^([A-Za-z]+|1)(?:\^?(-?[1-9][0-9]?))?$/.exec(term);
     if (!m) return `cannot read ${JSON.stringify(term)}`;
     const t = parseToken(m[1]!);
     if (!t) return `unknown unit ${JSON.stringify(m[1])}`;
@@ -84,14 +85,14 @@ function parseTerms(text: string, sign: 1 | -1, vector: Vec): { factor: number }
 export function parseUnit(unit: string): ParsedUnit {
   if (typeof unit !== "string" || unit.length === 0 || unit.length > 40) return { ok: false, reason: "a unit is 1 to 40 characters" };
   if (unit === "degC") return { ok: true, factor: 1, vector: { K: 1 }, celsius: true };
+  // Everything after the first "/" divides: W/m2/K is W / (m^2 * K).
   const parts = unit.split("/");
-  if (parts.length > 2) return { ok: false, reason: "at most one '/' in a unit" };
   const vector: Vec = {};
   const num = parseTerms(parts[0]!, 1, vector);
   if (typeof num === "string") return { ok: false, reason: num };
   let factor = num.factor;
-  if (parts[1] !== undefined) {
-    const den = parseTerms(parts[1], -1, vector);
+  for (const part of parts.slice(1)) {
+    const den = parseTerms(part, -1, vector);
     if (typeof den === "string") return { ok: false, reason: den };
     factor *= den.factor;
   }
