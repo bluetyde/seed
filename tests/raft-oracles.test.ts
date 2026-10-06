@@ -25,6 +25,7 @@ import { RunDispatcher } from "../src/core/runDispatcher";
 import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
 import { RunManager, type Budget } from "../src/core/runManager";
+import { observedValue } from "./helpers/quantityValue";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
 // adapter and the run manager. Needs the RAFT repo with the built headless runner and the entries; skipped otherwise.
@@ -88,8 +89,7 @@ async function observe(entry: OracleEntry, baseDir: string, gateSet?: SetResult)
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
   const q = index.quantities.find((x: { name: string }) => x.name === entry.expected.quantity);
-  const data = JSON.parse(readFileSync(join(root, q.data.path), "utf8")) as { values: number[] };
-  return { kind: "value", quantity: q.name, value: data.values[data.values.length - 1]!, unit: q.unit };
+  return { kind: "value", quantity: q.name, value: observedValue(q, root), unit: q.unit };
 }
 
 const observed = new Map<string, Observed>();
@@ -156,8 +156,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const reply = JSON.parse(cli.stdout); expect(reply.state).toBe("completed");
     const index = JSON.parse(readFileSync(join(project, "runs", reply.runId, "results.json"), "utf8"));
     const q = index.quantities.find((q: any) => q.name === entry.expected.quantity);
-    const values = JSON.parse(readFileSync(join(project, q.data.path), "utf8")).values;
-    expect({ kind: "value", quantity: q.name, unit: q.unit, value: values.at(-1) }).toEqual(await cached(entry));
+    expect({ kind: "value", quantity: q.name, unit: q.unit, value: observedValue(q, project) }).toEqual(await cached(entry));
     const log = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
     expect(log.map(row => row.event.phase)).toEqual(["request", "decision", "outcome"]);
     expect(log[1].event.event.decision.allow).toBe(true); expect(log[2].event.event.runId).toBe(reply.runId);

@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { callAdapter } from "../src/core/adapterClient";
 import { loadOracleEntries, runOracleSet, unverifiedQuantities, type Observed, type OracleEntry } from "../src/core/oracle";
 import { RunManager, type Budget } from "../src/core/runManager";
+import { observedValue } from "./helpers/quantityValue";
 
 // FEED's own oracle entries (oracles/seed in the FEED repo, closed-form expected values) run through the adapter and the run
 // manager against the real headless runner and the real OFFBEAT solver. Needs the FEED repo with `npm run build`, its entries,
@@ -85,8 +86,7 @@ async function observe(entry: OracleEntry): Promise<Observed> {
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
   const q = index.quantities.find((x: { name: string }) => x.name === entry.expected.quantity);
-  const data = JSON.parse(readFileSync(join(root, q.data.path), "utf8")) as { values: number[] };
-  return { kind: "value", quantity: q.name, value: data.values[data.values.length - 1]!, unit: q.unit };
+  return { kind: "value", quantity: q.name, value: observedValue(q, root), unit: q.unit };
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
