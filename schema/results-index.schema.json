@@ -109,7 +109,7 @@
           },
           "dimension": {
             "type": "string",
-            "enum": ["length","time","temperature","pressure","energy","power","power-per-length","power-per-volume","heat-flux","mass-flow","probability","count","rate","dimensionless","other"]
+            "enum": ["length","time","temperature","pressure","energy","power","power-per-length","power-per-volume","heat-flux","heat-transfer-coefficient","mass-flow","probability","count","rate","dimensionless","other"]
           },
           "coordinates": {
             "type": "object",

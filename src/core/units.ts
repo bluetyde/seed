@@ -18,6 +18,7 @@ export type Dimension =
   | "power-per-length"
   | "power-per-volume"
   | "heat-flux"
+  | "heat-transfer-coefficient"
   | "mass-flow"
   | "probability"
   | "count"
@@ -27,7 +28,7 @@ export type Dimension =
 
 export const DIMENSIONS: readonly Dimension[] = [
   "length", "time", "temperature", "pressure", "energy", "power", "power-per-length", "power-per-volume",
-  "heat-flux", "mass-flow", "probability", "count", "rate", "dimensionless", "other"
+  "heat-flux", "heat-transfer-coefficient", "mass-flow", "probability", "count", "rate", "dimensionless", "other"
 ];
 
 const BASE_AXES = ["m", "kg", "s", "K", "A", "mol"] as const;
@@ -116,6 +117,7 @@ const SI: Partial<Record<Dimension, Vec>> = {
   "power-per-length": { kg: 1, m: 1, s: -3 },
   "power-per-volume": { kg: 1, m: -1, s: -3 },
   "heat-flux": { kg: 1, s: -3 },
+  "heat-transfer-coefficient": { kg: 1, s: -3, K: -1 },
   "mass-flow": { kg: 1, s: -1 }
 };
 
