@@ -50,9 +50,10 @@ const numArray = (v: unknown): v is number[] => Array.isArray(v) && v.length > 0
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 
 /** Checks the schema cannot express: lengths, order, cell types, units. */
-function checkShape(d: QuantityData): TypedError[] {
+function checkShape(d: QuantityData, strictUnits: boolean): TypedError[] {
   const e: TypedError[] = [];
   const unit = (u: string, field: string): void => {
+    if (!strictUnits) return; // v0.1 files carry free-text units (RAFT: dk/k); only a declared dimension makes the unit checkable
     const p = parseUnit(u);
     if (!p.ok) e.push(err("E_UNITS", field, p.reason));
   };
@@ -172,6 +173,6 @@ export function readQuantityData(source: string | unknown, entry: IndexEntryView
     if (data.quantity !== entry.name) return { ok: false, errors: [err("E_SCHEMA_INVALID", "/quantity", `the file is for ${JSON.stringify(data.quantity)}, the index entry is ${JSON.stringify(entry.name)}`)] };
     if (data.unit !== entry.unit) return { ok: false, errors: [err("E_UNITS", "/unit", `the file says ${JSON.stringify(data.unit)}, the index entry says ${JSON.stringify(entry.unit)}`)] };
   }
-  const problems = checkShape(data);
+  const problems = checkShape(data, !converted);
   return problems.length ? { ok: false, errors: problems } : { ok: true, data, converted };
 }

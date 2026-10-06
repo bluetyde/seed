@@ -156,6 +156,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const reply = JSON.parse(cli.stdout); expect(reply.state).toBe("completed");
     const index = JSON.parse(readFileSync(join(project, "runs", reply.runId, "results.json"), "utf8"));
     const q = index.quantities.find((q: any) => q.name === entry.expected.quantity);
+    const values = JSON.parse(readFileSync(join(project, q.data.path), "utf8")).values;
     expect({ kind: "value", quantity: q.name, unit: q.unit, value: observedValue(q, project) }).toEqual(await cached(entry));
     const log = readFileSync(join(state, "engines", sha256Hex(bundle), "admissions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
     expect(log.map(row => row.event.phase)).toEqual(["request", "decision", "outcome"]);

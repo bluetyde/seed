@@ -103,6 +103,13 @@ describe("the five v0.1 shapes convert", () => {
     fails(readQuantityData({ quantity: "minimal_cut_sets", unit: "1", cutSets: [{ events: ["a"] }] }, entry("minimal_cut_sets", "1")), "E_SCHEMA_INVALID");
   });
 
+  it("keeps free-text units of v0.1 files, but not once a dimension is declared", () => {
+    const f = { quantity: "rho", unit: "dk/k", t: [0, 1], values: [0, 1] };
+    ok(readQuantityData(f, entry("rho", "dk/k", { coordinates: timeAxis })));
+    fails(readQuantityData(f, entry("rho", "dk/k", { coordinates: timeAxis, dimension: "dimensionless" })), "E_UNITS", "/unit");
+    fails(readQuantityData({ quantity: "rho", kind: "series", unit: "dk/k", axis: { name: "t", unit: "s" }, x: [0, 1], values: [0, 1], schema: "seed.quantity-data/0.2" }, entry("rho", "dk/k")), "E_UNITS", "/unit");
+  });
+
   it("refuses a v0.1 file whose name or unit differs from the index entry, and unknown shapes", () => {
     fails(readQuantityData({ quantity: "a", unit: "K", values: [1] }, entry("b", "K")), "E_SCHEMA_INVALID", "/quantity");
     fails(readQuantityData({ quantity: "a", unit: "K", values: [1] }, entry("a", "degC")), "E_UNITS", "/unit");
