@@ -87,3 +87,23 @@ describe("hasUncommittedEdits", () => {
     expect(hasUncommittedEdits(d)).toBe(true);
   });
 });
+
+describe("gitStatus", () => {
+  it("changes when a file is added, so a developer's new file can be told from an unchanged folder", async () => {
+    const { git } = await import("./helpers/repo");
+    const { gitStatus } = await import("./helpers/appTree");
+    const d = app();
+    git(d, "init", "-b", "main");
+    git(d, "add", "-A");
+    git(d, "commit", "-m", "first");
+    const before = gitStatus(d);
+    expect(gitStatus(d)).toBe(before);
+    writeFileSync(join(d, "src", "new.txt"), "x");
+    expect(gitStatus(d)).not.toBe(before);
+    expect(gitStatus(d)).toContain("src/new.txt");
+  });
+  it("is empty outside a checkout", async () => {
+    const { gitStatus } = await import("./helpers/appTree");
+    expect(gitStatus(app())).toBe("");
+  });
+});

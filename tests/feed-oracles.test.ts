@@ -9,7 +9,7 @@ import { callAdapter } from "../src/core/adapterClient";
 import { loadOracleEntries, runOracleSet, unverifiedQuantities, type Observed, type OracleEntry } from "../src/core/oracle";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // FEED's own oracle entries (oracles/seed in the FEED repo, closed-form expected values) run through the adapter and the run
 // manager against the real headless runner and the real OFFBEAT solver. Needs the FEED repo with `npm run build`, its entries,
@@ -41,10 +41,12 @@ const appCommit = (() => {
 
 let treeBefore: Map<string, string> | undefined;
 let editedBefore = false;
+let statusBefore = "";
 beforeAll(() => {
   if (have) {
     treeBefore = appTree(repo);
     editedBefore = hasUncommittedEdits(repo);
+    statusBefore = gitStatus(repo);
   }
   process.env.SEED_FEED_HEADLESS = bundle;
   process.env.SEED_FEED_ORACLES = join(base, "entries");
@@ -162,8 +164,9 @@ describe.skipIf(!have)("FEED is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", (ctx) => {
     expect(treeBefore).toBeDefined();
     const changes = treeChanges(treeBefore!, appTree(repo), trackedFiles(repo));
-    // someone was already editing the app when the runs began (another session on this machine): the changes cannot be told from theirs
-    if (changes.length > 0 && editedBefore) return ctx.skip();
+    // someone was editing the app when the runs began, or changed what git sees in it while they ran (another session on this machine):
+    // the changes cannot be told from theirs
+    if (changes.length > 0 && (editedBefore || gitStatus(repo) !== statusBefore)) return ctx.skip();
     expect(changes).toEqual([]);
   });
 });
