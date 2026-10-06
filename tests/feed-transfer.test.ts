@@ -93,8 +93,10 @@ describe.skipIf(!have)("FEED transfer command behind the SEED transfer core (rea
       const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", requestId: "req-d", actor: human, verb: "describe" }, { projectRoot: tmp, timeoutMs: 120000 });
       expect(o.ok).toBe(true);
       const reply = (o as any).reply;
-      expect(reply.result.transfers.map((t: any) => t.field)).toEqual(["heating-to-pin"]);
+      expect(reply.result.transfers.map((t: any) => t.field)).toEqual(["heating-to-pin", "coolant-boundary"]);
       expect(reply.result.transfers[0].accepts).toContainEqual({ dimension: "energy", normalization: "per-source-particle" });
+      // the coolant boundary: both forms, matched on exactly their roles
+      expect(reply.result.transfers[1].accepts).toEqual([{ dimension: "temperature", normalization: "none", additional: [{ role: "heat-transfer-coefficient", dimension: "heat-transfer-coefficient" }] }, { dimension: "temperature", normalization: "none" }]);
     } finally {
       delete process.env.SEED_FEED_HEADLESS;
     }
