@@ -7,6 +7,7 @@ import { callAdapter } from "../src/core/adapterClient";
 import { loadOracleEntries, runOracleSet, unverifiedQuantities, comparePins, pinsOf, type Observed, type OracleEntry } from "../src/core/oracle";
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
+import { observedValue } from "./helpers/quantityValue";
 
 // SNEED's own oracle entries (oracles/seed in the SNEED repository): hand-derived exact top-event probabilities (checked there against an
 // exhaustive enumeration) and bad-input refusals. They run through the adapter and the run manager. Needs the SNEED checkout built with
@@ -67,8 +68,7 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
   const q = index.quantities.find((x: { name: string }) => x.name === entry.expected.quantity);
   if (!q) throw new Error("the run has no quantity " + String(entry.expected.quantity));
-  const data = JSON.parse(readFileSync(join(root, q.data.path), "utf8")) as { value: number };
-  return { kind: "value", quantity: q.name, value: data.value, unit: q.unit };
+  return { kind: "value", quantity: q.name, value: observedValue(q, root), unit: q.unit };
 }
 
 const observed = new Map<string, Observed>();

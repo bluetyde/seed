@@ -7,6 +7,7 @@ import { callAdapter } from "../src/core/adapterClient";
 import { loadOracleEntries, runOracleSet, unverifiedQuantities, comparePins, pinsOf, type Observed, type OracleEntry } from "../src/core/oracle";
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
+import { observedValue } from "./helpers/quantityValue";
 
 // NODAL's own oracle entries (oracles/seed in the NODAL repo): four analytic cases whose expected values come from formulas and integrals that
 // do not use the solver, golden-vector regression cases, and bad inputs. They run through the adapter and the run manager. Needs the NODAL repo
@@ -70,8 +71,7 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
   const q = index.quantities.find((x: { name: string }) => x.name === entry.expected.quantity);
   if (!q) throw new Error("the run has no quantity " + String(entry.expected.quantity));
-  const data = JSON.parse(readFileSync(join(root, q.data.path), "utf8")) as { values: number[] };
-  return { kind: "value", quantity: q.name, value: data.values[data.values.length - 1]!, unit: q.unit };
+  return { kind: "value", quantity: q.name, value: observedValue(q, root), unit: q.unit };
 }
 
 const observed = new Map<string, Observed>();

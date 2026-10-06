@@ -7,6 +7,7 @@ import { callAdapter } from "../src/core/adapterClient";
 import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantities, type Observed, type OracleEntry } from "../src/core/oracle";
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
+import { observedValue } from "./helpers/quantityValue";
 
 // OpenMC Studio's own oracle entries (oracles/seed in the OpenMC repository): analytic cases whose expected values come from formulas and from
 // cross sections read out of the nuclear data library (a void ball's track length, absorption and track length in a pure B-10 slab), with
@@ -76,9 +77,7 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
   const q = index.quantities.find((x: { name: string }) => x.name === entry.expected.quantity);
   if (!q) throw new Error("the run has no quantity " + String(entry.expected.quantity) + " (has " + index.quantities.map((x: { name: string }) => x.name).join(", ") + ")");
-  const body = JSON.parse(readFileSync(join(root, q.data.path), "utf8")) as { bins: { mean: number }[] };
-  if (body.bins.length !== 1) throw new Error("expected one bin, got " + body.bins.length);
-  return { kind: "value", quantity: q.name, value: body.bins[0]!.mean, unit: q.unit };
+  return { kind: "value", quantity: q.name, value: observedValue(q, root), unit: q.unit };
 }
 
 const observed = new Map<string, Observed>();
