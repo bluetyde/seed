@@ -23,11 +23,13 @@ export type Recipe = {
   source: {
     runId: string; resultsSha256: string; quantity: string; dataSha256: string; unit: string; dimension: Dimension;
     normalization: string; revisionPins: Revision[];
+    /** Further quantities of the same run a target needs beside the primary one, each with the role the target names it by. */
+    additional?: { role: string; quantity: string; dataSha256: string; unit: string; dimension: Dimension; normalization: string; unitTo?: string }[];
   };
   target: { app: string; artifact: string; revision: string; field: string };
   units: { to: string };
   normalization: { kind: "none" | "source-rate" | "total-power"; value?: { value: number; unit: string }; origin?: string };
-  mapping: { spatial: Record<string, unknown>; time: { kind: "steady" | "series"; grid?: Record<string, unknown> }; extrapolation: "refused" };
+  mapping: { spatial: Record<string, unknown>; time: { kind: "steady" | "series"; grid?: Record<string, unknown>; select?: { kind: "last" | "at"; t?: number } }; extrapolation: "refused" };
   tolerance: { conservation: number; fixedBefore: "mapping" };
   applicability?: { range?: Record<string, unknown>; note?: string };
 };
@@ -77,7 +79,7 @@ export type TransferView = {
   /** The current revision of every artifact the recipe names. */
   currentRevisions: Record<string, string>;
   /** What the target app declared in `describe.transfers`, when known. */
-  targetTransfers?: { field: string; accepts: { dimension: string; normalization?: string }[] }[];
+  targetTransfers?: { field: string; accepts: { dimension: string; normalization?: string; additional?: { role: string; dimension: string }[] }[] }[];
   approvals: readonly Approval[];
   applied: readonly AppliedRecord[];
 };
@@ -116,6 +118,55 @@ function checkUnitsAndNormalization(r: Recipe, indexNormalization: string | unde
   return e;
 }
 
+export type Selected = { x: number; value: number; interpolated: boolean };
+
+/**
+ * One sample of a time series for a steady transfer: the last one, or the one at time t (linear between the two neighbours when t falls between
+ * samples; never outside the series). A string is the reason it cannot be chosen.
+ */
+export function selectSample(series: { x: number[]; values: number[] }, select: { kind: "last" | "at"; t?: number } | undefined): Selected | string {
+  if (!select) return "a time series needs mapping.time.select (last, or at a time) for a steady transfer";
+  const n = series.x.length;
+  if (select.kind === "last") return select.t === undefined ? { x: series.x[n - 1]!, value: series.values[n - 1]!, interpolated: false } : "select last takes no t";
+  if (select.t === undefined || !Number.isFinite(select.t)) return "select at needs a finite t";
+  const t = select.t;
+  if (t < series.x[0]! || t > series.x[n - 1]!) return `t ${t} is outside the series (${series.x[0]} to ${series.x[n - 1]})`;
+  let i = 0;
+  while (i < n - 1 && series.x[i + 1]! < t) i++;
+  if (series.x[i] === t) return { x: t, value: series.values[i]!, interpolated: false };
+  if (series.x[i + 1] === t) return { x: t, value: series.values[i + 1]!, interpolated: false };
+  const w = (t - series.x[i]!) / (series.x[i + 1]! - series.x[i]!);
+  return { x: t, value: series.values[i]! + w * (series.values[i + 1]! - series.values[i]!), interpolated: true };
+}
+
+/** One source quantity against its index entry, its data file and its pins. Returns the index entry when there is one. */
+function checkQuantity(
+  r: Recipe, index: any,
+  spec: { quantity: string; dataSha256: string; unit: string; dimension: Dimension; normalization: string },
+  at: string, additional: boolean, view: TransferView, invalid: TypedError[], stale: TypedError[],
+): (IndexEntryView & { data: { path: string; sha256: string }; normalization?: string }) | undefined {
+  const qd = index.quantities.find((x: { name: string }) => x.name === spec.quantity);
+  if (!qd) { invalid.push(err("E_NOT_FOUND", at + "/quantity", `the source run has no quantity ${JSON.stringify(spec.quantity)}`)); return undefined; }
+  if (qd.unit !== spec.unit) invalid.push(err("E_UNITS", at + "/unit", `the result's unit is ${JSON.stringify(qd.unit)}, the recipe says ${JSON.stringify(spec.unit)}`));
+  if (qd.dimension === undefined) invalid.push(err("E_UNITS", at + "/dimension", "the source quantity declares no dimension, so it is not offered to transfers"));
+  else if (qd.dimension !== spec.dimension) invalid.push(err("E_UNITS", at + "/dimension", `the result's dimension is ${qd.dimension}, the recipe says ${spec.dimension}`));
+  if (qd.normalization !== spec.normalization) stale.push(err("E_STALE_REVISION", at + "/normalization", "the result's normalization differs from the recipe's"));
+  if (additional && (qd.normalization !== "none" || spec.normalization !== "none")) invalid.push(err("E_UNITS", at + "/normalization", "an additional quantity must be absolute (normalization none)"));
+  if (qd.data.sha256 !== spec.dataSha256) stale.push(err("E_STALE_REVISION", at + "/dataSha256", "the source data differ from the ones the recipe pinned"));
+  const text = view.readData(qd.data.path);
+  if (text === null) invalid.push(err("E_OUTPUT_INCOMPLETE", at + "/dataSha256", "the source data file is missing"));
+  else if (sha256Hex(text) !== qd.data.sha256) stale.push(err("E_STALE_REVISION", at + "/dataSha256", "the source data file does not match the hash in the results index"));
+  else {
+    const rd = readQuantityData(text, qd);
+    if (!rd.ok) invalid.push(...rd.errors);
+    else if (rd.data.kind === "series" && r.mapping.time.kind === "steady") {
+      const sel = selectSample(rd.data, r.mapping.time.select);
+      if (typeof sel === "string") invalid.push(err("E_TIME_MAPPING", "/mapping/time/select", `${spec.quantity}: ${sel}`));
+    }
+  }
+  return qd;
+}
+
 export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
   const v = validate("transfer-recipe", recipeIn);
   if (!v.ok) return { state: "invalid", errors: v.errors, digest: "" };
@@ -124,7 +175,8 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
   const invalid: TypedError[] = [];
   const stale: TypedError[] = [];
 
-  // The source run and its result.
+  // The source run and its quantities: the primary one, and the additional ones a target such as a coolant boundary needs (a heat transfer
+  // coefficient beside a bulk temperature), each checked the same way against its own index entry and data file.
   let q: (IndexEntryView & { data: { path: string; sha256: string }; normalization?: string }) | undefined;
   if (view.sourceIndex === null) invalid.push(err("E_OUTPUT_INCOMPLETE", "/source/runId", "the source run has no results index"));
   else {
@@ -135,33 +187,31 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
     else if (view.sourceRunState !== "completed") invalid.push(err("E_OUTPUT_INCOMPLETE", "/source/runId", `the source run is ${view.sourceRunState ?? "unknown"}, not completed`));
     else {
       if (sha256Hex(view.sourceIndex) !== r.source.resultsSha256) stale.push(err("E_STALE_REVISION", "/source/resultsSha256", "the source results differ from the ones the recipe pinned"));
-      q = index.quantities.find((x: { name: string }) => x.name === r.source.quantity);
-      if (!q) invalid.push(err("E_NOT_FOUND", "/source/quantity", `the source run has no quantity ${JSON.stringify(r.source.quantity)}`));
-      else {
-        const qd = q as any;
-        if (qd.unit !== r.source.unit) invalid.push(err("E_UNITS", "/source/unit", `the result's unit is ${JSON.stringify(qd.unit)}, the recipe says ${JSON.stringify(r.source.unit)}`));
-        if (qd.dimension === undefined) invalid.push(err("E_UNITS", "/source/dimension", "the source quantity declares no dimension, so it is not offered to transfers"));
-        else if (qd.dimension !== r.source.dimension) invalid.push(err("E_UNITS", "/source/dimension", `the result's dimension is ${qd.dimension}, the recipe says ${r.source.dimension}`));
-        if (qd.normalization !== r.source.normalization) stale.push(err("E_STALE_REVISION", "/source/normalization", "the result's normalization differs from the recipe's"));
-        if (qd.data.sha256 !== r.source.dataSha256) stale.push(err("E_STALE_REVISION", "/source/dataSha256", "the source data differ from the ones the recipe pinned"));
-        const text = view.readData(qd.data.path);
-        if (text === null) invalid.push(err("E_OUTPUT_INCOMPLETE", "/source/dataSha256", "the source data file is missing"));
-        else if (sha256Hex(text) !== qd.data.sha256) stale.push(err("E_STALE_REVISION", "/source/dataSha256", "the source data file does not match the hash in the results index"));
-        else {
-          const rd = readQuantityData(text, qd);
-          if (!rd.ok) invalid.push(...rd.errors);
+      q = checkQuantity(r, index, r.source, "/source", false, view, invalid, stale);
+      const roles = new Set<string>(), names = new Set<string>([r.source.quantity]);
+      (r.source.additional ?? []).forEach((a, i) => {
+        const at = `/source/additional/${i}`;
+        if (roles.has(a.role)) invalid.push(err("E_SCHEMA_INVALID", at + "/role", `the role ${JSON.stringify(a.role)} is used twice`));
+        if (names.has(a.quantity)) invalid.push(err("E_SCHEMA_INVALID", at + "/quantity", "a quantity is named twice in one recipe"));
+        roles.add(a.role);
+        names.add(a.quantity);
+        checkQuantity(r, index, a, at, true, view, invalid, stale);
+        if (a.unitTo !== undefined) {
+          const bad = unitMismatch(a.unitTo, a.dimension);
+          if (bad) invalid.push(err("E_UNITS", at + "/unitTo", bad));
         }
-      }
+      });
     }
   }
   invalid.push(...checkUnitsAndNormalization(r, q ? (q as any).normalization : undefined));
 
-  // What the target accepts.
+  // What the target accepts: the primary dimension and normalization and exactly the additional roles the recipe carries.
   if (view.targetTransfers) {
     const t = view.targetTransfers.find((x) => x.field === r.target.field);
+    const have = (r.source.additional ?? []).map((a) => `${a.role}:${a.dimension}`).sort().join(",");
     if (!t) invalid.push(err("E_UNSUPPORTED", "/target/field", `the target app declares no transfer ${JSON.stringify(r.target.field)}`));
-    else if (!t.accepts.some((a) => a.dimension === r.source.dimension && (a.normalization === undefined || a.normalization === r.source.normalization))) {
-      invalid.push(err("E_UNITS", "/target/field", `the target does not accept a ${r.source.dimension} (${r.source.normalization}) source for ${r.target.field}`));
+    else if (!t.accepts.some((a) => a.dimension === r.source.dimension && (a.normalization === undefined || a.normalization === r.source.normalization) && (a.additional ?? []).map((x) => `${x.role}:${x.dimension}`).sort().join(",") === have)) {
+      invalid.push(err("E_UNITS", "/target/field", `the target does not accept a ${r.source.dimension} (${r.source.normalization}) source${have ? " with " + have : ""} for ${r.target.field}`));
     }
   }
 
@@ -350,7 +400,11 @@ export type TransferRequest = {
   schema: "seed.transfer-request/0.2";
   recipe: Recipe;
   recipeDigest: string;
-  source: { quantity: IndexEntryView; data: QuantityData };
+  source: {
+    quantity: IndexEntryView; data: QuantityData; selected?: Selected;
+    /** The further quantities of the recipe, by role, in the same form. */
+    additional?: { role: string; quantity: IndexEntryView; data: QuantityData; selected?: Selected }[];
+  };
   target: { artifact: string; revision: string; content: string };
 };
 export type TransferReply = { ok: true; output: { content: string }; checks?: Record<string, unknown> } | { ok: false; errors: { code: string; field?: string; message: string }[] };
@@ -359,7 +413,7 @@ export type AppliedTransfer = {
   ok: true;
   content: string;
   contentSha256: string;
-  provenance: { recipeId: string; recipeDigest: string; approvalId: string; sourceRunId: string; sourceResultsSha256: string; targetRevisionBefore: string; targetRevisionAfter: string };
+  provenance: { recipeId: string; recipeDigest: string; approvalId: string; sourceRunId: string; sourceResultsSha256: string; targetRevisionBefore: string; targetRevisionAfter: string; selected?: { quantity: string; x: number; value: number; interpolated: boolean }[] };
   checks?: Record<string, unknown>;
 };
 
@@ -402,10 +456,19 @@ export async function applyTransfer(opts: {
   if (ev.state !== "approved" || !ev.approval) return { ok: false, errors: ev.errors.length ? ev.errors : [err("E_NOT_PERMITTED", "/approval", `the recipe is ${ev.state}`)] };
 
   const index = JSON.parse(view.sourceIndex!);
-  const q = index.quantities.find((x: { name: string }) => x.name === recipe.source.quantity);
-  const read = readQuantityData(view.readData(q.data.path)!, q);
-  if (!read.ok) return { ok: false, errors: read.errors };
-  const reply = await opts.run({ schema: "seed.transfer-request/0.2", recipe, recipeDigest: ev.digest, source: { quantity: q, data: read.data }, target: { artifact: recipe.target.artifact, revision: recipe.target.revision, content: opts.targetContent } });
+  const loaded: { role?: string; entry: any; data: QuantityData; selected?: Selected }[] = [];
+  for (const sp of [{ role: undefined as string | undefined, spec: recipe.source }, ...(recipe.source.additional ?? []).map((a) => ({ role: a.role as string | undefined, spec: a }))]) {
+    const entry = index.quantities.find((x: { name: string }) => x.name === sp.spec.quantity);
+    const read = readQuantityData(view.readData(entry.data.path)!, entry);
+    if (!read.ok) return { ok: false, errors: read.errors };
+    const selected = read.data.kind === "series" && recipe.mapping.time.kind === "steady" ? selectSample(read.data, recipe.mapping.time.select) : undefined;
+    if (typeof selected === "string") return { ok: false, errors: [err("E_TIME_MAPPING", "/mapping/time/select", selected)] };
+    loaded.push({ role: sp.role, entry, data: read.data, ...(selected ? { selected } : {}) });
+  }
+  const reply = await opts.run({ schema: "seed.transfer-request/0.2", recipe, recipeDigest: ev.digest, source: {
+      quantity: loaded[0]!.entry, data: loaded[0]!.data, ...(loaded[0]!.selected ? { selected: loaded[0]!.selected } : {}),
+      ...(loaded.length > 1 ? { additional: loaded.slice(1).map((l) => ({ role: l.role!, quantity: l.entry, data: l.data, ...(l.selected ? { selected: l.selected } : {}) })) } : {}),
+    }, target: { artifact: recipe.target.artifact, revision: recipe.target.revision, content: opts.targetContent } });
   if (!reply || typeof reply !== "object" || typeof (reply as { ok?: unknown }).ok !== "boolean") return { ok: false, errors: [err("E_APP_FAILED", "/reply", "the transfer command answered with something else than a reply", "app-content")] };
   if (!reply.ok) {
     const errs = Array.isArray(reply.errors) ? reply.errors : [];
@@ -419,6 +482,7 @@ export async function applyTransfer(opts: {
   if (reply.output.content === opts.targetContent) return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer left the target unchanged", "app-content")] };
   return {
     ok: true, content: reply.output.content, contentSha256: after, ...(reply.checks ? { checks: reply.checks } : {}),
-    provenance: { recipeId: recipe.recipeId, recipeDigest: ev.digest, approvalId: ev.approval.approvalId, sourceRunId: recipe.source.runId, sourceResultsSha256: recipe.source.resultsSha256, targetRevisionBefore: recipe.target.revision, targetRevisionAfter: after }
+    provenance: { recipeId: recipe.recipeId, recipeDigest: ev.digest, approvalId: ev.approval.approvalId, sourceRunId: recipe.source.runId, sourceResultsSha256: recipe.source.resultsSha256, targetRevisionBefore: recipe.target.revision, targetRevisionAfter: after,
+      ...(loaded.some((l) => l.selected) ? { selected: loaded.filter((l) => l.selected).map((l) => ({ quantity: l.entry.name as string, ...l.selected! })) } : {}) }
   };
 }
