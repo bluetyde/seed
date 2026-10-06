@@ -14,7 +14,7 @@ import { validateHostConfiguration } from "./fileRunHost";
 import { inside, readAdmissions, readHostJson, regularFile, safeChild, writeHostJson } from "./hostFiles";
 import { openProject, withProjectLockAsync } from "./projectStore";
 import { buildReport, type ReportRun, type Series } from "./report";
-import { validate } from "./validate";
+import { RESULTS_INDEX_SCHEMAS, validate } from "./validate";
 import { writeFileAtomic } from "./atomicFile";
 import { evaluateGate } from "./policy";
 import { prepareReport, finishReport } from "./reportReceipt";
@@ -163,7 +163,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
           const bytes = checked(output.path, output.sha256);
           try {
             const doc = JSON.parse(bytes.toString());
-            if (doc.schema === "seed.results-index/0.1") indexes.push(doc);
+            if (RESULTS_INDEX_SCHEMAS.includes(doc.schema)) indexes.push(doc);
           } catch {
             /* quantity formats may be non-JSON */
           }

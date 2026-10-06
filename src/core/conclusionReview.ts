@@ -13,6 +13,7 @@ import { isAbsolute, join, dirname, relative } from "node:path";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { claimsOf } from "./conclusionDraft";
 import { validateHostConfiguration } from "./fileRunHost";
+import { RESULTS_INDEX_SCHEMAS } from "./validate";
 import { inside, readHostJson, regularFile, safeChild, writeHostJson } from "./hostFiles";
 import { openProject, withProjectLockAsync } from "./projectStore";
 import { readRegisteredReport, prepareReport, finishReport, reportReceiptFolder } from "./reportReceipt";
@@ -197,7 +198,7 @@ export function inspectConclusion(file: string, reviewerFile: string | undefined
           return undefined;
         }
       })
-      .filter((d: any) => d?.schema === "seed.results-index/0.1");
+      .filter((d: any) => RESULTS_INDEX_SCHEMAS.includes(d?.schema));
     if (indexes.length !== 1) throw Error("invalid saved results index");
     run.results = indexes[0];
     run.series = {};

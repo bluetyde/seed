@@ -1,5 +1,6 @@
 import { canonicalJson, sha256Hex } from "./canonical";
 import { validate, type TypedError } from "./validate";
+import { unitMismatch, type Dimension } from "./units";
 
 export function checkProject(manifest: unknown): TypedError[] {
   if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) {
@@ -429,6 +430,15 @@ export function checkResultsAgainstRecord(index: unknown, record: unknown): Type
         message: "quantity provenance names an input revision that is not in the run's snapshot",
         source: "seed"
       });
+    }
+    // v0.2: a dimension needs the v0.2 index, and the quantity's unit must belong to it.
+    if (q.dimension !== undefined) {
+      if (idx.schema !== "seed.results-index/0.2") {
+        errors.push({ code: "E_SCHEMA_VERSION", field: `/quantities/${qi}/dimension`, message: "a quantity dimension needs schema seed.results-index/0.2", source: "seed" });
+      } else {
+        const bad = typeof q.unit === "string" ? unitMismatch(q.unit, q.dimension as Dimension) : "the unit is missing";
+        if (bad) errors.push({ code: "E_UNITS", field: `/quantities/${qi}/unit`, message: bad, source: "seed" });
+      }
     }
   });
   return errors;

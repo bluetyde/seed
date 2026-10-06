@@ -1,0 +1,76 @@
+{
+  "$id": "https://seed.invalid/schema/quantity-data.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema", "quantity", "kind", "unit", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "seed.quantity-data/0.2" },
+        "quantity": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "kind": { "const": "scalar" },
+        "unit": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit" },
+        "value": { "type": "number" },
+        "std": { "type": "number", "minimum": 0 },
+        "meta": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema", "quantity", "kind", "unit", "axis", "x", "values"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "seed.quantity-data/0.2" },
+        "quantity": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "kind": { "const": "series" },
+        "unit": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit" },
+        "axis": {
+          "type": "object",
+          "required": ["name", "unit"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "unit": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit" }
+          }
+        },
+        "x": { "type": "array", "minItems": 1, "items": { "type": "number" } },
+        "values": { "type": "array", "minItems": 1, "items": { "type": "number" } },
+        "std": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+        "min": { "type": "array", "items": { "type": "number" } },
+        "max": { "type": "array", "items": { "type": "number" } },
+        "labels": { "type": "array", "items": { "type": "string", "maxLength": 200 } },
+        "meta": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema", "quantity", "kind", "unit", "columns", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "seed.quantity-data/0.2" },
+        "quantity": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "kind": { "const": "table" },
+        "unit": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit" },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "unit", "role"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+              "unit": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit" },
+              "role": { "type": "string", "enum": ["label", "coordinate", "value", "std"] },
+              "of": { "type": "string", "minLength": 1, "maxLength": 80 }
+            }
+          }
+        },
+        "rows": { "type": "array", "items": { "type": "array" } },
+        "meta": { "type": "object" }
+      }
+    }
+  ]
+}

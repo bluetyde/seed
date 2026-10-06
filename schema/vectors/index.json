@@ -307,6 +307,15 @@
     }
   },
   {
+    "file": "bad/results-index-dimension-unknown.json",
+    "family": "results-index",
+    "valid": false,
+    "expect": {
+      "code": "E_SCHEMA_INVALID",
+      "field": "/quantities/0/dimension"
+    }
+  },
+  {
     "file": "bad/run-record-wrong-version.json",
     "family": "run-record",
     "valid": false,
@@ -1443,6 +1452,11 @@
   },
   {
     "file": "good/results-index-full.json",
+    "family": "results-index",
+    "valid": true
+  },
+  {
+    "file": "good/results-index-v02-dimension.json",
     "family": "results-index",
     "valid": true
   },
