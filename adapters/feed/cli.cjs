@@ -193,8 +193,10 @@ function cleanTransfers(list) {
   const out = [];
   for (const t of list.slice(0, 20)) {
     if (!t || typeof t.field !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(t.field) || !Array.isArray(t.accepts) || t.accepts.length === 0) continue;
-    const accepts = t.accepts.filter((a) => a && typeof a.dimension === "string" && a.dimension.length > 0 && a.dimension.length <= 40 && (a.normalization === undefined || NORMALIZATIONS.includes(a.normalization)))
-      .map((a) => (a.normalization === undefined ? { dimension: a.dimension } : { dimension: a.dimension, normalization: a.normalization }));
+    const roleOk = (x) => x && typeof x.role === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(x.role) && typeof x.dimension === "string" && x.dimension.length > 0 && x.dimension.length <= 40;
+    const accepts = t.accepts.filter((a) => a && typeof a.dimension === "string" && a.dimension.length > 0 && a.dimension.length <= 40 && (a.normalization === undefined || NORMALIZATIONS.includes(a.normalization))
+      && (a.additional === undefined || (Array.isArray(a.additional) && a.additional.length <= 4 && a.additional.every(roleOk))))
+      .map((a) => ({ dimension: a.dimension, ...(a.normalization === undefined ? {} : { normalization: a.normalization }), ...(a.additional === undefined ? {} : { additional: a.additional.map((x) => ({ role: x.role, dimension: x.dimension })) }) }));
     if (accepts.length !== t.accepts.length) continue;
     out.push({ field: t.field, accepts, ...(t.parameters && typeof t.parameters === "object" && !Array.isArray(t.parameters) ? { parameters: t.parameters } : {}) });
   }
