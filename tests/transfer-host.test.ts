@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -497,11 +497,11 @@ describe("the commit is one critical section, and nothing leaves the project (Co
     expect(f.journal().some((r: any) => r.event.phase === "apply-outcome" && r.event.event.incomplete)).toBe(true);
   });
 
-  it("a linked ancestor does not move the recipe folder out of the project", async () => {
+  it("a linked ancestor does not move the recipe folder out of the project", async (ctx) => {
     const f = await fixture();
     const external = join(f.root, "external");
     mkdirSync(join(external, "transfers"), { recursive: true });
-    try { symlinkSync(external, join(f.project, "linked"), "junction"); } catch { return; }
+    try { symlinkSync(external, join(f.project, "linked"), "junction"); } catch { return ctx.skip(); } // no link rights on this machine: skipped, never a silent pass
     const c = f.config(f.agent);
     c.transfersFolder = "linked/transfers";
     const file = join(f.root, "linked-folder.json");
@@ -511,14 +511,14 @@ describe("the commit is one critical section, and nothing leaves the project (Co
     expect(readdirSync(join(external, "transfers"))).toEqual([]);
   });
 
-  it("a target reached through a linked ancestor is neither read nor written", async () => {
+  it("a target reached through a linked ancestor is neither read nor written", async (ctx) => {
     const f = await fixture();
     await propose(f);
     await approve(f);
     const external = join(f.root, "external-target");
     mkdirSync(external, { recursive: true });
     writeFileSync(join(external, "dst-case.json"), f.dstCase);
-    try { symlinkSync(external, join(f.project, "linkdir"), "junction"); } catch { return; }
+    try { symlinkSync(external, join(f.project, "linkdir"), "junction"); } catch { return ctx.skip(); } // no link rights on this machine: skipped, never a silent pass
     const p = openProject(f.project) as any;
     const m = structuredClone(p.value.manifest);
     m.artifacts[1].path = "linkdir/dst-case.json";
