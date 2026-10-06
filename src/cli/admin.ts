@@ -1,6 +1,7 @@
 import type { Readable } from "node:stream";
 import { recoverHostCalculation } from "../core/hostControl";
 import { releaseLessonReservation } from "../core/lessonHistory";
+import { approveTransfer } from "../core/transferHost";
 import { readRequest } from "./seed";
 
 /**
@@ -8,12 +9,13 @@ import { readRequest } from "./seed";
  * It reads its own configuration variable, SEED_ADMIN_HOST_CONFIG, so an agent's SEED_HOST_CONFIG never reaches it,
  * and the operation itself still requires the configured actor to be a human.
  */
-export const ADMIN_VERBS = ["release-intent-reservation", "recover"];
+export const ADMIN_VERBS = ["release-intent-reservation", "recover", "approve-transfer"];
 
 export async function runAdminCli(
   argv: string[],
   stream: Readable,
   hostConfig = process.env.SEED_ADMIN_HOST_CONFIG,
+  transferHostConfig = process.env.SEED_ADMIN_TRANSFER_HOST_CONFIG,
 ): Promise<{ code: number; reply: unknown }> {
   const failure = (message: string, code = "E_SCHEMA_INVALID") => ({
     code: 2,
@@ -29,9 +31,11 @@ export async function runAdminCli(
       "E_VERB_UNKNOWN",
     );
   }
-  if (!hostConfig) {
+  if (argv[0] === "approve-transfer" ? !transferHostConfig : !hostConfig) {
     return failure(
-      "set SEED_ADMIN_HOST_CONFIG to a host configuration whose actor is a human",
+      argv[0] === "approve-transfer"
+        ? "set SEED_ADMIN_TRANSFER_HOST_CONFIG to a transfer host configuration whose actor is a human"
+        : "set SEED_ADMIN_HOST_CONFIG to a host configuration whose actor is a human",
       "E_SETUP_REQUIRED",
     );
   }
@@ -42,9 +46,11 @@ export async function runAdminCli(
     return failure(e instanceof Error ? e.message : "invalid input");
   }
   const outcome =
-    argv[0] === "recover"
-      ? await recoverHostCalculation(hostConfig, request)
-      : releaseLessonReservation(hostConfig, request);
+    argv[0] === "approve-transfer"
+      ? await approveTransfer(transferHostConfig!, request)
+      : argv[0] === "recover"
+        ? await recoverHostCalculation(hostConfig!, request)
+        : releaseLessonReservation(hostConfig!, request);
   return { code: outcome.ok ? 0 : 2, reply: { schema: "seed.cli-reply/0.1", ...outcome } };
 }
 

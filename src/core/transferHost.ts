@@ -281,6 +281,11 @@ export function applyTransferFromHost(file: string, request: unknown): Promise<H
     if (sha256Hex(targetContent) !== target.revision.hash) return fail("E_STALE_REVISION", "the target file does not match the revision the project records", "/target/revision");
     const view = viewOf(x, recipe);
     const gate = gateFor(x, recipe, view);
+    // Writing a new target revision is a new_revision in effect: a failed oracle set or changed pins stop it as they stop a proposal.
+    if (gate.oracleBlocked || gate.pinsChanged) {
+      audit(x, "apply-refused", { recipeId: id, reason: "oracle set not clear or pins changed" });
+      return fail("E_NOT_PERMITTED", "an oracle set of the source or target app is not clear, or its pins changed since a human accepted them", "/oracles");
+    }
     audit(x, "apply-request", { recipeId: id, digest: recipeDigest(recipe), revisions: recipeRevisions(recipe) });
     const spec = app.transfer;
     const out = await applyTransfer({
