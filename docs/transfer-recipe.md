@@ -1,6 +1,6 @@
 # Transfer recipe and approval (proposal)
 
-Status 2026-10-06: **decided by the user (Q1 to Q4 all as recommended); core and host wiring built (section 6); not yet the study-log steps.** E4 step 4 of [TODO.md](../TODO.md), under [plan 08](plans/08-transfers-and-pipelines.md). It answers plan 08's open item "recipe file format and where it lives" and replaces FEED's provisional shapes (`feed.transfer-recipe/0.1`, FEED decision 0003). Data shapes and units it builds on: [contracts-v0.2-data-shapes.md](contracts-v0.2-data-shapes.md) (decided, built).
+Status 2026-10-06: **decided by the user (Q1 to Q4 all as recommended); core and host wiring built (section 6), a coolant boundary from NODAL (section 7); not yet the study-log steps.** E4 step 4 of [TODO.md](../TODO.md), under [plan 08](plans/08-transfers-and-pipelines.md). It answers plan 08's open item "recipe file format and where it lives" and replaces FEED's provisional shapes (`feed.transfer-recipe/0.1`, FEED decision 0003). Data shapes and units it builds on: [contracts-v0.2-data-shapes.md](contracts-v0.2-data-shapes.md) (decided, built).
 
 ## 1. What already exists
 
@@ -125,3 +125,17 @@ FEED built its `transfer` command on this recipe (FEED `docs/transfer-heating.md
 Every decision (request, refusal, outcome) is appended to a hash-chained journal in the state folder (`transfer-journal/admissions.jsonl`, the same format as the run host's). An **applied** recipe stays applied while its source and the target it produced stand, whatever became of its approval; a later change of either makes it stale.
 
 Not done: a transfer does not yet appear as a step in the study log (the journal records it); cylindrical and other source shapes; a real FEED command behind the host test (the core is tested with real FEED in `tests/feed-transfer.test.ts` and `tests/openmc-heating.test.ts`, the host with a fake target).
+
+## 7. A coolant boundary from NODAL (2026-10-06)
+
+A convective boundary needs two things from one run, and a fuel case needs them for an identified axial region: the coolant's bulk temperature and the heat transfer coefficient (plan 08: a bulk temperature alone is not a complete boundary). The recipe grew for that, additively:
+
+- `source.additional[]`: further quantities of the same run, each `{role, quantity, dataSha256, unit, dimension, normalization, unitTo?}`. The **role** is the name the target gives it (`heat-transfer-coefficient`). Each is checked exactly like the primary quantity (index entry, pinned hash, unit, dimension, readable data) and must be absolute (normalization `none`); roles and quantities are unique. `unitTo` is the unit the target should receive it in and must fit the dimension.
+- `mapping.time.select`: for a **steady** transfer from a time series SEED picks the sample before the app sees anything: `{kind: "last"}` or `{kind: "at", t}`. At a time between two samples the value is linear between them and flagged `interpolated`; a time outside the series is refused (`E_TIME_MAPPING`), never extrapolated. A series with no `select` is refused too. The chosen samples (quantity, time, value, interpolated) are recorded in the provenance.
+- `describe.transfers[].accepts[].additional`: the roles (and dimensions) a target takes with that primary quantity. A recipe matches an entry only when it carries exactly those roles.
+- Request to the target (`seed.transfer-request/0.2`): `source.selected` for the primary series, and `source.additional[]` with `{role, quantity, data, selected}` for the others.
+- New dimension `heat-transfer-coefficient` (W/m2/K, a different dimension from `heat-flux`, W/m2).
+
+The NODAL adapter now writes `seed.quantity-data/0.2` series and a `seed.results-index/0.2` with dimensions for the channels it knows (temperature, wall temperature, pressure, mass flow, heat transfer coefficient, time) when their units are the matching ones (K or degC, Pa, kg/s, W/m2/K, s); another pair stays free text and the quantity is not offered to transfers. `tests/nodal-boundary.test.ts` runs the heated-pipe model through the adapter (real NODAL): `t_out` (coolant temperature at the pipe outlet) and `h_surf` (the wall's coefficient) become the primary and the `heat-transfer-coefficient` role of a recipe for a fake boundary target, the boundary values equal the committed golden vector's last values, and a time between two samples equals the golden vector's linear mean.
+
+What SEED cannot check: that the NODAL cell and the heat structure the two channels belong to are the axial region the recipe's `mapping.spatial.region` names. The recipe states the region (the target's vocabulary); the human who approves reads both. A shared geometry convention across NODAL and the fuel case stays an open item of plan 08.
