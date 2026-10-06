@@ -134,7 +134,7 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 - [ ] 1. Contracts v0.2 data shapes and units (candidates 3 and 4 in [contracts-v0.2-candidates.md](docs/contracts-v0.2-candidates.md)): a transfer reads result data generically, and today each adapter's data file differs. Proposal: [contracts-v0.2-data-shapes.md](docs/contracts-v0.2-data-shapes.md) (2026-10-06, decided; schema, units and reader built; oracle observers and adapters still to move).
 - [ ] 2. OpenMC heating: a source-strength or power normalization the adapter can carry (the Studio project has a `sourceRate` setting) and an oracle for the heating score; heating by cell is mapped to eV per source particle today, with no oracle coverage.
 - [x] 3. FEED F3 (reviewed heating and boundary mappings): done 2026-10-05 (transfer intake, 81 tests, Codex reviewed). Its recipe and source shapes are provisional (FEED decision 0003) until step 4 here; FEED waits for SEED to define the recipe format and the OpenMC and NODAL readers.
-- [ ] 4. Transfer recipe schema, approval record (tier A3) and the refusal table of plan 08, built and tested against fake apps first, as the plan says.
+- [ ] 4. Transfer recipe schema, approval record (tier A3) and the refusal table of plan 08, built and tested against fake apps first, as the plan says. Proposal: [transfer-recipe.md](docs/transfer-recipe.md) (2026-10-06, awaiting the user).
 - [ ] 5. The real OpenMC-to-FEED transfer, then NODAL coolant into FEED (a time series mapped onto FEED's boundary condition: time mapping and the explicit boundary choice of plan 08).
 
 - [ ] Transfer recipe format and approval record (tier A3).
