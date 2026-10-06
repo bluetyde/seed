@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomicFile";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { isPortableRelative, resolveInside } from "./paths";
@@ -34,6 +34,11 @@ export type LockOptions = {
   beforeTakeover?: () => void;
   /** Test hook: replaces the recursive delete used for lock folders (to force a failed release). */
   removeTree?: (path: string) => void;
+  /**
+   * withProjectLockAsync only: how often the holder proves it is alive (default staleMs / 4, at most 30 s); 0 turns it off.
+   * A lock held by another host (where a process id says nothing) counts as abandoned only once its holder has been silent for staleMs.
+   */
+  heartbeatMs?: number;
 };
 
 export const MANIFEST_FILE = "seed.project.json";
@@ -230,7 +235,7 @@ export function openProject(dir: string): StoreResult<Project> {
 }
 
 type LockAcquireResult =
-  | { ok: true; release: () => TypedError | null }
+  | { ok: true; release: () => TypedError | null; beat: () => void }
   | { ok: false; errors: TypedError[] };
 
 type LockJudgement =
@@ -269,6 +274,20 @@ function checkSeedDir(dir: string, seedDir: string): TypedError | null {
   }
 }
 
+/** Writer locks this process holds, by project folder: the token that must still be in the lock's owner file for a write to be this writer's. */
+const heldLocks = new Map<string, { token: string; ownerPath: string }>();
+const heldKey = (dir: string) => (process.platform === "win32" ? resolve(dir).toLowerCase() : resolve(dir));
+const BEAT_FILE = "beat";
+
+/** The last sign of life of a lock: its acquisition or the holder's latest heartbeat, whichever is later. */
+function lastSign(lockDir: string, acquiredMs: number): number {
+  try {
+    return Math.max(acquiredMs, statSync(join(lockDir, BEAT_FILE)).mtimeMs);
+  } catch {
+    return acquiredMs;
+  }
+}
+
 function judgeLock(lockDir: string, ownerPath: string, o: Required<Pick<LockOptions, "staleMs" | "graceMs" | "isAlive" | "host" | "now">>): LockJudgement {
   let owner: { pid: number; host: string; acquiredAt: string } | null = null;
   try {
@@ -301,7 +320,7 @@ function judgeLock(lockDir: string, ownerPath: string, o: Required<Pick<LockOpti
       return alive ? { state: "held" } : { state: "stale" };
     }
     const acquired = new Date(owner.acquiredAt).getTime();
-    return !Number.isNaN(acquired) && nowMs - acquired > o.staleMs ? { state: "stale" } : { state: "held" };
+    return !Number.isNaN(acquired) && nowMs - lastSign(lockDir, acquired) > o.staleMs ? { state: "stale" } : { state: "held" };
   }
   try {
     return nowMs - statSync(lockDir).mtimeMs > o.graceMs ? { state: "stale" } : { state: "held" };
@@ -374,7 +393,17 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
         return { ok: false, errors: [toInternalError(err)] };
       }
 
+      heldLocks.set(heldKey(dir), { token, ownerPath });
+      const beat = (): void => {
+        try {
+          const current = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown } | null;
+          if (current !== null && current.token === token) writeFileSync(join(lockDir, BEAT_FILE), String(Date.now()));
+        } catch {
+          // a missed beat is only a smaller margin; the next one or the release tells whether the lock is still ours
+        }
+      };
       const release = (): TypedError | null => {
+        if (heldLocks.get(heldKey(dir))?.token === token) heldLocks.delete(heldKey(dir));
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
             const current = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown } | null;
@@ -394,7 +423,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
         }
         return null;
       };
-      return { ok: true, release };
+      return { ok: true, release, beat };
     }
 
     // The lock exists. Judge it; a stale lock is taken over under the takeover guard.
@@ -507,13 +536,19 @@ export async function withProjectLockAsync<T>(dir: string, fn: () => Promise<T>,
   if (!acq.ok) {
     return acq;
   }
+  // An asynchronous holder can wait on an adapter for a long time; its heartbeat is what tells a contender on another host that it is alive.
+  const beatMs = opts?.heartbeatMs ?? Math.min(30000, Math.floor((opts?.staleMs ?? 600000) / 4));
+  const timer = beatMs > 0 ? setInterval(acq.beat, beatMs) : undefined;
+  timer?.unref();
   let val: T;
   try {
     val = await fn();
   } catch (err: unknown) {
+    if (timer) clearInterval(timer);
     acq.release();
     throw err;
   }
+  if (timer) clearInterval(timer);
   const releaseError = acq.release();
   if (releaseError !== null) {
     return { ok: false, errors: [releaseError] };
@@ -552,14 +587,28 @@ export function saveProjectHeld(
   expectedRevision: string,
   opts?: LockOptions & { now?: () => Date }
 ): StoreResult<Project> {
-  return saveLocked(dir, manifest, expectedRevision, opts);
+  const fence = (): TypedError | null => {
+    const held = heldLocks.get(heldKey(dir));
+    const lost = (why: string): TypedError => ({ code: "E_PROJECT_LOCKED", field: "", message: `the project lock is not this writer's (${why}); nothing was saved`, source: "seed" });
+    if (!held) return lost("this process does not hold it");
+    try {
+      const current = JSON.parse(readFileSync(held.ownerPath, "utf8")) as { token?: unknown } | null;
+      return current !== null && current.token === held.token ? null : lost("it was taken over");
+    } catch {
+      return lost("it is gone or unreadable");
+    }
+  };
+  const first = fence();
+  if (first !== null) return { ok: false, errors: [first] };
+  return saveLocked(dir, manifest, expectedRevision, opts, fence);
 }
 
 function saveLocked(
   dir: string,
   manifest: Record<string, unknown>,
   expectedRevision: string,
-  opts?: LockOptions & { now?: () => Date }
+  opts?: LockOptions & { now?: () => Date },
+  fence?: () => TypedError | null
 ): StoreResult<Project> {
   {
     const manifestPath = join(dir, MANIFEST_FILE);
@@ -732,6 +781,9 @@ function saveLocked(
     const effectiveUpdated = nowTime >= storedUpdatedTime ? nowIso : new Date(storedUpdated).toISOString();
     newManifest.updated = effectiveUpdated;
 
+    // the last look before the write: a writer whose lock was taken over while it worked must not save
+    const lostLock = fence?.() ?? null;
+    if (lostLock !== null) return { ok: false, errors: [lostLock] };
     try {
       const content = JSON.stringify(newManifest, null, 2) + "\n";
       writeFileAtomic(manifestPath, content);

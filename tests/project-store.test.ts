@@ -29,6 +29,7 @@ import {
   recoverProject,
   resolveArtifact,
   saveProject,
+  saveProjectHeld,
   withProjectLock,
   withProjectLockAsync,
 } from "../src/core/projectStore";
@@ -1385,5 +1386,111 @@ describe("Project Store: review fixes (Codex, 2026-10-03)", () => {
     expect(res.ok).toBe(false);
     expect(JSON.parse(readFileSync(join(lockDirOf(dir), "owner.json"), "utf8")).token).toBe("live");
     expect(readdirSync(join(dir, ".seed")).sort()).toEqual(["lock"]);
+  });
+});
+
+describe("Project Store: a holder that keeps working, and a writer that lost its lock (E2 limit L4)", () => {
+  const fresh = () => {
+    const dir = makeTempDir();
+    createProject(dir, { name: "Beat", seedVersion: "0.1.0" });
+    return dir;
+  };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // a contender on another machine: it can only judge by age
+  const foreign = { host: "another-machine", staleMs: 400 };
+
+  it("an asynchronous holder that keeps its heartbeat is not taken over by a contender on another host, however long it works", async () => {
+    const dir = fresh();
+    let contended: { ok: boolean }[] = [];
+    const held = await withProjectLockAsync(
+      dir,
+      async () => {
+        for (let i = 0; i < 4; i++) {
+          await sleep(300); // 1200 ms of work in all: three times the 400 ms a silent lock would be given
+          contended.push(withProjectLock(dir, () => "stolen", foreign));
+        }
+        return "done";
+      },
+      { staleMs: 400 }
+    );
+    expect(held).toEqual({ ok: true, value: "done" });
+    expect(contended.map((c) => c.ok)).toEqual([false, false, false, false]);
+  });
+
+  it("a holder that goes silent is taken over after staleMs, and its late save is refused and changes nothing", async () => {
+    const dir = fresh();
+    const opened = openProject(dir);
+    if (!opened.ok) throw new Error("open");
+    let late: ReturnType<typeof saveProjectHeld> | undefined;
+    let taken: ReturnType<typeof withProjectLock<string>> | undefined;
+    const held = await withProjectLockAsync(
+      dir,
+      async () => {
+        await sleep(700); // silent for longer than staleMs: no heartbeat (heartbeatMs 0)
+        taken = withProjectLock(dir, () => "took over", foreign);
+        late = saveProjectHeld(dir, { ...opened.value.manifest, name: "late writer" }, opened.value.revision);
+        return "done";
+      },
+      { staleMs: 400, heartbeatMs: 0 }
+    );
+    expect(taken).toEqual({ ok: true, value: "took over" });
+    expect(late?.ok).toBe(false);
+    expect((late as { errors: { code: string; message: string }[] }).errors[0]).toMatchObject({ code: "E_PROJECT_LOCKED" });
+    expect((late as { errors: { message: string }[] }).errors[0]!.message).toContain("nothing was saved");
+    const after = openProject(dir);
+    expect(after.ok && after.value.manifest.name).toBe("Beat");
+    expect(held.ok).toBe(true); // releasing a lock that is no longer ours is quiet and leaves the new owner's alone
+  });
+
+  it("saveProjectHeld refuses a caller that does not hold the lock", () => {
+    const dir = fresh();
+    const opened = openProject(dir);
+    if (!opened.ok) throw new Error("open");
+    const r = saveProjectHeld(dir, { ...opened.value.manifest, name: "x" }, opened.value.revision);
+    expect(r.ok).toBe(false);
+    expect((r as { errors: { message: string }[] }).errors[0]!.message).toContain("does not hold it");
+  });
+
+  it("a writer whose lock is taken over between the check and the write is refused at the last look", async () => {
+    const dir = fresh();
+    const opened = openProject(dir);
+    if (!opened.ok) throw new Error("open");
+    let result: ReturnType<typeof saveProjectHeld> | undefined;
+    await withProjectLockAsync(dir, async () => {
+      // simulate the takeover during the save: change the owner token the moment the manifest is about to be written
+      const ownerPath = join(dir, ".seed", "lock", "owner.json");
+      const manifest = { ...opened.value.manifest, name: "racing" };
+      Object.defineProperty(manifest, "updated", {
+        enumerable: true,
+        get() {
+          const o = JSON.parse(readFileSync(ownerPath, "utf8"));
+          writeFileSync(ownerPath, JSON.stringify({ ...o, token: "someone-else" }));
+          return opened.value.manifest.updated;
+        },
+      });
+      result = saveProjectHeld(dir, manifest, opened.value.revision);
+    });
+    // the property read happens while the new manifest is cloned, before the last look
+    expect(result?.ok).toBe(false);
+    const after = openProject(dir);
+    expect(after.ok && after.value.manifest.name).toBe("Beat");
+  });
+
+  it("a normal save under the async lock still works and a heartbeat file is cleaned up with the lock", async () => {
+    const dir = fresh();
+    const opened = openProject(dir);
+    if (!opened.ok) throw new Error("open");
+    const r = await withProjectLockAsync(
+      dir,
+      async () => {
+        await sleep(120);
+        return saveProjectHeld(dir, { ...opened.value.manifest, name: "kept" }, opened.value.revision);
+      },
+      { staleMs: 400 }
+    );
+    expect(r.ok && r.value.ok).toBe(true);
+    expect(existsSync(join(dir, ".seed", "lock"))).toBe(false);
+    const after = openProject(dir);
+    expect(after.ok && after.value.manifest.name).toBe("kept");
   });
 });
