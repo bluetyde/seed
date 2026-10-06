@@ -48,6 +48,14 @@ describe("dimensions: W, W/m and W/m^3 are distinct (plan 08)", () => {
     }
   });
 
+  it("a heat transfer coefficient is W/m2/K, and not a heat flux", () => {
+    expect(mismatch("W/m2/K", "heat-transfer-coefficient")).toBeNull();
+    expect(mismatch("kW/m^2/K", "heat-transfer-coefficient")).toBeNull();
+    expect(mismatch("W/m2", "heat-transfer-coefficient")).not.toBeNull();
+    expect(mismatch("W/m2/K", "heat-flux")).not.toBeNull();
+    expect(toSI(2, "kW/m2/K", "heat-transfer-coefficient")).toBe(2000);
+  });
+
   it("treats probability, count and rate by their own rules", () => {
     expect(mismatch("1", "probability")).toBeNull();
     expect(mismatch("1", "dimensionless")).toBeNull();
@@ -74,6 +82,6 @@ describe("dimensions: W, W/m and W/m^3 are distinct (plan 08)", () => {
   });
 
   it("knows every dimension the schema lists", () => {
-    expect(DIMENSIONS).toHaveLength(15);
+    expect(DIMENSIONS).toHaveLength(16);
   });
 });
