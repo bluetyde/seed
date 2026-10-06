@@ -109,6 +109,12 @@ describe("FEED adapter: configuration", () => {
     delete process.env.FEED_STUB_TRANSFERS;
     const none = okReply(await ask(feedProject().root, { verb: "describe" }));
     expect("transfers" in none.result).toBe(false);
+    // additional roles pass through when well formed; an entry with a malformed role list is dropped whole
+    const withRoles = { field: "coolant-boundary", accepts: [{ dimension: "temperature", normalization: "none", additional: [{ role: "heat-transfer-coefficient", dimension: "heat-transfer-coefficient" }] }] };
+    process.env.FEED_STUB_TRANSFERS = JSON.stringify([withRoles, { field: "bad-roles", accepts: [{ dimension: "temperature", additional: [{ role: "bad role!", dimension: "x" }] }] }, { field: "too-many", accepts: [{ dimension: "temperature", additional: Array.from({ length: 5 }, (_, i) => ({ role: "r" + i, dimension: "x" })) }] }]);
+    const roles = okReply(await ask(feedProject().root, { verb: "describe" }));
+    expect(roles.result.transfers).toEqual([withRoles]);
+    expect(validate("adapter-reply", roles)).toEqual({ ok: true });
     process.env.FEED_STUB_TRANSFERS = JSON.stringify(Array.from({ length: 25 }, (_, i) => ({ field: "t" + i, accepts: [{ dimension: "power" }] })));
     const many = okReply(await ask(feedProject().root, { verb: "describe" }));
     expect(many.result.transfers).toHaveLength(20);
