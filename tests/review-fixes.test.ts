@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { callAdapter } from "../src/core/adapterClient";
@@ -264,6 +264,8 @@ describe("run manager: two managers on one project (review: concurrent managers 
     const r2 = req();
     const key = ".reserve-" + sha256Hex(r2.requestId).slice(0, 24);
     mkdirSync(join(proj.root, "runs", key));
+    // made by something that wrote no owner file: judged abandoned once it is older than a few seconds
+    utimesSync(join(proj.root, "runs", key), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
     const blocked = await mgr().start(r2);
     expect(blocked.ok).toBe(false);
     await mgr().recover();
