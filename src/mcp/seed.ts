@@ -4,6 +4,7 @@ import { z } from "zod";
 import { supervisedRun } from "./supervisor";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
+import { applyTransferFromHost, proposeTransfer, transferStatus } from "../core/transferHost";
 
 export const MAX_MCP_BYTES = 1_048_576;
 const positiveInteger = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
@@ -23,7 +24,7 @@ const requestSchema = z
   .strict();
 
 /** The path is selected once by the trusted process environment, never by MCP arguments. */
-export function createSeedMcpServer(hostConfig: string): McpServer {
+export function createSeedMcpServer(hostConfig: string, transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG): McpServer {
   const studyHeader = process.env.SEED_STUDY_HEADER;
   const server = new McpServer(
     { name: "seed", version: "0.1.0" },
@@ -105,6 +106,47 @@ export function createSeedMcpServer(hostConfig: string): McpServer {
       };
     },
   );
+  // Transfers: only when the trusted environment names a transfer host. Approval is a human verb of the admin CLI and has no tool here.
+  if (transferHostConfig) {
+    const annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+    const answer = (outcome: unknown) => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...(outcome as object) } as { ok?: boolean };
+      return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply as Record<string, unknown>, isError: !reply.ok };
+    };
+    const recipeId = z.object({ recipeId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/) }).strict();
+    server.registerTool(
+      "seed_propose_transfer",
+      {
+        title: "Propose a reviewed transfer",
+        description:
+          "Write a transfer recipe (seed.transfer-recipe/0.2) that moves one quantity of a completed run into another app's input. It is checked against the source run (units and dimension, declared normalization, revisions) and the target before it is saved, and it does nothing until a human approves exactly this content. The agent cannot approve, enable or change a tolerance after approval.",
+        inputSchema: z.object({ recipe: z.record(z.string(), z.unknown()) }).strict(),
+        annotations,
+      },
+      async (request) => answer(await proposeTransfer(transferHostConfig, request)),
+    );
+    server.registerTool(
+      "seed_transfer_status",
+      {
+        title: "Where a transfer recipe stands",
+        description: "Read the state of a recipe (proposed, approved, applied, stale or invalid) and the reasons, from the project and the host's records.",
+        inputSchema: recipeId,
+        annotations: { ...annotations, readOnlyHint: true },
+      },
+      async (request) => answer(await transferStatus(transferHostConfig, request)),
+    );
+    server.registerTool(
+      "seed_apply_transfer",
+      {
+        title: "Apply an approved transfer",
+        description:
+          "Apply a recipe a human approved: the target app's own command maps the data (its coverage and conservation checks decide), and SEED writes the new target file and revision with provenance. Refused when there is no valid approval for this exact content and these exact revisions, when anything changed since, or when the oracle sets are not clear.",
+        inputSchema: recipeId,
+        annotations,
+      },
+      async (request) => answer(await applyTransferFromHost(transferHostConfig, request)),
+    );
+  }
   return server;
 }
 
