@@ -294,6 +294,50 @@
                   }
                 }
               },
+              "resources": {
+                "type": "object",
+                "required": ["measured"],
+                "additionalProperties": false,
+                "properties": {
+                  "wallSeconds": {
+                    "type": "object",
+                    "required": ["typical", "max"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "typical": { "type": "number", "minimum": 0 },
+                      "max": { "type": "number", "minimum": 0 }
+                    }
+                  },
+                  "cores": { "type": "integer", "minimum": 1 },
+                  "memoryMB": {
+                    "type": "object",
+                    "required": ["peak"],
+                    "additionalProperties": false,
+                    "properties": { "peak": { "type": "number", "minimum": 0 } }
+                  },
+                  "diskMB": {
+                    "type": "object",
+                    "required": ["peak"],
+                    "additionalProperties": false,
+                    "properties": { "peak": { "type": "number", "minimum": 0 } }
+                  },
+                  "measured": {
+                    "type": "object",
+                    "required": ["platform", "date", "basis"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "platform": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                      "basis": { "type": "string", "minLength": 1, "maxLength": 500 }
+                    }
+                  },
+                  "notes": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+                  }
+                }
+              },
               "oraclePin": {
                 "type": "object",
                 "required": ["sha256", "commit"],

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { appTree, treeChanges } from "./helpers/appTree";
+import { appTree, trackedFiles, treeChanges } from "./helpers/appTree";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -38,5 +38,36 @@ describe("the app folder fingerprint that backs the standalone check", () => {
       writeFileSync(join(d, f, "x"), "x");
     }
     expect(treeChanges(before, appTree(d))).toEqual([]);
+  });
+});
+
+describe("tolerating the app's own developers", () => {
+  it("does not report an edited tracked file, but still reports an added, a removed and an edited untracked one", () => {
+    const d = app();
+    writeFileSync(join(d, "src", "gone.txt"), "x");
+    writeFileSync(join(d, "src", "scratch.txt"), "x");
+    const before = appTree(d);
+    writeFileSync(join(d, "src", "a.txt"), "edited");
+    writeFileSync(join(d, "src", "scratch.txt"), "edited too");
+    writeFileSync(join(d, "src", "new.txt"), "n");
+    rmSync(join(d, "src", "gone.txt"));
+    const tracked = new Set(["src/a.txt", "src/gone.txt"]);
+    expect(treeChanges(before, appTree(d), tracked)).toEqual(["added src/new.txt", "changed src/scratch.txt", "removed src/gone.txt"]);
+  });
+  it("lists what git tracks in a checkout and nothing outside one", () => {
+    const d = app();
+    expect(trackedFiles(d).size).toBe(0);
+  });
+});
+
+describe("trackedFiles in a real checkout", () => {
+  it("lists the committed files and not the untracked ones", async () => {
+    const { git } = await import("./helpers/repo");
+    const d = app();
+    git(d, "init", "-b", "main");
+    git(d, "add", "-A");
+    git(d, "commit", "-m", "first");
+    writeFileSync(join(d, "src", "untracked.txt"), "x");
+    expect([...trackedFiles(d)]).toEqual(["src/a.txt"]);
   });
 });

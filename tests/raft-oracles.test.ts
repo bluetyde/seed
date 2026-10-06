@@ -26,7 +26,7 @@ import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
-import { appTree, treeChanges } from "./helpers/appTree";
+import { appTree, trackedFiles, treeChanges } from "./helpers/appTree";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
 // adapter and the run manager. Needs the RAFT repo with the built headless runner and the entries; skipped otherwise.
@@ -737,6 +737,7 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "req-d", actor }, { projectRoot: tmpdir(), timeoutMs: 30000 });
     if (!o.ok) throw new Error("transport");
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
+    expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).raft);
     expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(["energy", "fuelTemp", "power"]);
     expect(cov).toHaveLength(18);
   });
@@ -799,6 +800,6 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
 describe.skipIf(!have)("RAFT is left as the adapter found it", () => {
   it("no file of the app's own folder was added, changed or removed by the runs above", () => {
     expect(treeBefore).toBeDefined();
-    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
+    expect(treeChanges(treeBefore!, appTree(repo), trackedFiles(repo))).toEqual([]);
   });
 });
