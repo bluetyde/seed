@@ -1,6 +1,6 @@
 # Transfer recipe and approval (proposal)
 
-Status 2026-10-06: **proposal, not decided.** E4 step 4 of [TODO.md](../TODO.md), under [plan 08](plans/08-transfers-and-pipelines.md). It answers plan 08's open item "recipe file format and where it lives" and replaces FEED's provisional shapes (`feed.transfer-recipe/0.1`, FEED decision 0003). Data shapes and units it builds on: [contracts-v0.2-data-shapes.md](contracts-v0.2-data-shapes.md) (decided, built).
+Status 2026-10-06: **decided by the user (Q1 to Q4 all as recommended); core built (sections 2.1 to 2.8 without the gate wiring in the host and the study log, and without registering the applied revision in the project).** E4 step 4 of [TODO.md](../TODO.md), under [plan 08](plans/08-transfers-and-pipelines.md). It answers plan 08's open item "recipe file format and where it lives" and replaces FEED's provisional shapes (`feed.transfer-recipe/0.1`, FEED decision 0003). Data shapes and units it builds on: [contracts-v0.2-data-shapes.md](contracts-v0.2-data-shapes.md) (decided, built).
 
 ## 1. What already exists
 
