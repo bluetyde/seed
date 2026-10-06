@@ -8,6 +8,7 @@ import { comparePins, loadOracleEntries, pinsOf, runOracleSet, unverifiedQuantit
 import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
+import { appTree, treeChanges } from "./helpers/appTree";
 
 // OpenMC Studio's own oracle entries (oracles/seed in the OpenMC repository): analytic cases whose expected values come from formulas and from
 // cross sections read out of the nuclear data library (a void ball's track length, absorption and track length in a pure B-10 slab), with
@@ -37,7 +38,9 @@ const appCommit = (() => {
   return r.status === 0 ? r.stdout.trim() : "unknown";
 })();
 
+let treeBefore: Map<string, string> | undefined;
 beforeAll(() => {
+  if (have) treeBefore = appTree(repo);
   if (have) Object.assign(process.env, { SEED_OPENMC_REPO: repo, SEED_ELECTRON: electron, SEED_OPENMC_PYTHON: py, SEED_OPENMC_DATA: data, SEED_OPENMC_WSL_DISTRO: distro, SEED_OPENMC_ORACLES: join(base, "entries") });
 });
 afterAll(() => {
@@ -168,5 +171,13 @@ describe.skipIf(!have)("OpenMC oracle set through the SEED adapter (real OpenMC)
     const { entries } = loadOracleEntries(join(base, "entries"));
     const accepted = pinsOf(entries, appCommit);
     expect(comparePins(accepted, pinsOf(entries, "0".repeat(40)))).toEqual([`app commit ${appCommit} -> ${"0".repeat(40)}`]);
+  });
+});
+
+// E2 exit, "standalone launch of the app unchanged by its adapter": everything above ran the real OpenMC Studio through its adapter; its own folder must be as found.
+describe.skipIf(!have)("OpenMC Studio is left as the adapter found it", () => {
+  it("no file of the app's own folder was added, changed or removed by the runs above", () => {
+    expect(treeBefore).toBeDefined();
+    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
   });
 });

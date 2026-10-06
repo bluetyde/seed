@@ -26,6 +26,7 @@ import type { SetResult } from "../src/core/oracle";
 import { connectSeedMcp } from "./helpers/mcp-client";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
+import { appTree, treeChanges } from "./helpers/appTree";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
 // adapter and the run manager. Needs the RAFT repo with the built headless runner and the entries; skipped otherwise.
@@ -44,7 +45,9 @@ const appCommit = (() => {
   return r.status === 0 ? r.stdout.trim() : "unknown";
 })();
 
+let treeBefore: Map<string, string> | undefined;
 beforeAll(() => {
+  if (have) treeBefore = appTree(repo);
   process.env.SEED_RAFT_HEADLESS = bundle;
   process.env.SEED_RAFT_ORACLES = join(base, "entries");
 });
@@ -789,5 +792,13 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
     const edited: IndexedOracle[] = entries.map((i, k) => (k === 0 ? { ...i, fileSha256: sha256Hex("changed") } : i));
     expect(comparePins(accepted, pinsOf(edited, appCommit))).toHaveLength(1);
     expect(evaluateGate({ operation: "run_case", actor, studyId: "s1" }, { study, pinsChanged: true }).allow).toBe(false);
+  });
+});
+
+// E2 exit, "standalone launch of the app unchanged by its adapter": everything above ran the real RAFT through its adapter; its own folder must be as found.
+describe.skipIf(!have)("RAFT is left as the adapter found it", () => {
+  it("no file of the app's own folder was added, changed or removed by the runs above", () => {
+    expect(treeBefore).toBeDefined();
+    expect(treeChanges(treeBefore!, appTree(repo))).toEqual([]);
   });
 });
