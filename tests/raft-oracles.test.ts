@@ -373,6 +373,9 @@ describe.skipIf(!have)("RAFT oracle set through the SEED adapter", () => {
       expect(recovered.reportId).toBeTruthy(); expect(readFileSync(reviewFile)).toEqual(reviewBytes);
       expect(await decideConclusion(config, reviewerFile, proposal.draftId, snapshot.displayHash, "accepted")).toEqual(recovered);
     }
+    // L7: the Markdown copy is bound by the receipt like the HTML, so the loop below alters it too and the saved report refuses to display
+    expect(receipt.schema).toBe("seed.report-receipt/0.2");
+    expect(receipt.files.map((x: { path: string }) => x.path.split("/").pop())).toEqual(["report.html", "study.jsonl", "evidence.json", "report.md"]);
     for (const file of receipt.files) {
       const path = join(project, file.path), bytes = readFileSync(path);
       writeFileSync(path, Buffer.concat([bytes, Buffer.from(" altered")]));

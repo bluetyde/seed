@@ -336,6 +336,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
           sha256Hex(report.value.html),
           sha256Hex(studyLines.join("\n") + "\n"),
           sha256Hex(JSON.stringify(savedEvidence, null, 2) + "\n"),
+          sha256Hex(report.value.markdown),
         ],
       );
       renameSync(staging, target);

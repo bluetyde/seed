@@ -136,7 +136,7 @@ export async function proposeConclusion(file: string, request: unknown) {
         studyId: receipt.studyId,
         reportId,
         sourceHead: entries.at(-1).hash,
-        sourceFiles: receipt.files,
+        sourceFiles: receipt.files.slice(0, 3), // the three the draft reasons over; report.md is bound by the receipt itself
         configHash,
         actor: c.actor,
         claims,
