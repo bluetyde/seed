@@ -199,12 +199,13 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           },
           loadAuthority: async () => {
             unchanged();
-            const authority = loadOracleAuthority(c.oracles, c.adapter.id);
+            const authority = loadOracleAuthority(c.oracles, { id: c.adapter.id, version: c.adapter.version }, state);
             return {
               context: { study: c.study, grants: c.grants },
               currentPins: authority.currentPins,
               acceptedPins: c.acceptedPins,
               oracleResult: authority.oracleResult,
+              journalBlocked: authority.journalBlocked,
             };
           },
           audit: async event => {

@@ -179,7 +179,7 @@ function gateFor(x: Ctx, recipe: Recipe, view: TransferView): GateContext {
   for (const id of ids) {
     const app = x.c.apps[id];
     if (!app) throw Object.assign(Error(`the app ${JSON.stringify(id)} is not configured for transfers`), { code: "E_SETUP_REQUIRED" });
-    const auth = loadOracleAuthority(app.oracles, app.adapter.id);
+    const auth = loadOracleAuthority(app.oracles, { id: app.adapter.id, version: app.adapter.version }, x.state);
     const flags = oracleFlags({ acceptedPins: app.acceptedPins, ...auth }, app.adapter);
     pinsChanged ||= flags.pinsChanged;
     oracleBlocked ||= flags.oracleBlocked;

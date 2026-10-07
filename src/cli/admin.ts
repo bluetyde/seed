@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import { recoverHostCalculation } from "../core/hostControl";
 import { releaseLessonReservation } from "../core/lessonHistory";
 import { approveTransfer } from "../core/transferHost";
+import { clearOracleFailure, oracleJournalStatus, recordOracleEvaluation } from "../core/oracleJournalHost";
 import { readRequest } from "./seed";
 
 /**
@@ -9,7 +10,7 @@ import { readRequest } from "./seed";
  * It reads its own configuration variable, SEED_ADMIN_HOST_CONFIG, so an agent's SEED_HOST_CONFIG never reaches it,
  * and the operation itself still requires the configured actor to be a human.
  */
-export const ADMIN_VERBS = ["release-intent-reservation", "recover", "approve-transfer"];
+export const ADMIN_VERBS = ["release-intent-reservation", "recover", "approve-transfer", "oracle-record", "oracle-clear", "oracle-status"];
 
 export async function runAdminCli(
   argv: string[],
@@ -50,7 +51,13 @@ export async function runAdminCli(
       ? await approveTransfer(transferHostConfig!, request)
       : argv[0] === "recover"
         ? await recoverHostCalculation(hostConfig!, request)
-        : releaseLessonReservation(hostConfig!, request);
+        : argv[0] === "oracle-record"
+          ? recordOracleEvaluation(hostConfig!, request)
+          : argv[0] === "oracle-clear"
+            ? clearOracleFailure(hostConfig!, request)
+            : argv[0] === "oracle-status"
+              ? oracleJournalStatus(hostConfig!, request)
+              : releaseLessonReservation(hostConfig!, request);
   return { code: outcome.ok ? 0 : 2, reply: { schema: "seed.cli-reply/0.1", ...outcome } };
 }
 
