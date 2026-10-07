@@ -159,7 +159,8 @@ interface InFlightRun {
 function computePayloadHash(req: StartRequest): string {
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(req)) {
-    if (k !== "wallLimitMs" && v !== undefined) {
+    // the wall limit is part of what a request id stands for: a retry with another limit is a different request (E_REQUEST_CONFLICT)
+    if (v !== undefined) {
       clean[k] = v;
     }
   }

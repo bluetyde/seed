@@ -205,7 +205,7 @@ export function inspectConclusion(file: string, reviewerFile: string | undefined
     for (const q of indexes[0].quantities) {
       const data = JSON.parse(checked(q.data.path, q.data.sha256).toString());
       if (data.quantity !== q.name || data.unit !== q.unit) throw Error("saved quantity mismatch");
-      run.series[q.name] = { x: data.t, y: data.values, xLabel: "Time (s)", yLabel: `${q.name} (${q.unit})` };
+      run.series[q.name] = { x: data.t, y: data.values, xLabel: "Time (s)", yLabel: `${q.name} (${q.unit})`, dataSha256: q.data.sha256 };
     }
   }
   const currentInputs = record.inputs.map((i: any) => {
@@ -373,6 +373,9 @@ export async function decideConclusion(
       runs: { [s.evidence.runId]: s.run },
       staleRunIds: review.acknowledgedLimits.stale ? [s.evidence.runId] : [],
       generatedBy: `SEED human-accepted report; reviewer ${review.reviewer.name}; proposed by ${d.actor.kind} ${d.actor.name}; review ${review.hash}`,
+      // the head the draft was verified against: the source record may not be cut short or stripped of its chain on the way to the report
+      studyAnchor: { seq: s.lines.length - 1, hash: d.sourceHead },
+      requireBoundSeries: true,
     });
     if (!report.ok) throw Error(report.errors.map(e => e.message).join("; "));
     const acceptedEvidence = {

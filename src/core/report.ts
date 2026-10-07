@@ -10,6 +10,8 @@ export type Series = {
   y: number[];
   xLabel: string;
   yLabel: string;
+  /** The sha256 of the data file these points were read from; it must equal the one in the run's results index (see requireBoundSeries). */
+  dataSha256?: string;
 };
 
 export type ReportRun = {
@@ -23,6 +25,13 @@ export type ReportInput = {
   runs: Record<string, ReportRun>;
   staleRunIds?: string[];
   generatedBy: string;
+  /**
+   * The verified head of the study record. When set, the record must be hash-chained (a log whose hashes were stripped is refused), the line at
+   * `seq` must carry `hash` (a log cut short of that line is refused), and with `last` that line must be the final one.
+   */
+  studyAnchor?: { seq: number; hash: string; last?: boolean };
+  /** When true every plotted series must carry `dataSha256`, equal to the data hash its results index lists for that quantity. */
+  requireBoundSeries?: boolean;
 };
 
 export type ReportOutput = {
@@ -293,6 +302,21 @@ function buildReportChecked(
     };
   }
 
+  // The anchor: the record must really end where the caller verified it to, and still carry its hash chain.
+  if (input.studyAnchor) {
+    const a = input.studyAnchor;
+    const rows = input.studyLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const bad = (message: string): { ok: false; errors: TypedError[] } => ({
+      ok: false,
+      errors: [{ code: "E_SCHEMA_INVALID", field: "/studyLines", message, source: "seed" }],
+    });
+    if (rows.some((r) => typeof r.hash !== "string" || !("prev" in r))) return bad("the study record carries no complete hash chain");
+    const at = rows.findIndex((r) => r.seq === a.seq);
+    if (at < 0) return bad("the study record is shorter than its verified head (line " + a.seq + " is missing)");
+    if (rows[at]!.hash !== a.hash) return bad("the study record does not end in its verified head (the hash at line " + a.seq + " differs)");
+    if (a.last && at !== rows.length - 1) return bad("the study record has lines after its verified head");
+  }
+
   // 3. A run ID cited in any step runs or in a conclusion claim runs is not a key of runs
   // -> E_PROP_MISSING, field /runs/<id>, message run cited in the study record is not provided.
   const citedRunIds: string[] = [];
@@ -314,6 +338,23 @@ function buildReportChecked(
           }
         }
       }
+    }
+  }
+
+  // A run that no step and no claim cites does not belong in this report: the caller is passing more than the study record says
+  for (const provided of Object.keys(input.runs)) {
+    if (!citedRunIds.includes(provided)) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_SCHEMA_INVALID",
+            field: `/runs/${provided}`,
+            message: "run is not cited by any step or conclusion claim of the study record",
+            source: "seed"
+          }
+        ]
+      };
     }
   }
 
@@ -474,6 +515,21 @@ function buildReportChecked(
             };
           }
 
+          const listed = results.quantities.find((q) => q.name === name);
+          if (s && (s.dataSha256 !== undefined || input.requireBoundSeries) && s.dataSha256 !== listed?.data.sha256) {
+            return {
+              ok: false,
+              errors: [
+                {
+                  code: "E_OUTPUT_INCOMPLETE",
+                  field: `/runs/${runId}/series/${name}/dataSha256`,
+                  message: `the plotted series '${name}' is not bound to the data hash in the results index`,
+                  source: "seed"
+                }
+              ]
+            };
+          }
+
           if (
             !s ||
             !Array.isArray(s.x) ||
@@ -502,7 +558,7 @@ function buildReportChecked(
 
   // --- Building Content ---
 
-  // Order of completed runs: first appearance in study steps, then remaining in ascending order
+  // Order of completed runs: first appearance in study steps (every provided run is cited, see above)
   const completedRunOrder: string[] = [];
   const completedRunIds = new Set<string>();
   const failedRunOrder: string[] = [];
@@ -530,20 +586,17 @@ function buildReportChecked(
     }
   }
 
+  // a run cited only by a conclusion claim still appears: after the runs of the steps, in ascending order
   for (const rId of runKeys) {
     const r = input.runs[rId];
-    if (r) {
+    if (r && !completedRunIds.has(rId) && !failedRunIds.has(rId)) {
       const rec = r.record as RunRecordType;
       if (rec.state === "completed") {
-        if (!completedRunIds.has(rId)) {
-          completedRunIds.add(rId);
-          completedRunOrder.push(rId);
-        }
+        completedRunIds.add(rId);
+        completedRunOrder.push(rId);
       } else {
-        if (!failedRunIds.has(rId)) {
-          failedRunIds.add(rId);
-          failedRunOrder.push(rId);
-        }
+        failedRunIds.add(rId);
+        failedRunOrder.push(rId);
       }
     }
   }

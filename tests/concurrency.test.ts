@@ -140,3 +140,20 @@ describe("L5: recover() in one manager does not remove the reservation of anothe
     expect(reservations().sort()).toEqual([".reserve-alive", ".reserve-foreign", ".reserve-young"]);
   });
 });
+
+describe("L6: the wall limit is part of what a request id stands for", () => {
+  it("the same request with the same limit is replayed; with another limit it is a conflict and starts nothing", async () => {
+    const { req, mgr, runDirs } = modelProject();
+    const r = req({ wallLimitMs: 20000 });
+    const first = await mgr().start(r);
+    expect(first.ok).toBe(true);
+    const same = await mgr().start({ ...r });
+    expect(same.ok && same.replayed).toBe(true);
+    const other = await mgr().start({ ...r, wallLimitMs: 30000 });
+    expect(other.ok).toBe(false);
+    if (!other.ok) expect(other.errors[0]).toMatchObject({ code: "E_REQUEST_CONFLICT", field: "/requestId" });
+    const without = await mgr().start({ ...r, wallLimitMs: undefined });
+    expect(without.ok).toBe(false);
+    expect(runDirs()).toHaveLength(1);
+  }, 30000);
+});
