@@ -40,6 +40,13 @@ The TODO's E2 block (the items marked `[~]` or `[ ]`) names things that remain, 
 
 For each, the choice is: it blocks the E2 exit, or it is an accepted limit for E2 (as with L1 to L10 for E0).
 
+**Decided by the user on 2026-10-06 (in chat):**
+
+- **1, raw `RunManager`: accepted as a limit for E2.** Production code constructs it only in the dispatcher and in the host control (checked by search of `src`: no CLI, MCP or desktop file builds one). Offered and not done: a structural test that fails if a file under `src/cli`, `src/mcp` or `src/main` imports it.
+- **2, recovery gaps: accepted as a limit for E2.** The failure mode is conservative: an unusual crash blocks the engine until a human inspects it (admin CLI), and nothing is corrupted or restarted on a guess.
+- **3, report workflow gaps: accepted as a limit for E2**, to be carried into E3 (the UI work) and the recovery work: correction chains from an accepted study, adapter-specific history, export and replay of recovered runs, the manual sign-off flow.
+- **4, stale TODO boxes: delegated.** The user decided that each app session reconciles the boxes that concern its own app, with the evidence it can verify, instead of the SEED agent editing them. The requests were posted on 2026-10-06 in the logs of the RAFT, SNEED, FEED, NODAL and OpenMC Studio sessions (`messages/virtual-reactor.md`, `pra-studio.md`, `fuel-performance-studio.md`, `pipe-studio.md`, `openmc.md`); each names its boxes, asks for a claim, a branch from a fresh clone, tests before the merge and a log entry. The SEED-owned boxes (core dispatch, cancellation and recovery, reports) stay as they are: their remaining notes are the accepted limits 2 and 3 above. Until the sessions report, the E2 box state in TODO.md is not reconciled.
+
 ## What Codex found, and what was done
 
 Pass 1, security of the tier, approval and transfer code (policy, transfer, transferHost, oracleAuthority): 5 findings, all confirmed, all fixed in this branch.
@@ -140,4 +147,4 @@ Two read-only passes over the diff of the E2 work (src/core/projectStore.ts, run
 ## What I ask
 
 - **E0:** accept L1 to L10 as known limits (or name the ones to fix first) and sign off the milestone. Contracts v0.1 are already signed off; material preservation moves to E1.
-- **E2 (updated 2026-10-06, late):** the four items are done (see the E2 section). Decide for the four residuals under "Residuals the review has not weighed" whether each blocks the exit or is an accepted limit, then sign off E2 or send items back.
+- **E2 (updated 2026-10-06, late):** the four items are done and the user has decided the four residuals (1 to 3 accepted as limits, 4 delegated to the app sessions; see "Residuals the review has not weighed"). Left for the user: the E2 exit sign-off, best after the app sessions have reported on the boxes.
