@@ -206,7 +206,7 @@ Still waiting (the user's):
 See [plan 11](docs/plans/11-runtime-and-shared-acceptance.md). SEED owns managed runtime installation and launch/cleanup/offline availability. Apps own native save/open, solver and export correctness; slow MCNP export remains OpenMC work. Shared acceptance proves an offline SEED-to-OpenMC run, save, clean close and reopen. Existing packaging recipes are reused; no second full OpenMC installer/updater or competing watchdog is planned. This is planned scope, not current implementation.
 
 - [ ] W1: inventory SEED process/installer entry points and OpenMC portable candidate e4d67df; document recipe reuse and lifecycle ownership.
-- [ ] W2: specify runtime metadata, staged install/rollback, offline cache, managed/adopted resources and process identities before code.
+- [x] W2 (2026-10-07): runtime metadata, staged install and rollback, offline cache, managed/adopted resources and process identities specified: [runtime-contract.md](docs/runtime-contract.md); schemas `component-manifest`, `install-state`, `process-owner`; pure resolver, removal plan, transaction states and recovery in `src/core/components.ts` (89 tests, 34 mutations caught; a schema defect found by a surviving mutant). No installer change, no download. Open questions for the user are at the end of that document. Next: W3 (processes) and W4 (staged install) follow it.
 - [ ] W3: fake-process lifecycle tests R4/R5, including forced host termination, WSL-side cleanup and unowned-process survival; then implement fixes.
 - [ ] W4: local fake-artifact install, corruption, interruption, upgrade and rollback tests R1-R3/R6; no real engine needed.
 - [ ] W5: complete E0 contracts/fake adapter with the corrected harness semantics below; no app private-port bypass.
