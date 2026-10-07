@@ -170,6 +170,17 @@ describe("the suite together", () => {
     expect(errs[0]!.message).toMatch(/a\/a-add -> b\/b-add -> a\/a-add|b\/b-add -> a\/a-add -> b\/b-add/);
   });
 
+  it("a consumer's maximum version is checked against the registry: it cannot want only versions the registry does not have", () => {
+    const reg: RecordRegistry = { ...registry, kinds: [{ ...registry.kinds[0]!, version: 3 }, registry.kinds[1]!] };
+    const ms = suite();
+    ms[0]!.components.find((c) => c.id === "studio-depletion")!.produces![0]!.version = 3;
+    ms[1]!.components[1]!.consumes![0] = { record: "depletion-record", minVersion: 1, maxVersion: 2 }; // wants 1 or 2; the registry has 3
+    ms[2]!.components[1]!.consumes![0] = { record: "depletion-record", minVersion: 1 }; // wants 1 or later; 3 is fine
+    const errs = validateSuite(ms, reg);
+    expect(errs.map((e) => e.code)).toEqual(["E_RECORD_VERSION"]);
+    expect(errs[0]!.component).toBe("raft/raft-burnup");
+  });
+
   it("two possible producers are not a cycle: the user can choose", () => {
     expect(validateSuite(suite(), registry)).toEqual([]);
   });
@@ -220,6 +231,15 @@ describe("a chain across apps", () => {
     expect(r.chain[0]).toMatchObject({ producer: "studio/studio-depletion", how: "installed" });
     expect(r.grant.map((g) => `${g.app}/${g.component}`).sort()).toEqual(["raft/raft-burnup", "raft/raft-core"]);
     expect(r.cost.downloadBytes).toBe(300 + 800);
+  });
+
+  it("a component of the plan that is installed already is kept and is not in the grant", () => {
+    const r = resolveChain(base({ installed: [rec("raft", "raft-core", { selectedByUser: true })], select: [{ app: "raft", component: "raft-burnup" }] }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.steps.find((s) => s.component === "raft-core")).toMatchObject({ action: "keep" });
+    expect(r.grant.map((g) => `${g.app}/${g.component}`)).not.toContain("raft/raft-core");
+    expect(r.grant.map((g) => `${g.app}/${g.component}`)).toContain("raft/raft-burnup");
   });
 
   it("the user may choose the producer too: it is then chosen by the user, and the edge says so", () => {
