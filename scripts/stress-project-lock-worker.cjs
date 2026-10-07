@@ -22,7 +22,8 @@ for (const name of ["mkdirSync", "rmSync", "renameSync", "writeFileSync"]) {
   };
 }
 const { withProjectLock } = require(lib);
-const now = () => performance.timeOrigin + performance.now();
+// one clock all workers share: hrtime is the system monotonic counter, while timeOrigin + now() is estimated separately by each process (skew of a millisecond or so produced false overlaps)
+const now = () => Number(process.hrtime.bigint()) / 1e6;
 function trace(o) { fs.appendFileSync(traceFile, JSON.stringify({ t: now(), pid: process.pid, p: prefix, ...o }) + "\n"); }
 const counter = dir + "/counter.json";
 for (let i = 0; i < Number(count); i++) {
