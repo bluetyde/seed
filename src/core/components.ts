@@ -24,8 +24,12 @@ export type Component = {
   artifacts: Artifact[];
   dataRefs?: { id: string; sha256: string }[];
   license: { spdx: string; noticesSha256?: string; sourceOffer?: boolean };
+  /** v0.2: record kinds this component makes, and needs (see packages.ts); library components `satisfy` catalog prerequisites. */
+  produces?: { record: string; version: number }[];
+  consumes?: { record: string; minVersion: number; maxVersion?: number }[];
+  satisfies?: string[];
 };
-export type Manifest = { schema: "seed.component-manifest/0.1"; app: string; recipeRevision: string; components: Component[] };
+export type Manifest = { schema: "seed.component-manifest/0.1" | "seed.component-manifest/0.2"; app: string; recipeRevision: string; components: Component[] };
 export type Installed = {
   app: string;
   component: string;
@@ -69,7 +73,11 @@ export const COMPONENT_ERROR_CODES = [
   "E_COMPONENT_CORE",
   "E_ADOPTED_PROTECTED",
   "E_OFFLINE_MISSING",
-  "E_DISK_SPACE"
+  "E_DISK_SPACE",
+  "E_RECORD_UNKNOWN",
+  "E_RECORD_VERSION",
+  "E_RECORD_NO_PRODUCER",
+  "E_RECORD_AMBIGUOUS"
 ] as const;
 export type ComponentErrorCode = (typeof COMPONENT_ERROR_CODES)[number];
 export type ComponentError = { code: ComponentErrorCode; component?: string; field?: string; message: string };
@@ -78,17 +86,18 @@ const fail = (errors: ComponentError[]) => ({ ok: false as const, errors });
 // ---- schema validation -------------------------------------------------------------------------------------------
 
 const schemaDir = path.join(__dirname, "..", "..", "schema");
-let validators: Record<"manifest" | "state" | "owner", ValidateFunction> | null = null;
+let validators: Record<"manifest" | "state" | "owner" | "registry", ValidateFunction> | null = null;
 function load() {
   if (validators) return validators;
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   const read = (f: string) => JSON.parse(fs.readFileSync(path.join(schemaDir, f), "utf8")) as object;
   ajv.addSchema(read("common.schema.json"));
   ajv.addSchema(read("component-manifest.schema.json"));
+  ajv.addSchema(read("record-kinds.schema.json"));
   ajv.addSchema(read("process-owner.schema.json"));
   ajv.addSchema(read("install-state.schema.json"));
   const get = (name: string) => ajv.getSchema(`https://seed.invalid/schema/${name}.schema.json`) as ValidateFunction;
-  validators = { manifest: get("component-manifest"), state: get("install-state"), owner: get("process-owner") };
+  validators = { manifest: get("component-manifest"), state: get("install-state"), owner: get("process-owner"), registry: get("record-kinds") };
   return validators;
 }
 function schemaErrors(v: ValidateFunction, value: unknown): ComponentError[] | null {
@@ -154,6 +163,31 @@ export function validateManifest(value: unknown): { ok: true; manifest: Manifest
       if (!byId.has(x)) errors.push({ code: "E_COMPONENT_UNKNOWN", component: c.id, field: "/conflicts", message: `${c.id} conflicts with ${x}, which the manifest does not list` });
     }
   }
+  for (const c of m.components) {
+    const where = (f: string) => ({ component: c.id, field: f });
+    if (c.consumes !== undefined) {
+      if (c.kind !== "addon") errors.push({ code: "E_COMPONENT_DEPENDENCY", ...where("/consumes"), message: `${c.id}: only an add-on may need another app's record; a core component must run without any package, and a library is only a dependency` });
+      const seenC = new Set<string>();
+      for (const r of c.consumes) {
+        if (seenC.has(r.record)) errors.push({ code: "E_SCHEMA_INVALID", ...where("/consumes"), message: `${c.id} consumes ${r.record} twice` });
+        seenC.add(r.record);
+        if (r.maxVersion !== undefined && r.maxVersion < r.minVersion) errors.push({ code: "E_RECORD_VERSION", ...where("/consumes"), message: `${c.id}: maxVersion of ${r.record} is below its minVersion` });
+      }
+    }
+    if (c.produces !== undefined) {
+      if (c.kind === "library") errors.push({ code: "E_COMPONENT_DEPENDENCY", ...where("/produces"), message: `${c.id}: a library only supports other components; it does not make records` });
+      const seenP = new Set<string>();
+      for (const r of c.produces) {
+        const key = `${r.record}@${r.version}`;
+        if (seenP.has(key)) errors.push({ code: "E_SCHEMA_INVALID", ...where("/produces"), message: `${c.id} produces ${key} twice` });
+        seenP.add(key);
+      }
+    }
+    if (c.satisfies !== undefined) {
+      if (c.kind !== "library") errors.push({ code: "E_COMPONENT_DEPENDENCY", ...where("/satisfies"), message: `${c.id}: only a library component can satisfy a catalog prerequisite` });
+      if (new Set(c.satisfies).size !== c.satisfies.length) errors.push({ code: "E_SCHEMA_INVALID", ...where("/satisfies"), message: `${c.id} lists a prerequisite twice` });
+    }
+  }
   const cycle = findCycle(byId);
   if (cycle) errors.push({ code: "E_COMPONENT_CYCLE", component: cycle[0], message: `dependency cycle: ${cycle.join(" -> ")}` });
   return errors.length ? fail(errors) : { ok: true, manifest: m };
@@ -208,6 +242,27 @@ export function validateInstallState(value: unknown): { ok: true; state: Install
   return errors.length ? fail(errors) : { ok: true, state: s };
 }
 
+export type RecordKind = { record: string; version: number; owner: string; status: "planned" | "defined"; wireSchema?: string; schemaSha256?: string; summary: string; manual: string };
+export type RecordRegistry = { schema: "seed.record-kinds/0.1"; kinds: RecordKind[] };
+
+/** The registry of record kinds (record-kinds.json): valid against the schema, one entry per record and version, and a `defined` kind pins its schema by hash. */
+export function validateRecordKinds(value: unknown): { ok: true; registry: RecordRegistry } | { ok: false; errors: ComponentError[] } {
+  const bad = schemaErrors(load().registry, value);
+  if (bad) return fail(bad);
+  const r = value as RecordRegistry;
+  const errors: ComponentError[] = [];
+  const seen = new Set<string>();
+  for (const k of r.kinds) {
+    const key = `${k.record}@${k.version}`;
+    if (seen.has(key)) errors.push({ code: "E_SCHEMA_INVALID", field: "/kinds", message: `${key} is registered twice` });
+    seen.add(key);
+    if (k.status === "defined" && (k.wireSchema === undefined || k.schemaSha256 === undefined)) {
+      errors.push({ code: "E_SCHEMA_INVALID", field: "/kinds", message: `${key} is defined, so it names its wire schema and pins the schema's hash` });
+    }
+  }
+  return errors.length ? fail(errors) : { ok: true, registry: r };
+}
+
 /** A process-owner record the host may act on. */
 export function validateProcessOwner(value: unknown): { ok: true } | { ok: false; errors: ComponentError[] } {
   const bad = schemaErrors(load().owner, value);
@@ -238,7 +293,7 @@ export type SelectionRequest = {
   freeBytes?: number;
 };
 
-function eligible(c: Component, platform: Platform, appVersion: string): ComponentError | null {
+export function eligible(c: Component, platform: Platform, appVersion: string): ComponentError | null {
   const ok = c.platforms.some((p) => p.os === platform.os && p.arch === platform.arch && (p.via === undefined || platform.via === undefined || p.via === platform.via));
   if (!ok) return { code: "E_COMPONENT_PLATFORM", component: c.id, message: `${c.id} is not available for ${platform.os} ${platform.arch}${platform.via ? ` (${platform.via})` : ""}` };
   const v = c.appVersions;
