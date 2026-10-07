@@ -10,7 +10,7 @@ describe("registry", () => {
   it.each(["apps.default.json", "apps.windows.json"])("accepts %s with no problems", (file) => {
     const r = parseRegistry(readFileSync(join(__dirname, "..", file), "utf-8"));
     expect(r.problems).toEqual([]);
-    expect(r.apps.map((a) => a.id)).toEqual(["openmc-studio", "nodal-studio", "virtual-reactor", "feed"]);
+    expect(r.apps.map((a) => a.id)).toEqual(["openmc-studio", "nodal-studio", "virtual-reactor", "feed", "sneed"]);
   });
 
   it("fills defaults", () => {

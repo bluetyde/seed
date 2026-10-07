@@ -5,6 +5,7 @@ const ICON_PATHS: Record<string, string> = {
   atom: '<circle cx="12" cy="12" r="2.2" fill="currentColor"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>',
   pipe: '<rect x="2" y="8" width="20" height="8" rx="1"/><path d="M7 8v8M17 8v8"/>',
   reactor: '<rect x="5" y="3" width="14" height="18" rx="4"/><path d="M9 8h6M9 12h6M9 16h6"/>',
+  tree: '<path d="M12 3v5M12 8H6v5M12 8h6v5"/><rect x="3" y="13" width="6" height="6" rx="1"/><rect x="15" y="13" width="6" height="6" rx="1"/>',
   app: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',

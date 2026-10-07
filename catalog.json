@@ -215,6 +215,66 @@
           ]
         }
       ]
+    },
+    {
+      "id": "sneed",
+      "name": "SNEED",
+      "url": "https://github.com/bluetyde/sneed.git",
+      "branch": "main",
+      "folder": "sneed",
+      "private": true,
+      "notes": "Private repository: sign in to GitHub once on this computer (Git Credential Manager or gh auth login). Fault trees and event trees. Its built-in solver needs nothing else; the SCRAM engine is optional and SEED does not install it.",
+      "candidates": [],
+      "prerequisites": [
+        {
+          "id": "git",
+          "label": "Git",
+          "command": "git",
+          "args": [
+            "--version"
+          ],
+          "fix": "Install Git for your operating system and make it available on PATH.",
+          "when": "install"
+        },
+        {
+          "id": "node",
+          "label": "Node.js 24 or newer",
+          "command": "node",
+          "args": [
+            "-e",
+            "process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)"
+          ],
+          "fix": "Install Node.js 24 or newer from nodejs.org.",
+          "when": "install"
+        }
+      ],
+      "steps": [
+        {
+          "label": "Install dependencies",
+          "cwd": ".",
+          "command": "npm",
+          "args": [
+            "ci",
+            "--ignore-scripts"
+          ],
+          "watch": [
+            "package-lock.json"
+          ]
+        },
+        {
+          "label": "Build the web app",
+          "cwd": ".",
+          "command": "npm",
+          "args": [
+            "run",
+            "build:web"
+          ],
+          "watch": [
+            "package.json",
+            "vite.config.ts"
+          ]
+        }
+      ]
     }
   ]
 }

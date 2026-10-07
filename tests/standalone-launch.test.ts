@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -24,7 +25,11 @@ const installs: Record<string, { dir: string | undefined; needs: string[] }> = {
   },
   "virtual-reactor": { dir: first(process.env.SEED_RAFT_REPO, join(homeRoot, "virtual-reactor")), needs: ["web/node_modules/vite/bin/vite.js"] },
   feed: { dir: first(process.env.SEED_FEED_REPO, join(sharedRoot, "fuel-performance-studio")), needs: ["dist/server/server.js"] },
+  sneed: { dir: first(process.env.SEED_PRA_REPO, join(homeRoot, "pra-studio"), join(sharedRoot, "pra-studio")), needs: ["node_modules/tsx/dist/cli.mjs", "dist/web/index.html"] },
 };
+// SNEED keeps its models and runs under the user's home by default: point both at a throw-away folder for the check
+const scratch = mkdtempSync(join(tmpdir(), "seed-launch-"));
+const extraEnv: Record<string, Record<string, string>> = { sneed: { SNEED_PROJECT_DIR: join(scratch, "models"), SNEED_RUNS_DIR: join(scratch, "runs") } };
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
@@ -44,6 +49,7 @@ async function launchAndProbe(app: AppEntry): Promise<{ status: number; stderr: 
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const k of Object.keys(env)) if (k.startsWith("SEED_")) delete env[k];
   for (const [k, v] of Object.entries(start.env ?? {})) env[k] = sub(v);
+  Object.assign(env, extraEnv[app.id] ?? {});
   const child = spawn(start.command, start.args.map(sub), { cwd: start.cwd, env, stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
   let stderr = "";
   child.stderr!.on("data", (d) => { stderr = (stderr + d).slice(-2000); });
