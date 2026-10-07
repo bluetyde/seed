@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { runAdminCli } from "../src/cli/admin";
 import { canonicalJson, sha256Hex } from "../src/core/canonical";
 import { runFromHostFile, saveHostConfiguration, type HostConfiguration } from "../src/core/fileRunHost";
-import { writeHostJson } from "../src/core/hostFiles";
+import { appendAdmission, writeHostJson } from "../src/core/hostFiles";
 import { loadOracleEntries, runOracleSet, type OracleEntry, type PinSet, type SetResult } from "../src/core/oracle";
 import { clearFailure, journalBlock, journalRoot, recordEvaluation } from "../src/core/oracleJournal";
 import { clearOracleFailure, oracleJournalStatus, recordOracleEvaluation } from "../src/core/oracleJournalHost";
@@ -122,6 +122,15 @@ describe("the journal alone", () => {
       expect(() => clearFailure(s, adapter, pins(), first.hash, "the old one again", human)).toThrow(/not the failure that is blocking/);
     });
 
+    it("a clearance row that names some other row clears nothing (a forged or stale row)", () => {
+      const s = tmp();
+      rec(s, failed());
+      appendAdmission(journalRoot(s, "fake", true)!, { type: "clearance", clears: sha("9"), reason: "names another row", actor: human });
+      expect(block(s).blocked).toBe(true);
+      appendAdmission(journalRoot(s, "fake")!, { type: "clearance", reason: "names no row", actor: human });
+      expect(block(s).blocked).toBe(true);
+    });
+
     it("a clearance cannot be replayed to clear a later failure (it names one row hash)", () => {
       const s = tmp();
       const first = rec(s, failed());
@@ -194,6 +203,14 @@ describe("the journal alone", () => {
       const body = { schema: "seed.admission/0.1", seq: 1, time: "2026-10-07T00:00:00.000Z", prev: null, event: { type: "mystery" } };
       writeFileSync(join(root, "admissions.jsonl"), JSON.stringify({ ...body, hash: sha256Hex(canonicalJson(body)) }) + "\n");
       expect(block(s)).toMatchObject({ blocked: true, reason: expect.stringContaining("unknown kind") });
+    });
+
+    it("a correctly chained row whose event is not an object", () => {
+      for (const event of [null, "text", 5]) {
+        const s = tmp();
+        appendAdmission(journalRoot(s, "fake", true)!, event);
+        expect(block(s), String(event)).toMatchObject({ blocked: true, reason: expect.stringContaining("malformed") });
+      }
     });
 
     it("an adapter id that cannot be a folder name blocks instead of leaving the state folder", () => {
@@ -337,6 +354,32 @@ describe("the host", () => {
     expect(recordOracleEvaluation(f.adminFile, {})).toMatchObject({ ok: false });
     expect(recordOracleEvaluation(f.adminFile, { resultFile: f.write("other.json", { ...f.good, adapter: "other" }) })).toMatchObject({ ok: false });
     expect(journalRoot(f.state, "fake")).toBeNull();
+  });
+
+  it("a relative path is refused even when a file exists at that path relative to the working directory", async () => {
+    const f = await fixture({ kind: "agent", name: "bot", model: "fixture" });
+    const abs = f.write("rel.json", { ...f.good, verdict: "fail", blocked: true });
+    const rel = relative(process.cwd(), abs);
+    expect(rel.startsWith("..") || /^[a-zA-Z]:/.test(rel)).toBe(true); // the file is outside the working directory, reachable only by a relative path
+    const out = recordOracleEvaluation(f.adminFile, { resultFile: rel });
+    expect(out).toMatchObject({ ok: false });
+    expect((out as { errors: { message: string }[] }).errors[0]!.message).toMatch(/absolute/);
+    expect(journalRoot(f.state, "fake")).toBeNull();
+  });
+
+  it("a host configuration or state folder inside the project is refused", async () => {
+    const f = await fixture({ kind: "agent", name: "bot", model: "fixture" });
+    const config = JSON.parse(readFileSync(f.adminFile, "utf8"));
+    const inProject = join(f.project, "host.json");
+    writeHostJson(inProject, config);
+    expect(oracleJournalStatus(inProject, {})).toMatchObject({ ok: false });
+    const insideState = join(f.project, "state-inside");
+    mkdirSync(insideState);
+    const other = join(f.root, "host-state-inside.json");
+    writeHostJson(other, { ...config, stateRoot: insideState });
+    const out = oracleJournalStatus(other, {});
+    expect(out).toMatchObject({ ok: false });
+    expect((out as { errors: { message: string }[] }).errors[0]!.message).toMatch(/outside the project/);
   });
 
   it("clearing needs the failure's own row hash", async () => {

@@ -8,7 +8,6 @@ const M = [
   [J, "if (e.adapterVersion !== adapterVersion || e.pins === undefined || comparePins(e.pins, currentPins).length > 0) continue;", "if (e.adapterVersion !== adapterVersion) continue;"],
   [J, "if (e.adapterVersion !== adapterVersion || e.pins === undefined || comparePins(e.pins, currentPins).length > 0) continue;", "if (e.pins === undefined || comparePins(e.pins, currentPins).length > 0) continue;"],
   [J, "if (open !== null && e.clears === open.hash) open = null;", "if (open !== null) open = null;"],
-  [J, "if (open !== null && e.clears === open.hash) open = null;", "if (e.clears === open?.hash) open = null; else if (e.type === 'x') open = null;"],
   [J, "return { blocked: true, reason: \"the oracle journal is unreadable or its hash chain is broken\" };", "return { blocked: false };"],
   [J, "return { blocked: true, reason: \"the oracle journal location is not usable\" };", "return { blocked: false };"],
   [J, "return { blocked: true, reason: \"the oracle journal has a malformed row\" };", "continue;"],
