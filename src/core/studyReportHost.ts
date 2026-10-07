@@ -182,7 +182,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
           const data = JSON.parse(checked(q.data.path, q.data.sha256).toString());
           if (c.adapter.id !== "raft" || data.quantity !== q.name || data.unit !== q.unit)
             throw Error("series format not supported by this first RAFT report workflow");
-          series[q.name] = { x: data.t, y: data.values, xLabel: "Time (s)", yLabel: `${q.name} (${q.unit})` };
+          series[q.name] = { x: data.t, y: data.values, xLabel: "Time (s)", yLabel: `${q.name} (${q.unit})`, dataSha256: q.data.sha256 };
         }
         reportRun.results = index;
         reportRun.series = series;
@@ -244,6 +244,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
         runs: { [runId]: reportRun },
         staleRunIds: stale ? [runId] : [],
         generatedBy: "SEED guarded single-case report/0.1",
+        requireBoundSeries: true,
       });
       if (!report.ok) return { ok: false as const, errors: report.errors };
       const studies = safeChild(projectRoot, folders.studies, true);
