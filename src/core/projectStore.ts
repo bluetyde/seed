@@ -12,6 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomicFile";
@@ -32,6 +33,8 @@ export type LockOptions = {
   now?: () => Date;
   /** Test hook: runs after a lock was judged stale and before it is renamed away (to force the takeover race). */
   beforeTakeover?: () => void;
+  /** Test hook: runs right after the manifest was written and before the writer checks that it still held the lock. */
+  afterManifestWrite?: () => void;
   /** Test hook: replaces the recursive delete used for lock folders (to force a failed release). */
   removeTree?: (path: string) => void;
   /**
@@ -235,7 +238,7 @@ export function openProject(dir: string): StoreResult<Project> {
 }
 
 type LockAcquireResult =
-  | { ok: true; release: () => TypedError | null; beat: () => void }
+  | { ok: true; release: () => TypedError | null; beat: () => void; scope: LockScope }
   | { ok: false; errors: TypedError[] };
 
 type LockJudgement =
@@ -274,15 +277,26 @@ function checkSeedDir(dir: string, seedDir: string): TypedError | null {
   }
 }
 
-/** Writer locks this process holds, by project folder: the token that must still be in the lock's owner file for a write to be this writer's. */
-const heldLocks = new Map<string, { token: string; ownerPath: string }>();
-const heldKey = (dir: string) => (process.platform === "win32" ? resolve(dir).toLowerCase() : resolve(dir));
+/**
+ * What one acquisition of the writer lock stands for. The callback that holds the lock runs inside its scope (AsyncLocalStorage), so a
+ * later save asks the lock about *its own* token: a callback whose lock was taken over stays refused even when another callback of the
+ * same process holds the lock by then.
+ */
+type LockScope = { dir: string; token: string; ownerPath: string };
+const lockScope = new AsyncLocalStorage<LockScope>();
+const sameProject = (a: string, b: string) => (process.platform === "win32" ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b));
+
 const BEAT_FILE = "beat";
 
-/** The last sign of life of a lock: its acquisition or the holder's latest heartbeat, whichever is later. */
+/**
+ * The last sign of life of a lock: its acquisition or the holder's latest heartbeat (a time in the file `beat`), whichever is later. A
+ * heartbeat is written to a new file that must not exist yet and renamed over `beat`, so it never writes through a link that the project
+ * put at `beat` (a rename replaces the link itself); reading a planted `beat` can only give a wrong time, never harm.
+ */
 function lastSign(lockDir: string, acquiredMs: number): number {
   try {
-    return Math.max(acquiredMs, statSync(join(lockDir, BEAT_FILE)).mtimeMs);
+    const beat = Number(readFileSync(join(lockDir, BEAT_FILE), "utf8").trim());
+    return Number.isFinite(beat) ? Math.max(acquiredMs, beat) : acquiredMs;
   } catch {
     return acquiredMs;
   }
@@ -393,17 +407,29 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
         return { ok: false, errors: [toInternalError(err)] };
       }
 
-      heldLocks.set(heldKey(dir), { token, ownerPath });
+      const scope: LockScope = { dir, token, ownerPath };
       const beat = (): void => {
         try {
           const current = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown } | null;
-          if (current !== null && current.token === token) writeFileSync(join(lockDir, BEAT_FILE), String(Date.now()));
+          if (current !== null && current.token === token) {
+            const tmp = join(lockDir, BEAT_FILE + "." + randomBytes(6).toString("hex"));
+            try {
+              writeFileSync(tmp, String(judging.now().getTime()), { flag: "wx" });
+              renameSync(tmp, join(lockDir, BEAT_FILE));
+            } catch (err) {
+              try {
+                rmSync(tmp, { force: true });
+              } catch {
+                // best effort
+              }
+              throw err;
+            }
+          }
         } catch {
           // a missed beat is only a smaller margin; the next one or the release tells whether the lock is still ours
         }
       };
       const release = (): TypedError | null => {
-        if (heldLocks.get(heldKey(dir))?.token === token) heldLocks.delete(heldKey(dir));
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
             const current = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown } | null;
@@ -423,7 +449,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
         }
         return null;
       };
-      return { ok: true, release, beat };
+      return { ok: true, release, beat, scope };
     }
 
     // The lock exists. Judge it; a stale lock is taken over under the takeover guard.
@@ -510,7 +536,7 @@ export function withProjectLock<T>(dir: string, fn: () => T, opts?: LockOptions)
   }
   let val: T;
   try {
-    val = fn();
+    val = lockScope.run(acq.scope, fn);
   } catch (err: unknown) {
     acq.release();
     throw err;
@@ -542,7 +568,7 @@ export async function withProjectLockAsync<T>(dir: string, fn: () => Promise<T>,
   timer?.unref();
   let val: T;
   try {
-    val = await fn();
+    val = await lockScope.run(acq.scope, fn);
   } catch (err: unknown) {
     if (timer) clearInterval(timer);
     acq.release();
@@ -587,10 +613,17 @@ export function saveProjectHeld(
   expectedRevision: string,
   opts?: LockOptions & { now?: () => Date }
 ): StoreResult<Project> {
-  const fence = (): TypedError | null => {
-    const held = heldLocks.get(heldKey(dir));
-    const lost = (why: string): TypedError => ({ code: "E_PROJECT_LOCKED", field: "", message: `the project lock is not this writer's (${why}); nothing was saved`, source: "seed" });
-    if (!held) return lost("this process does not hold it");
+  const fence = (after = false): TypedError | null => {
+    const held = lockScope.getStore();
+    const lost = (why: string): TypedError => ({
+      code: "E_PROJECT_LOCKED",
+      field: "",
+      message: after
+        ? `the project lock was no longer this writer's when the manifest had been written (${why}); the manifest may have replaced a newer writer's save, reopen the project and check it`
+        : `the project lock is not this writer's (${why}); nothing was saved`,
+      source: "seed",
+    });
+    if (!held || !sameProject(held.dir, dir)) return lost("this callback does not hold it");
     try {
       const current = JSON.parse(readFileSync(held.ownerPath, "utf8")) as { token?: unknown } | null;
       return current !== null && current.token === held.token ? null : lost("it was taken over");
@@ -606,7 +639,7 @@ function saveLocked(
   manifest: Record<string, unknown>,
   expectedRevision: string,
   opts?: LockOptions & { now?: () => Date },
-  fence?: () => TypedError | null
+  fence?: (after?: boolean) => TypedError | null
 ): StoreResult<Project> {
   {
     const manifestPath = join(dir, MANIFEST_FILE);
@@ -788,6 +821,11 @@ function saveLocked(
     } catch (err: unknown) {
       return { ok: false, errors: [toInternalError(err)] };
     }
+    // Between the last look and the rename nothing can stop a writer whose lock was taken over meanwhile (a process that was suspended,
+    // a disk that stalled): the revision was checked before, so the write can replace a newer save. Say so rather than report success.
+    opts?.afterManifestWrite?.();
+    const lostAfter = fence?.(true) ?? null;
+    if (lostAfter !== null) return { ok: false, errors: [lostAfter] };
 
     const newRev = projectRevision(newManifest);
     return { ok: true, value: { manifest: newManifest, revision: newRev } };

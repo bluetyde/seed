@@ -97,11 +97,11 @@ describe("L6: the request log is not lost when two processes add to it at once",
     const dead = spawnSync(process.execPath, ["-e", "0"]);
     expect(dead.status).toBe(0);
     mkdirSync(file + ".lock");
-    writeFileSync(join(file + ".lock", "owner.json"), JSON.stringify({ pid: dead.pid, host: os.hostname(), time: new Date().toISOString() }));
+    writeFileSync(join(file + ".lock", "owner.json"), JSON.stringify({ pid: dead.pid, host: os.hostname(), time: new Date().toISOString(), token: "t" }));
     expect(withRequestsLock(file, () => "ran")).toBe("ran");
     // now a live holder (this very process) that never lets go
     mkdirSync(file + ".lock");
-    writeFileSync(join(file + ".lock", "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString() }));
+    writeFileSync(join(file + ".lock", "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString(), token: "t" }));
     expect(() => withRequestsLock(file, () => "never", { waitMs: 150 })).toThrow(/in use by another manager/);
     rmSync(file + ".lock", { recursive: true, force: true });
   });
@@ -130,9 +130,9 @@ describe("L5: recover() in one manager does not remove the reservation of anothe
       mkdirSync(join(runs, dir));
       if (o) writeFileSync(join(runs, dir, "owner.json"), JSON.stringify(o));
     };
-    owner(".reserve-dead", { pid: dead.pid, host: os.hostname(), time: "2026-10-06T00:00:00Z" });
-    owner(".reserve-alive", { pid: process.pid, host: os.hostname(), time: "2026-10-06T00:00:00Z" });
-    owner(".reserve-foreign", { pid: 1, host: "another-machine", time: "2026-10-06T00:00:00Z" });
+    owner(".reserve-dead", { pid: dead.pid, host: os.hostname(), time: "2026-10-06T00:00:00Z", token: "t" });
+    owner(".reserve-alive", { pid: process.pid, host: os.hostname(), time: "2026-10-06T00:00:00Z", token: "t" });
+    owner(".reserve-foreign", { pid: 1, host: "another-machine", time: "2026-10-06T00:00:00Z", token: "t" });
     owner(".reserve-young", null);
     owner(".reserve-old", null);
     utimesSync(join(runs, ".reserve-old"), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
