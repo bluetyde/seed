@@ -15,6 +15,8 @@ export type DispatchAuthority = {
   currentPins: PinSet;
   acceptedPins?: PinSet;
   oracleResult?: SetResult;
+  /** A failure recorded in the oracle journal stands against the current pins (L1). */
+  journalBlocked?: boolean;
 };
 export type DispatchAudit = {
   requestId: string;
