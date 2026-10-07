@@ -19,6 +19,10 @@ const M = [
   ["if (c !== \"EEXIST\" && c !== \"ENOENT\" && !TRANSIENT_CODES.has(c)) return", "if (true) return"],
   ["if (c === \"ENOENT\") break;", ""],
   ["if (!TRANSIENT_CODES.has(c)) return { ok: false, errors: [toInternalError(guardErr)] };", "return { ok: false, errors: [toInternalError(guardErr)] };"],
+  ["if (TRANSIENT_CODES.has(code)) {\n                // something holds", "if (false) {\n                // something holds"],
+  ["if (code === \"ENOENT\") continue; // somebody else already moved it", ""],
+  ["moveAside(lockDir, staleDir);", "renameSync(lockDir, staleDir);"],
+  ["if (Date.now() >= deadline) return lockedError();\n                sleepSync(Math.min(10, Math.max(1, deadline - Date.now())));\n                continue;", "sleepSync(10);\n                continue;"],
   ["if (Date.now() >= deadline) return lockedError();\n      sleepSync(Math.min(10, Math.max(1, deadline - Date.now())));\n      continue;\n    }\n", "sleepSync(10);\n      continue;\n    }\n"]
 ];
 const only = process.argv[2] !== undefined ? Number(process.argv[2]) : null;
