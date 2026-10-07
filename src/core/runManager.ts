@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { callAdapter, type AdapterSpec } from "./adapterClient";
 import { appendLine, writeFileAtomic } from "./atomicFile";
+import { cacheKey as makeCacheKey } from "./cacheKey";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { isPortableRelative, resolveInside } from "./paths";
 import { isAlive } from "./procTree";
@@ -792,14 +793,14 @@ export class RunManager {
     }
 
     const declaredInputs = req.inputs.map((i) => ({ path: i.path, sha256: i.sha256 }));
-    const cacheKey = sha256Hex(
-      canonicalJson({
-        adapter: { id: this.adapter.id, version: this.adapter.version },
-        inputs: declaredInputs,
-        seed: req.seed ?? null,
-        settings: req.settings ?? {},
-      })
-    );
+    // one definition of the key (src/core/cacheKey.ts); the components the manager does not know at this point (engine version, data library,
+    // material revisions, mapping recipe) are left out of the key rather than guessed
+    const cacheKey = makeCacheKey({
+      adapter: { id: this.adapter.id, version: this.adapter.version },
+      inputs: declaredInputs,
+      ...(req.seed !== undefined ? { seed: req.seed } : {}),
+      settings: req.settings ?? {},
+    });
 
     const record: Record<string, unknown> = {
       schema: "seed.run-record/0.1",
