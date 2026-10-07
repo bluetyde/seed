@@ -96,6 +96,16 @@ else if (mode === "hang" && verb !== "cancel") {
         { id: "timeStep", verdict: "pass", value: 1.5 },
       ];
     }
+    const limitModes = {
+      "limits": [{ value: 639.4, verdict: "pass" }, { value: null, verdict: "pass" }],
+      "limits-two": [{ value: 639.4, verdict: "pass" }, { value: 120.5, verdict: "pass" }],
+      "limit-exceeded": [{ value: -12.5, verdict: "fail" }, { value: null, verdict: "pass" }],
+      "limit-none": [{ value: null, verdict: "pass" }],
+      "limit-incoherent": [{ value: 5, verdict: "fail" }],
+      "limit-badvalue": [{ value: "5", verdict: "pass" }],
+      "limit-nullfail": [{ value: null, verdict: "fail" }],
+    };
+    if (limitModes[mode]) limitModes[mode].forEach((c, i) => results.checks.push({ id: "temperatureLimit" + (i + 1), label: "Temperature limit", unit: "K", ...c }));
     if (mode === "nodomain") delete results.domain;
     if (mode === "nan") results.summary.maxT = null;
     const files = {
