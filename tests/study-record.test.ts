@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli/seed";
@@ -111,6 +111,24 @@ describe("the record file", () => {
       expect(appendStudySteps(file, header(), [draft("c")], project)).toMatchObject({ ok: false });
       expect(readFileSync(file, "utf8")).toBe(broken); // not repaired, not extended
     });
+  });
+
+  it("a last line that lacks only its newline is a partial write and is refused", () => {
+    const { project, file } = setup();
+    appendStudySteps(file, header(), [draft("a")], project);
+    writeFileSync(file, readFileSync(file, "utf8").slice(0, -1));
+    expect(readStudyRecord(file)).toMatchObject({ ok: false });
+    expect(appendStudySteps(file, header(), [draft("b")], project)).toMatchObject({ ok: false });
+  });
+
+  it("a step the schema would refuse is never written (an agent actor with no model, an unknown action)", () => {
+    for (const bad of [draft("m1", { actor: { kind: "agent", name: "bot" } as never }), draft("m3", { action: "mystery" as never })]) {
+      const { project, file } = setup();
+      appendStudySteps(file, header(), [draft("ok")], project);
+      const before = readFileSync(file, "utf8");
+      expect(appendStudySteps(file, header(), [bad], project), bad.key).toMatchObject({ ok: false });
+      expect(readFileSync(file, "utf8")).toBe(before);
+    }
   });
 
   it("a record that would not fit is refused rather than truncated", () => {
@@ -264,6 +282,7 @@ describe("runs write the record", () => {
     const f = await fixture();
     expect(await runFromHostFile(f.hostFile, f.request("r1"))).toMatchObject({ ok: true, state: "completed" });
     expect(existsSync(f.record)).toBe(false);
+    expect(f.diagnostics().filter((d) => d.stage === "study-record")).toEqual([]); // no header is not a failure
   });
 
   it("a header that does not match the host (another study, tier or parameters) records nothing, logs why, and the run still completes", async () => {
@@ -282,9 +301,14 @@ describe("runs write the record", () => {
     const f = await fixture();
     const hashed = join(f.root, "hashed.json");
     writeHostJson(hashed, { ...f.header, hash: "a".repeat(64) });
+    const chained = join(f.root, "chained.json");
+    writeHostJson(chained, { ...f.header, prev: null, hash: "a".repeat(64) }); // a header that already carries a chain position
+    const reachable = join(f.root, "reachable.json");
+    writeHostJson(reachable, f.header);
+    const rel = relative(process.cwd(), reachable); // a real file, reachable only by a relative path
     const inside = join(f.project, "header.json");
     writeHostJson(inside, f.header);
-    for (const bad of [hashed, "header.json", inside]) {
+    for (const bad of [hashed, chained, "header.json", rel, inside]) {
       process.env.SEED_STUDY_HEADER = bad;
       expect(await runFromHostFile(f.hostFile, f.request("r-" + sha256Hex(bad).slice(0, 6)))).toMatchObject({ ok: true });
     }
@@ -403,6 +427,17 @@ describe("notes", () => {
     expect(out).toMatchObject({ ok: false });
     expect((out as { errors: { code: string }[] }).errors[0]!.code).toBe("E_NOT_PERMITTED");
     expect(existsSync(f.record)).toBe(false);
+  });
+
+  it("the same run cited twice is refused (with a run that really exists)", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const out = (await runFromHostFile(f.hostFile, f.request("r1"))) as { runId: string };
+    const before = readFileSync(f.record, "utf8");
+    const bad = note(f.hostFile, { runs: [out.runId, out.runId] });
+    expect(bad).toMatchObject({ ok: false });
+    expect((bad as { errors: { code: string }[] }).errors[0]!.code).toBe("E_SCHEMA_INVALID");
+    expect(readFileSync(f.record, "utf8")).toBe(before);
   });
 
   it("a run that is not in this project is refused", async () => {
