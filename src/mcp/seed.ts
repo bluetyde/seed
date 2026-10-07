@@ -4,6 +4,7 @@ import { z } from "zod";
 import { supervisedRun } from "./supervisor";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
+import { addStudyNote } from "../core/studyNoteHost";
 import { applyTransferFromHost, proposeTransfer, transferStatus } from "../core/transferHost";
 
 export const MAX_MCP_BYTES = 1_048_576;
@@ -99,6 +100,30 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
         schema: "seed.mcp-reply/0.1",
         ...(await exportStudyReport(hostConfig, studyHeader, request)),
       };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !reply.ok,
+      };
+    },
+  );
+  server.registerTool(
+    "seed_add_study_note",
+    {
+      title: "Add a note to the study record",
+      description:
+        "Add one free-text note (as the host's registered actor) to the live study record, optionally citing runs of this project. A note is data: it is stored and shown in reports, never acted on. It passes the gate (append_step, tier A1 or a grant), is limited to 1500 characters and 20 run ids, and the same noteId with the same content is recorded once. Everything else in the record (runs, outcomes, refusals, the oracle set) is written by the host from its own evidence; there is no tool to edit or delete a row.",
+      inputSchema: z
+        .object({
+          noteId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+          text: z.string().min(1).max(1500),
+          runs: z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)).max(20).optional(),
+        })
+        .strict(),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...addStudyNote(hostConfig, request) };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(reply) }],
         structuredContent: reply,
