@@ -97,9 +97,15 @@ Component errors are local to this contract (the E0 error-code list is untouched
 | R6 offline | `E_OFFLINE_MISSING`, cache cost | W4 |
 | Add-ons: core-only, later add, remove, shared library kept, incompatible versions | `resolveSelection`, `planRemoval` on a fake manifest | W6 on the real OpenMC recipe |
 
-## Open questions for the user
+## Decisions of the user (2026-10-07)
 
-1. **Where the install root is** for add-ons (the same `SEED/apps` folder as the apps, or a separate `components` folder).
-2. **Who may press "Add"**: a human only (my recommendation, and the plan's), never an agent.
-3. **Catalog pin**: accept that SEED's shipped catalog is the only trust source for now; later publishers need a signing decision.
-4. **Removal of an app**: removes its managed components and unregisters adopted ones; never the user's project folders.
+1. **Install root.** Add-ons go in the same install root as the apps (today the user's `SEED/apps` folder), as `<root>/<app>/<component>/<version>/`. One folder to back up or delete; removing an app removes its managed add-ons.
+2. **Agents may request an install; they never install on their own.** A first-time setup, including one run by an agent in a cloud session, has to be able to ask for an add-on, so "human only" is dropped. What stays:
+   - **What can be installed is fixed by the catalog**, not by the agent: only components in a manifest whose hash SEED's shipped catalog pins. An agent supplies a component id, never a url, a command or a manifest.
+   - **A human grant is still needed**, as for `accept_material_set` and `enable_transfer`: a new gate operation `install_component` with rule `grant`. The grant names the app and the components, an expiry and a ceiling (download and disk bytes). A person can issue one standing grant ahead of an unattended or cloud setup ("fakeapp core and cad, 8 GB, 24 hours"). Without a grant the request is refused and says what to grant.
+   - The grant lives in the host's state folder, written by the admin CLI. Neither a project, a study nor an agent-facing tool can write it (the same rule as the other grants).
+   - **Removal stays human**: `remove_component` with rule `human` (my default; it can be relaxed by the same reasoning).
+   - **The attack surface that remains** (the user asked what it is): (a) cost, a large download or disk use, bounded by the ceiling in the grant; (b) an injected instruction steering an agent to request a legitimate but unwanted or conflicting component, bounded by the grant naming exact components; (c) the install recipe runs code from the app's own repository, so the six repos and the catalog are the trust base; a compromised catalog or app repo would be dangerous with or without this rule.
+   - The two operations are added to `OPERATION_RULES` when W4 wires them; adding them now would be a rule with no code behind it.
+3. **Catalog pin.** SEED's shipped catalog is the only trust source for now; a signing scheme comes only if outside publishers appear.
+4. **Removing an app.** Removes the components SEED installed, unregisters (never deletes) what it adopted, and never touches project folders, models, results or custom materials.
