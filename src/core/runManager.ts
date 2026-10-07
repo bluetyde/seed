@@ -218,15 +218,21 @@ function claimAbandoned(dir: string, graceMs: number, foreignStaleMs?: number): 
   }
 }
 
+/** Removes a folder, tolerating the moment on Windows when another process still holds a handle on something in it. */
+const rmTree = (p: string): void => rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
+
 /** Removes an abandoned claim. Judged again under a takeover guard; false when it is not abandoned, gone, or another contender is judging. */
-function removeClaimIfAbandoned(dir: string, graceMs: number, foreignStaleMs?: number): boolean {
+export function removeClaimIfAbandoned(dir: string, graceMs: number, foreignStaleMs?: number, mkdir: (path: string) => void = (p) => void mkdirSync(p)): boolean {
   const guard = join(dirname(dir), ".takeover-" + basename(dir).replace(/^\./, ""));
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      mkdirSync(guard);
+      mkdir(guard);
       break;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      // On Windows a guard that another contender is deleting right now refuses mkdir for a moment: somebody else is judging, so not now
+      if (code === "EPERM" || code === "EBUSY" || code === "EACCES") return false;
+      if (code !== "EEXIST") throw err;
       // a guard left by a contender that died is removed once it is old; a fresh one means somebody else is judging right now
       let old = false;
       try {
@@ -235,15 +241,15 @@ function removeClaimIfAbandoned(dir: string, graceMs: number, foreignStaleMs?: n
         old = false;
       }
       if (!old || attempt === 1) return false;
-      rmSync(guard, { recursive: true, force: true });
+      rmTree(guard);
     }
   }
   try {
     if (!existsSync(dir) || !claimAbandoned(dir, graceMs, foreignStaleMs)) return false;
-    rmSync(dir, { recursive: true, force: true });
+    rmTree(dir);
     return true;
   } finally {
-    rmSync(guard, { recursive: true, force: true });
+    rmTree(guard);
   }
 }
 
@@ -272,14 +278,14 @@ export function takeClaim(dir: string, token: string, afterMkdir?: () => void): 
     const code = (err as NodeJS.ErrnoException).code;
     // EEXIST: somebody replaced the folder and wrote its owner first; ENOENT: the folder was removed under us. Either way it is not ours.
     if (code === "EEXIST" || code === "ENOENT") return false;
-    if (readClaimOwner(dir) === null) rmSync(dir, { recursive: true, force: true });
+    if (readClaimOwner(dir) === null) rmTree(dir);
     throw err;
   }
 }
 
 /** Releases a claim, and only if the owner file still carries this holder's token. */
 function releaseClaim(dir: string, token: string): void {
-  if (readClaimOwner(dir)?.token === token) rmSync(dir, { recursive: true, force: true });
+  if (readClaimOwner(dir)?.token === token) rmTree(dir);
 }
 
 /**
