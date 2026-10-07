@@ -14,6 +14,7 @@ import {
 import { evaluateGate, issueGrant, type Actor, type Grant, type PolicyStudy } from "./policy";
 import { controlBinding } from "./hostControl";
 import { loadOracleAuthority } from "./oracleAuthority";
+import { expandSweep, type SweepDefinition } from "./sweep";
 import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runDispatcher";
 import { openProject } from "./projectStore";
 import { type RunOutcome } from "./runManager";
@@ -37,6 +38,8 @@ export type HostConfiguration = {
   actor: Actor;
   study: PolicyStudy;
   cases: Record<string, RegisteredCase>;
+  /** Registered sweeps: each one expands to cases of its own (see sweep.ts), ids `<sweepId>-001` and on. */
+  sweeps?: Record<string, SweepDefinition>;
   runtime: { path: string; sha256: string };
   oracles: {
     repository: string;
@@ -90,7 +93,24 @@ export function validateHostConfiguration(value: unknown): HostConfiguration {
     if (ids.size !== seen.size || [...seen].some(id => !ids.has(id)))
       throw Error("registered case must name every study parameter exactly once");
   }
+  for (const [sweepId, def] of Object.entries(c.sweeps ?? {})) {
+    const expanded = expandSweep(sweepId, def, c.cases, c.study);
+    if (!expanded.ok) throw Error("invalid sweep " + sweepId + ": " + expanded.errors.map(e => e.message).join("; "));
+    for (const x of expanded.cases)
+      if (Object.hasOwn(c.cases, x.caseId))
+        throw Error("sweep " + sweepId + " would reuse the registered case id " + x.caseId);
+  }
   return c;
+}
+/** Every case a client may name: the registered ones and those of the registered sweeps. */
+export function allCases(c: HostConfiguration): Record<string, RegisteredCase> {
+  const all: Record<string, RegisteredCase> = { ...c.cases };
+  for (const [sweepId, def] of Object.entries(c.sweeps ?? {})) {
+    const expanded = expandSweep(sweepId, def, c.cases, c.study);
+    if (!expanded.ok) throw Error("invalid sweep " + sweepId);
+    for (const x of expanded.cases) all[x.caseId] = x.registered;
+  }
+  return all;
 }
 /** Called by trusted setup code; the run CLI provides no configuration or approval writer. */
 export function saveHostConfiguration(file: string, value: unknown): void {
@@ -111,6 +131,7 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
     const configBytes = readFileSync(file);
     const configHash = sha256Hex(configBytes);
     const c = validateHostConfiguration(JSON.parse(configBytes.toString("utf8")));
+    const cases = allCases(c);
     const project = realpathSync(c.projectRoot);
     const state = realpathSync(c.stateRoot);
     if (inside(project, realpathSync(file)) || inside(project, state))
@@ -139,7 +160,7 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           token: owner.token,
           binding: controlBinding(c),
           inputs:
-            c.cases[(request as any).caseId]?.inputs.map(i => ({ artifact: i.path, revision: i.sha256 })) ??
+            (Object.hasOwn(cases, (request as any).caseId) ? cases[(request as any).caseId] : undefined)?.inputs.map(i => ({ artifact: i.path, revision: i.sha256 })) ??
             [],
         });
       }
@@ -173,8 +194,8 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           engine: engineKey,
           loadCase: async id => {
             unchanged();
-            if (!Object.hasOwn(c.cases, id)) throw Error("case is not registered");
-            return c.cases[id]!;
+            if (!Object.hasOwn(cases, id)) throw Error("case is not registered");
+            return cases[id]!;
           },
           loadAuthority: async () => {
             unchanged();
