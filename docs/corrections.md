@@ -32,7 +32,7 @@ Append a block at the end, next number, this shape:
 - **Why the checks missed it:** the tests and the earlier stress test ran on a quiet machine, where the refusal never happened; the E2 record said "three processes adding 40 entries lose none", which was true only without load. The second-model review of the same code did not find it either.
 - **Catches it now:** `tests/claim-safety.test.ts` (injected failures for each rule) and `scripts/stress-request-log.cjs` (run under load after any change to the claims or the project lock)
 - **Disposition:** regression-test, stress-tool
-- **Evidence:** 530cfce; the section "Defects found in the E2 concurrency work after the sign-off" in `docs/reviews/exit-reviews-e0-e2-2026-10-06.md` (before: 4 of 80 and 1 of 120 rounds lost entries; after: 0 of 240). Open: the project writer lock in `src/core/projectStore.ts` re-reads its token before each removal but has not been stress-traced the same way.
+- **Evidence:** 530cfce; the section "Defects found in the E2 concurrency work after the sign-off" in `docs/reviews/exit-reviews-e0-e2-2026-10-06.md` (before: 4 of 80 and 1 of 120 rounds lost entries; after: 0 of 240). The project writer lock in `src/core/projectStore.ts` was stress-traced the same day: see C-07.
 
 ### C-02 Takeover guard folder threw on a Windows refusal
 - **Date:** 2026-10-07
@@ -83,3 +83,13 @@ Append a block at the end, next number, this shape:
 - **Catches it now:** nothing: practice only (a request that makes another session write somewhere needs the same permission as writing there myself)
 - **Disposition:** none
 - **Evidence:** correction entries of 2026-10-07 07:51 in the five app logs under `messages/` (outside this repository, so not checked by the test)
+
+### C-07 The project writer lock answered E_INTERNAL while a lock was being released
+- **Date:** 2026-10-07
+- **Found by:** stress run (the new `scripts/stress-project-lock.cjs`: four workers on one project folder, fourteen busy-loop processes)
+- **Class:** infrastructure
+- **What was wrong:** a lock folder, owner file or stale folder that its holder is deleting right now refuses a read, a `mkdir`, a write or a rename for a moment on Windows (EPERM, EBUSY, EACCES). The lock treated that as an internal error, so a save failed under contention. Nothing was lost and two writers were never inside at once. Two smaller holes were closed on the way: the owner file was written with a plain overwrite (a folder replaced while its maker was paused could have its owner file overwritten), and the takeover guard was a folder with no owner, removed by path once it looked old.
+- **Why the checks missed it:** the lock's tests injected a failed release and a stale takeover but never a refusal on the read, `mkdir`, write or rename of a lock being released; the code had been reasoned about as safe ("re-reads its token before each removal") and not run under load. Even the first fix was incomplete: 40 rounds per mode found no more errors, and a run of 80 rounds then found the rename refusal.
+- **Catches it now:** `tests/project-lock-transient.test.ts` (injected refusals for each step) and `scripts/stress-project-lock.cjs` (run under load after any change to the lock, at least 100 rounds per mode)
+- **Disposition:** regression-test, stress-tool
+- **Evidence:** 1dd7f25 and 236ae66. Before: lock errors in 1 of 8 quiet rounds, 1 of 20 loaded contention rounds, 1 of 30 takeover rounds and 3 of 60 abandoned-guard rounds. After both fixes: 0 lock errors and 0 lost updates in 360 loaded rounds, then 0 flags in 300 loaded rounds with a shared clock. The five overlaps that run flagged were timestamp skew between processes (the workers used `performance.timeOrigin + now()`, estimated separately per process); they disappeared when the same code was run with `process.hrtime`, and each such round ended with the right counter. Left: the check-then-delete window on an abandoned guard is shorter, not closed.

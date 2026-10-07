@@ -22,7 +22,8 @@ for (const name of ["mkdirSync", "rmSync", "writeFileSync"]) {
   };
 }
 const { withRequestsLock, readRequestsMap } = require(lib);
-const now = () => performance.timeOrigin + performance.now();
+// one clock all workers share (system monotonic counter); timeOrigin + now() is estimated per process and can differ by a millisecond
+const now = () => Number(process.hrtime.bigint()) / 1e6;
 const trace = (o) => fs.appendFileSync(traceFile, JSON.stringify({ t: now(), pid: process.pid, p: prefix, ...o }) + "\n");
 const hash = "a".repeat(64);
 for (let i = 0; i < Number(count); i++) {
