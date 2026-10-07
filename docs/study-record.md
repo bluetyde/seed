@@ -1,0 +1,42 @@
+# The live study record (E3)
+
+From [plan 07](plans/07-studies-and-reports.md). Until now a study had a record only at report export, when the steps were rebuilt from the admission log. Now the host keeps the record **while runs happen**. Code: `src/core/studyRecord.ts` (the file), `studyRecordHost.ts` (what a request becomes), `studyNoteHost.ts` (notes). Tests: `tests/study-record.test.ts` (48).
+
+## The file
+
+`<project>/<studies folder>/<studyId>/study.jsonl`, one JSON object per line, in the `seed.study/0.1` format the report builder already reads:
+
+- Row 1 is the **human header** (question, hypothesis, assumptions, allowed parameters and bounds, budget, tier), exactly as the human wrote it. The host gets it from `SEED_STUDY_HEADER`, the same trusted file the report export uses, and checks it against its own study and project (study id, project id, tier, budget, parameters); a header that does not match, has a chain position of its own, is not an absolute path, or lies inside the project is refused. A record whose first row is another header is never appended to.
+- Every later row is a **step**: sequence number, time, actor, action, reason, inputs changed, runs, and where it applies the oracle set or the gate stop. Rows are **hash-chained** (`prev`, `hash`), so an edited, removed or reordered row is detected. The whole file is verified (`verifyStudyLog`) before every append and again after the new rows are added, and is replaced atomically; a record that fails either check is **not repaired and not extended**.
+- Appends happen under the project writer lock (the one stress-traced as C-07), so several processes append safely: four processes appending ten steps each at once leave one valid chain with 40 distinct steps.
+
+## What the host writes
+
+For every request the host has audited (`runFromHostFile`, so single runs and every case of a sweep):
+
+| Situation | Steps |
+|---|---|
+| Admitted, a run exists | `oracle` (the pinned evidence set and verdict, written once per set), `run` (registered case, how it was admitted: tier or a named grant), and the audited terminal outcome: `cancel` if cancelled, otherwise `note` ("Audited terminal outcome: failed. No scientific conclusion has been accepted.") |
+| Refused at the gate | one `gate-stop` step with the gate's rule and the reasons |
+| A sweep case | the `run` step also says "Sweep t, case 2 of 3 (delayMs=20)" |
+| Admitted but the start itself was refused, or the request failed before the gate | nothing; the admission log has it |
+
+A failed, interrupted or tripped run is a step like any other: the record never leaves a failure out.
+
+**A step is written once.** Each step carries a short marker at the end of its reason, `(ref 3fa9c1d27be04a66)`, the first 16 hex digits of the hash of its key (the request id and what it records, or the note id and its content). A replay of the same request finds its markers and writes nothing; a step's own text cannot imitate another step's marker, because the marker is always appended last by the writer.
+
+**The record never changes a run.** It is derived from what the host has just audited. If appending fails (a damaged record, a header that does not match, a full file) the run's outcome is unchanged, the reason goes to the host's `diagnostics.jsonl` (stage `study-record`), and the admission log still holds everything. No header configured means no record and no diagnostic: it is simply not kept.
+
+## What an agent may add: notes
+
+The only agent-writable thing is a note: CLI `node dist/cli/seed.js note` or MCP `seed_add_study_note`, with `{noteId, text, runs?}` (text 1 to 1500 characters, at most 20 different run ids, each a run of this project). It passes the gate as `append_step` (tier A1 or a grant), is recorded as the host's registered actor, is **data** (stored and shown, never acted on; reports escape it), and the same note id with the same content is recorded once. There is no verb to edit or delete a row; a correction is a new step.
+
+## Not done
+
+- **The report export still rebuilds its own steps** from the admission log. Switching it to read this record (so the report shows notes and every run of the study) is the next step; until then a note appears in the record and not yet in a report.
+- **No reconciliation**: a step lost because an append failed is not backfilled from the admission log yet.
+- **Replay** (re-running a recorded run and comparing), **feeding comparisons into the report**, and **cache reuse as a step** ("reused from run X", [compare-and-cache.md](compare-and-cache.md)) are not built.
+- The oracle step is written once per evidence set (by key); a set that is replaced by another and later returns is not written a second time.
+- Limits: the record is one file (8 MB); a study that outgrows it needs a new study. Deleting the *last* rows cannot be told from a shorter record by the chain alone (as with the admission log); the project folder is the trust boundary.
+
+Mutations of this code: 33; 29 caught; 3 equivalent (a check the schema makes redundant, twice, and a branch the first branch makes unreachable); 1 untested (the length of the lock wait). `scripts/mutate-study-record.cjs`.
