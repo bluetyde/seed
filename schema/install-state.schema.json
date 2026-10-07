@@ -1,0 +1,58 @@
+{
+  "$id": "https://seed.invalid/schema/install-state.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "seed.install-state/0.1 (runtime contract, W2): what SEED has installed or adopted, and the one transaction in flight",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "installs"],
+  "properties": {
+    "schema": { "const": "seed.install-state/0.1" },
+    "installs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["app", "component", "version", "origin", "location", "manifestSha256", "selectedByUser", "installedAt"],
+        "properties": {
+          "app": { "$ref": "component-manifest.schema.json#/$defs/id" },
+          "component": { "$ref": "component-manifest.schema.json#/$defs/id" },
+          "version": { "$ref": "component-manifest.schema.json#/$defs/version" },
+          "origin": { "enum": ["managed", "adopted"] },
+          "location": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "manifestSha256": { "$ref": "component-manifest.schema.json#/$defs/sha256" },
+          "artifactSha256": { "type": "array", "items": { "$ref": "component-manifest.schema.json#/$defs/sha256" } },
+          "selectedByUser": { "type": "boolean" },
+          "installedAt": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" },
+          "previous": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "location"],
+            "properties": {
+              "version": { "$ref": "component-manifest.schema.json#/$defs/version" },
+              "location": { "type": "string", "minLength": 1, "maxLength": 1000 }
+            }
+          }
+        }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operation", "app", "component", "to", "state", "startedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "operation": { "enum": ["install", "update", "remove"] },
+        "app": { "$ref": "component-manifest.schema.json#/$defs/id" },
+        "component": { "$ref": "component-manifest.schema.json#/$defs/id" },
+        "from": { "$ref": "component-manifest.schema.json#/$defs/version" },
+        "to": { "$ref": "component-manifest.schema.json#/$defs/version" },
+        "state": {
+          "enum": ["queued", "preflight", "staging", "verifying", "activating", "ready", "removing", "removed", "cancelled", "failed", "interrupted"]
+        },
+        "startedAt": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "owner": { "$ref": "process-owner.schema.json#/$defs/identity" }
+      }
+    }
+  }
+}
