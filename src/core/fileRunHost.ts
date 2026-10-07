@@ -11,10 +11,11 @@ import {
   type PinSet,
   type SetResult,
 } from "./oracle";
-import { evaluateGate, issueGrant, type Actor, type Grant, type PolicyStudy } from "./policy";
+import { evaluateGate, issueGrant, type Actor, type Decision, type Grant, type PolicyStudy } from "./policy";
 import { controlBinding } from "./hostControl";
 import { loadOracleAuthority } from "./oracleAuthority";
 import { expandSweep, type SweepDefinition } from "./sweep";
+import { recordRequestInStudy, type LiveContext } from "./studyRecordHost";
 import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runDispatcher";
 import { openProject } from "./projectStore";
 import { type RunOutcome } from "./runManager";
@@ -124,7 +125,7 @@ function failed(message: string, code = "E_INTERNAL"): RunOutcome {
 }
 
 /** Uses only the config selected by the trusted host environment. No client path or actor fields. */
-export async function runFromHostFile(file: string, request: unknown): Promise<RunOutcome> {
+export async function runFromHostFile(file: string, request: unknown, context?: LiveContext): Promise<RunOutcome> {
   try {
     if (!isAbsolute(file)) return failed("SEED_HOST_CONFIG must be an absolute path", "E_SETUP_REQUIRED");
     regularFile(file);
@@ -176,6 +177,7 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
       try {
         unchanged();
         // Fixed host environment for the RAFT adapter, never request content.
+        let lastDecision: Decision | undefined;
         const dispatcher = new RunDispatcher({
           manager: {
             projectRoot: project,
@@ -211,6 +213,7 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
           audit: async event => {
             unchanged();
             audit("decision", event);
+            lastDecision = event.decision;
           },
           // The caller's reply carries only a stage and a failure class; the full cause stays here, in the host's
           // state folder, which clients cannot reach.
@@ -351,6 +354,22 @@ export async function runFromHostFile(file: string, request: unknown): Promise<R
         );
         if (outcome.ok && ["completed", "cancelled", "terminated-by-trip"].includes(outcome.state))
           writeHostJson(join(lease, "owner.json"), { ...owner, retain: false });
+        // The live study record is derived from what the host has just audited. It never changes the outcome: a failure goes to the diagnostics.
+        const asked = request as { requestId?: unknown; caseId?: unknown } | null;
+        if (asked && typeof asked.requestId === "string" && typeof asked.caseId === "string") {
+          recordRequestInStudy({
+            c,
+            projectRoot: project,
+            studiesFolder: (p.value.manifest.folders as { studies: string }).studies,
+            projectId: p.value.manifest.projectId as string,
+            engineRoot,
+            requestId: asked.requestId,
+            caseId: asked.caseId,
+            decision: lastDecision,
+            outcome: outcome.ok ? { ok: true, runId: outcome.runId, state: outcome.state } : { ok: false },
+            ...(context ? { context } : {}),
+          });
+        }
         return outcome;
       } catch (e) {
         const message = e instanceof Error ? e.message : "host dispatch failed";

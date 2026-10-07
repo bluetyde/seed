@@ -134,7 +134,7 @@ function cli(file: string, input: unknown, args = ["run"], entry = "seed") {
 it("real MCP discovery and run preserve guarded host admission", async () => {
   const f = await fixture(); const m = await connectSeedMcp(f.file);
   try {
-    const tools = await m.client.listTools(); expect(tools.tools.map(t => t.name)).toEqual(["seed_run_case", "seed_cancel_calculation", "seed_export_study_report"]);
+    const tools = await m.client.listTools(); expect(tools.tools.map(t => t.name)).toEqual(["seed_run_case", "seed_cancel_calculation", "seed_export_study_report", "seed_add_study_note"]);
     expect(tools.tools[0]!.inputSchema.additionalProperties).toBe(false);
     const result = await m.client.callTool({ name: "seed_run_case", arguments: f.request });
     expect(result.isError).toBe(false); expect(result.structuredContent).toMatchObject({ ok: true, state: "completed" });

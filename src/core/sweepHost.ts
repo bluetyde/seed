@@ -135,7 +135,11 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
         stoppedAt = { caseId: row.caseId, reason: "host configuration changed during the sweep" };
         break;
       }
-      const outcome: RunOutcome = await runFromHostFile(file, { requestId: row.requestId, caseId: row.caseId, budget });
+      const outcome: RunOutcome = await runFromHostFile(
+        file,
+        { requestId: row.requestId, caseId: row.caseId, budget },
+        { sweep: { sweepId, index: results.indexOf(row) + 1, count: results.length, values: row.values } }
+      );
       if (!outcome.ok) {
         row.state = "refused";
         row.errors = outcome.errors;
