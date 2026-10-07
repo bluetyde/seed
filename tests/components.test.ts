@@ -373,6 +373,13 @@ describe("the install-state and process-owner records", () => {
     expect(codes(r)).toContain(code);
   });
 
+  it("a removal and a first install are valid transactions: a removal has no target version, an install has no old one", () => {
+    const base = { id: "d".repeat(32), app: "fakeapp", component: "fake-cad", startedAt: "2026-10-07T00:00:00Z" };
+    expect(validateInstallState({ ...good(), transaction: { ...base, operation: "remove", from: "0.3.0", state: "removing" } }).ok).toBe(true);
+    expect(validateInstallState({ ...good(), transaction: { ...base, operation: "install", to: "0.3.0", state: "staging" } }).ok).toBe(true);
+    expect(validateInstallState({ ...good(), transaction: { ...base, operation: "update", from: "0.2.0", to: "0.3.0", state: "activating" } }).ok).toBe(true);
+  });
+
   it("an owner record without a start identity, or with an endpoint off this machine, is refused", () => {
     const a = owner();
     delete (a.host as any).startIdentity;

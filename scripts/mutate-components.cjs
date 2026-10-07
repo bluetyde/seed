@@ -4,7 +4,7 @@ const { spawnSync, execSync } = require("node:child_process");
 const { readFileSync, writeFileSync } = require("node:fs");
 const F = "src/core/components.ts";
 const M = [
-  ["if (compareVersions(have.version, c.version) >= 0) {", "if (compareVersions(have.version, c.version) > 0) {"],
+  ["if (have && compareVersions(have.version, c.version) >= 0) {", "if (have && compareVersions(have.version, c.version) > 0) {"],
   ["if (have && have.origin === \"adopted\") {", "if (false) {"],
   ["if (need !== undefined && compareVersions(have.version, need) < 0) {", "if (false) {"],
   ["if (req.cache?.has(a.sha256)) continue;", ""],
