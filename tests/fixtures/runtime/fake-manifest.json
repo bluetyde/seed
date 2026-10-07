@@ -1,0 +1,80 @@
+{
+  "schema": "seed.component-manifest/0.1",
+  "app": "fakeapp",
+  "recipeRevision": "r1",
+  "components": [
+    {
+      "id": "fakeapp-core",
+      "version": "1.2.0",
+      "kind": "core",
+      "title": "Fake app, core",
+      "platforms": [
+        { "os": "windows", "arch": "x64", "via": "wsl" },
+        { "os": "linux", "arch": "x64" },
+        { "os": "macos", "arch": "arm64" }
+      ],
+      "appVersions": { "min": "1.0.0" },
+      "capabilities": ["edit", "run"],
+      "artifacts": [{ "id": "core-pack", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "downloadBytes": 1000, "expandedBytes": 3000, "archive": "tar.gz" }],
+      "license": { "spdx": "MIT" }
+    },
+    {
+      "id": "shared-libs",
+      "version": "2.0.0",
+      "kind": "library",
+      "title": "Shared libraries",
+      "platforms": [
+        { "os": "windows", "arch": "x64", "via": "wsl" },
+        { "os": "linux", "arch": "x64" },
+        { "os": "macos", "arch": "arm64" }
+      ],
+      "capabilities": [],
+      "artifacts": [{ "id": "libs-pack", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "downloadBytes": 5000, "expandedBytes": 20000, "archive": "tar.gz" }],
+      "license": { "spdx": "LGPL-2.1-only", "sourceOffer": true }
+    },
+    {
+      "id": "fake-cad",
+      "version": "0.3.0",
+      "kind": "addon",
+      "title": "CAD import",
+      "description": "Needed only for CAD import and conversion.",
+      "platforms": [
+        { "os": "windows", "arch": "x64", "via": "wsl" },
+        { "os": "linux", "arch": "x64" }
+      ],
+      "appVersions": { "min": "1.1.0", "max": "1.9.0" },
+      "dependsOn": [{ "component": "fakeapp-core", "min": "1.2.0" }, { "component": "shared-libs", "min": "2.0.0" }],
+      "capabilities": ["cad-import"],
+      "artifacts": [{ "id": "cad-pack", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "downloadBytes": 40000, "expandedBytes": 160000, "archive": "zip" }],
+      "license": { "spdx": "LGPL-2.1-only", "sourceOffer": true }
+    },
+    {
+      "id": "fake-nodal",
+      "version": "0.1.0",
+      "kind": "addon",
+      "title": "Nodal core solver",
+      "platforms": [
+        { "os": "windows", "arch": "x64", "via": "wsl" },
+        { "os": "linux", "arch": "x64" },
+        { "os": "macos", "arch": "arm64" }
+      ],
+      "dependsOn": [{ "component": "fakeapp-core" }, { "component": "shared-libs" }],
+      "conflicts": ["fake-legacy"],
+      "capabilities": ["nodal-solve", "group-constants"],
+      "artifacts": [{ "id": "nodal-pack", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "downloadBytes": 8000, "expandedBytes": 12000, "archive": "tar.gz" }],
+      "dataRefs": [{ "id": "iaea2d-deck", "sha256": "5555555555555555555555555555555555555555555555555555555555555555" }],
+      "license": { "spdx": "MIT", "noticesSha256": "6666666666666666666666666666666666666666666666666666666666666666" }
+    },
+    {
+      "id": "fake-legacy",
+      "version": "0.9.0",
+      "kind": "addon",
+      "title": "Legacy exporter",
+      "platforms": [{ "os": "linux", "arch": "x64" }],
+      "conflicts": ["fake-nodal"],
+      "capabilities": ["legacy-export"],
+      "artifacts": [],
+      "license": { "spdx": "MIT" }
+    }
+  ]
+}
