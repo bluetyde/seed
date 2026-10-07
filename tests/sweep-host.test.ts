@@ -178,6 +178,8 @@ describe("what the client cannot do", () => {
     const f = await fixture();
     const r = await runSweepFromHostFile(f.file, { ...f.request, sweepId: name });
     expect(r).toMatchObject({ ok: false });
+    if (!r.ok) expect(r.errors[0]).toMatchObject({ code: "E_NOT_PERMITTED", field: "/sweepId" });
+    expect(lines(join(f.state, "sweeps.jsonl"))[0].event).toMatchObject({ phase: "refused", reason: "sweep is not registered" });
     expect(runDirs(f.project)).toHaveLength(0);
   });
 

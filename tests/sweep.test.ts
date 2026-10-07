@@ -91,6 +91,13 @@ describe("what a sweep may not be", () => {
     expect(code(bad({ base: "base", axes: [{ id: "temp", values: [300, 301, 302] }] }, study({ maxCases: 2 })))).toBe("E_BUDGET_EXCEEDED");
   });
 
+  it("the limit is exact for a product too: 12 cases pass at maxCases 12 and are refused at 11; one axis over the limit names that axis", () => {
+    const def = { base: "base", axes: [{ id: "temp", values: [300, 301, 302] }, { id: "flow", values: [1, 2, 3, 4] }] };
+    expect(bad(def, study({ maxCases: 12 })).ok).toBe(true);
+    expect(code(bad(def, study({ maxCases: 11 })))).toBe("E_BUDGET_EXCEEDED");
+    expect(field(bad({ base: "base", axes: [{ id: "temp", values: Array.from({ length: 11 }, (_, i) => 300 + i) }] }))).toBe("/sweeps/t/axes/0/values");
+  });
+
   it("the product of the axes counts, not each axis alone", () => {
     const def = { base: "base", axes: [{ id: "temp", values: [300, 301, 302, 303] }, { id: "flow", values: [1, 2, 3] }] };
     const r = bad(def);
