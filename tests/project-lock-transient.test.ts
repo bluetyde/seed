@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -215,6 +215,73 @@ describe("writing the owner file", () => {
     });
     expect(codeOf(r)).toBe("E_INTERNAL");
     expect(existsSync(lockDir(d))).toBe(false);
+  });
+});
+
+describe("moving a stale lock aside", () => {
+  it.each(["EPERM", "EBUSY", "EACCES"])("%s a few times, then success: the takeover goes through", (code) => {
+    const d = project();
+    plant(d, deadPid());
+    let calls = 0;
+    const r = withProjectLock(d, () => "ran", {
+      waitMs: 5000,
+      io: {
+        rename: (a, b) => {
+          if (++calls <= 2) throw errno(code);
+          renameSync(a, b);
+        }
+      }
+    });
+    expect(r).toEqual({ ok: true, value: "ran" });
+    expect(calls).toBe(3);
+    expect(existsSync(guardDir(d))).toBe(false); // the guard was released each time
+  });
+
+  it("a refusal that does not end is E_PROJECT_LOCKED at the deadline, not an internal error and not a hot loop", () => {
+    const d = project();
+    plant(d, deadPid());
+    const t0 = Date.now();
+    const r = withProjectLock(d, () => 1, {
+      waitMs: 100,
+      io: {
+        rename: () => {
+          throw errno("EPERM");
+        }
+      }
+    });
+    expect(codeOf(r)).toBe("E_PROJECT_LOCKED");
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(existsSync(guardDir(d))).toBe(false);
+  });
+
+  it("the folder already moved by somebody else is not an error", () => {
+    const d = project();
+    plant(d, deadPid());
+    const r = withProjectLock(d, () => "ran", {
+      waitMs: 5000,
+      io: {
+        rename: () => {
+          rmSync(lockDir(d), { recursive: true, force: true });
+          throw errno("ENOENT");
+        }
+      }
+    });
+    expect(r).toEqual({ ok: true, value: "ran" });
+  });
+
+  it("any other error is still an internal error", () => {
+    const d = project();
+    plant(d, deadPid());
+    const r = withProjectLock(d, () => 1, {
+      waitMs: 0,
+      io: {
+        rename: () => {
+          throw errno("EIO");
+        }
+      }
+    });
+    expect(codeOf(r)).toBe("E_INTERNAL");
+    expect(existsSync(guardDir(d))).toBe(false);
   });
 });
 
