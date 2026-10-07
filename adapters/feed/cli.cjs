@@ -65,6 +65,12 @@ const TRANSIENT_QUANTITIES = [
   { name: "energy_deposited", unit: "J/m" },
   { name: "energy_balance_gap", unit: "1" },
 ];
+// A case may state temperature limits; FEED then reports one check per rule (temperatureLimit1, 2, ...) whose value is the smallest
+// margin in kelvin (limit minus hottest cell; negative when exceeded) and no value when the rule never applied. A FAILED limit check is a
+// failed check on a COMPLETED run: it is a result about the case, not a broken run, so collect keeps the run and the margin goes out as this
+// quantity (the smallest margin over the rules that applied; each rule's own margin is in extensions.feed.limits). No rule in force: no quantity.
+const LIMIT_QUANTITY = { name: "temperature_limit_margin", unit: "K" };
+const LIMIT_CHECK = /^temperatureLimit[1-9][0-9]{0,1}$/;
 const OUTPUT_FILES = ["case.json", "derived.json", "feed-manifest.json", "results.json", "run.json"];
 const PARAMETERS = [
   { id: "power.linearHeatRate", type: "number", unit: "W/m", min: 1, max: 60000 },
@@ -220,7 +226,7 @@ async function describe(reply, fail) {
       formats: [{ id: d.caseFormat.format, version: String(d.caseFormat.version) }],
       capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "thermal-only", "transient-pulse"],
       parameters: PARAMETERS,
-      quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
+      quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES, [LIMIT_QUANTITY]).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
       oracleCoverage: oracleCoverage(),
       resources: resourcesFor("feed"),
       ...(cleanTransfers(d.transfers).length > 0 ? { transfers: cleanTransfers(d.transfers) } : {}),
@@ -374,7 +380,14 @@ function collect(request, root, reply, fail) {
   // Evidence must be present, not assumed: every check carries a recognised verdict and the domain verdict is stated.
   if (results.checks.some((c) => !c || typeof c.id !== "string" || (c.verdict !== "pass" && c.verdict !== "fail"))) return incomplete("results.json has a check without a recognised verdict");
   if (!results.domain || (results.domain.verdict !== "in-domain" && results.domain.verdict !== "out-of-domain")) return incomplete("results.json states no domain verdict");
-  const failing = results.checks.filter((c) => c.verdict === "fail");
+  // A limit check must say what it means: a margin (a number) with pass at zero or more and fail below, or no margin and pass.
+  const limitChecks = results.checks.filter((c) => LIMIT_CHECK.test(c.id));
+  for (const c of limitChecks) {
+    const m = c.value;
+    const coherent = m === null ? c.verdict === "pass" : typeof m === "number" && Number.isFinite(m) && c.verdict === (m >= 0 ? "pass" : "fail");
+    if (!coherent) return incomplete("the limit check " + c.id + " does not state a margin that agrees with its verdict", "/quantities/temperature_limit_margin");
+  }
+  const failing = results.checks.filter((c) => c.verdict === "fail" && !LIMIT_CHECK.test(c.id));
   if (results.domain && results.domain.verdict === "out-of-domain") {
     return fail(typed("E_OUT_OF_DOMAIN", "/quantities", "a conductivity law was used outside the temperature range it is stated for; this is not a valid result"));
   }
@@ -441,6 +454,19 @@ function collect(request, root, reply, fail) {
       ...(q.series ? { coordinates: { system: "time", axes: [{ name: "t", unit: "s" }] } } : {}),
     });
   }
+  const margins = limitChecks.filter((c) => c.value !== null).map((c) => c.value);
+  if (margins.length > 0) {
+    const text = json({ quantity: LIMIT_QUANTITY.name, unit: LIMIT_QUANTITY.unit, values: [Math.min(...margins)], note: "the smallest margin over the limit rules that applied in this run (limit minus hottest cell, K); negative means exceeded; each rule's own margin is in extensions.feed.limits; not an integrity assessment" });
+    atomicWrite(path.join(nativeDir, "series", LIMIT_QUANTITY.name + ".json"), text);
+    quantities.push({
+      name: LIMIT_QUANTITY.name,
+      unit: LIMIT_QUANTITY.unit,
+      normalization: "none",
+      provenance: { runId, inputRevisions },
+      data: { path: request.runDir + "/native/series/" + LIMIT_QUANTITY.name + ".json", sha256: sha256(text) },
+      verification: "unverified",
+    });
+  }
   const index = {
     schema: "seed.results-index/0.1",
     runId,
@@ -458,6 +484,7 @@ function collect(request, root, reply, fail) {
         caseSha256: manifest.caseSha256,
         resultsSha256: manifest.files.find((f) => f.path === "results.json").sha256,
         checks: results.checks.map((c) => ({ id: String(c.id), verdict: String(c.verdict) })),
+        ...(limitChecks.length > 0 ? { limits: limitChecks.map((c) => ({ id: String(c.id), verdict: String(c.verdict), marginK: c.value })) } : {}),
         domain: results.domain.verdict,
         warnings: Array.isArray(derived.warnings) ? derived.warnings.map((w) => String(w.code)) : [],
         quantityNotes: isTransient ? "temperature_peak_max is the hottest cell-centre value over the whole run (the interior of a short pulse is adiabatic); the power history is an input, not a result; the time step is first order, so the checks include the independent solution and the step-halving estimate; energy_balance_gap includes the first-order error of the time stepping." : "temperature_peak, temperature_fuel_surface and temperature_clad_inner are cell-centre values of the solver mesh; temperature_surface is the converged outer-wall patch value; energy_balance_residual is relative (flux through the cladding wall against the input linear heat rate).",

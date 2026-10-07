@@ -93,7 +93,7 @@ describe("FEED adapter: configuration", () => {
     expect(r.result.app.id).toBe("feed");
     expect(r.result.engine).toEqual({ name: "feed-headless", version: "9.9.9" });
     expect(r.result.formats).toEqual([{ id: "feed.case", version: "0.1" }]);
-    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap"]);
+    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap", "temperature_limit_margin"]);
     expect(r.result.capabilities).toContain("thermal-only");
     expect(r.result.oracleCoverage).toEqual([]);
     expect(r.warnings).toEqual([]);
@@ -258,6 +258,80 @@ describe("FEED adapter: run and collect through the SEED run manager (stub runne
     expect(out.ok && out.state).toBe("failed");
     expect(JSON.stringify((await collectError(p.root, out as any)).errors)).toContain("energyBalance");
     expect(existsSync(join(p.root, "runs", (out as { runId: string }).runId, "results.json"))).toBe(false);
+  });
+
+  describe("temperature limit checks", () => {
+    const collectIndex = async (mode: string) => {
+      useStub(mode);
+      const p = feedProject();
+      const out = await runStart(p.root, p, "req-" + mode);
+      if (!out.ok) throw new Error(JSON.stringify(out.errors));
+      return { p, out };
+    };
+    const indexOf = (p: ReturnType<typeof feedProject>, runId: string) => JSON.parse(readFileSync(join(p.root, "runs", runId, "results.json"), "utf8"));
+    const margin = (p: ReturnType<typeof feedProject>, runId: string) => JSON.parse(readFileSync(join(p.root, "runs", runId, "native", "series", "temperature_limit_margin.json"), "utf8"));
+
+    it("a case with a rule in force reports its margin as a quantity, and the rule that never applied adds none", async () => {
+      const { p, out } = await collectIndex("limits");
+      expect(out.state).toBe("completed");
+      const index = indexOf(p, out.runId);
+      expect(validate("results-index", index)).toEqual({ ok: true });
+      expect(checkResultsIndex(index)).toEqual([]);
+      expect(index.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_limit_margin"]);
+      expect(margin(p, out.runId)).toMatchObject({ quantity: "temperature_limit_margin", unit: "K", values: [639.4] });
+      expect(index.extensions.feed.limits).toEqual([{ id: "temperatureLimit1", verdict: "pass", marginK: 639.4 }, { id: "temperatureLimit2", verdict: "pass", marginK: null }]);
+    });
+
+    it("the quantity is the smallest margin over the rules that applied", async () => {
+      const { p, out } = await collectIndex("limits-two");
+      expect(margin(p, out.runId).values).toEqual([120.5 < 639.4 ? 120.5 : 639.4]);
+    });
+
+    it("an exceeded limit is a completed run with a negative margin and a failed check, not a failed run", async () => {
+      const { p, out } = await collectIndex("limit-exceeded");
+      expect(out.state).toBe("completed");
+      const index = indexOf(p, out.runId);
+      expect(margin(p, out.runId).values).toEqual([-12.5]);
+      expect(index.status).toBe("completed");
+      expect(index.extensions.feed.limits[0]).toEqual({ id: "temperatureLimit1", verdict: "fail", marginK: -12.5 });
+      expect(index.extensions.feed.checks.find((c: { id: string }) => c.id === "temperatureLimit1").verdict).toBe("fail");
+    });
+
+    it("another failed check still stops the collection while a limit check passes", async () => {
+      useStub("checkfail");
+      const p = feedProject();
+      const out = await runStart(p.root, p, "req-limit-other");
+      expect(out.ok && out.state).toBe("failed");
+      expect(JSON.stringify((await collectError(p.root, out as any)).errors)).toContain("energyBalance");
+    });
+
+    it("no rule in force: no margin quantity, and the limits are listed with no margin", async () => {
+      const { p, out } = await collectIndex("limit-none");
+      const index = indexOf(p, out.runId);
+      expect(index.quantities.map((q: { name: string }) => q.name)).toEqual(QUANTITIES);
+      expect(index.extensions.feed.limits).toEqual([{ id: "temperatureLimit1", verdict: "pass", marginK: null }]);
+    });
+
+    it("a case without limits has neither the quantity nor the list", async () => {
+      const { p, out } = await collectIndex("ok");
+      const index = indexOf(p, out.runId);
+      expect(index.quantities.map((q: { name: string }) => q.name)).toEqual(QUANTITIES);
+      expect(index.extensions.feed.limits).toBeUndefined();
+    });
+
+    it.each([
+      ["limit-incoherent", "a fail verdict with a positive margin"],
+      ["limit-badvalue", "a margin that is not a number"],
+      ["limit-nullfail", "a fail verdict with no margin"],
+    ])("%s (%s) is refused as incomplete", async (mode) => {
+      useStub(mode);
+      const p = feedProject();
+      const out = await runStart(p.root, p, "req-" + mode);
+      expect(out.ok && out.state).toBe("failed");
+      const e = (await collectError(p.root, out as any)).errors[0];
+      expect(e?.code).toBe("E_OUTPUT_INCOMPLETE");
+      expect(e?.message).toContain("temperatureLimit1");
+    });
   });
 
   it("a result computed outside a conductivity law's range is refused as E_OUT_OF_DOMAIN", async () => {
