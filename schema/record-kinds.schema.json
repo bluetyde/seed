@@ -1,0 +1,68 @@
+{
+  "$id": "https://seed.invalid/schema/record-kinds.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "seed.record-kinds/0.1: the kinds of file one app makes and another reads, registered once so both agree on one schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kinds"
+  ],
+  "properties": {
+    "schema": {
+      "const": "seed.record-kinds/0.1"
+    },
+    "kinds": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "record",
+          "version",
+          "owner",
+          "status",
+          "summary",
+          "manual"
+        ],
+        "properties": {
+          "record": {
+            "$ref": "component-manifest.schema.json#/$defs/id"
+          },
+          "version": {
+            "$ref": "component-manifest.schema.json#/$defs/recordVersion"
+          },
+          "owner": {
+            "$ref": "component-manifest.schema.json#/$defs/id"
+          },
+          "status": {
+            "enum": [
+              "planned",
+              "defined"
+            ]
+          },
+          "wireSchema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "schemaSha256": {
+            "$ref": "component-manifest.schema.json#/$defs/sha256"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "manual": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600,
+            "description": "How a person with no SEED makes this record by hand. The message an app shows when it is missing is built from this."
+          }
+        }
+      }
+    }
+  }
+}

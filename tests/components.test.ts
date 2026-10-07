@@ -52,7 +52,7 @@ describe("the manifest", () => {
     return validateManifest(m);
   };
   it.each([
-    ["an unknown schema version", (m: any) => (m.schema = "seed.component-manifest/0.2"), "E_SCHEMA_INVALID"],
+    ["an unknown schema version", (m: any) => (m.schema = "seed.component-manifest/0.3"), "E_SCHEMA_INVALID"],
     ["a field the contract does not have", (m: any) => (m.components[0].installCommand = "rm -rf /"), "E_SCHEMA_INVALID"],
     ["a component with no platform", (m: any) => (m.components[0].platforms = []), "E_SCHEMA_INVALID"],
     ["a version that is not three numbers", (m: any) => (m.components[0].version = "1.2"), "E_SCHEMA_INVALID"],

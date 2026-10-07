@@ -1,60 +1,140 @@
 {
   "$id": "https://seed.invalid/schema/component-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "seed.component-manifest/0.1 (runtime contract, W2): what an app publishes about its installable components",
+  "title": "seed.component-manifest/0.1 and /0.2 (runtime contract, W2 and packages design): what an app publishes about its installable components",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "app", "recipeRevision", "components"],
+  "required": [
+    "schema",
+    "app",
+    "recipeRevision",
+    "components"
+  ],
   "properties": {
-    "schema": { "const": "seed.component-manifest/0.1" },
-    "app": { "$ref": "#/$defs/id" },
-    "recipeRevision": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "schema": {
+      "enum": [
+        "seed.component-manifest/0.1",
+        "seed.component-manifest/0.2"
+      ]
+    },
+    "app": {
+      "$ref": "#/$defs/id"
+    },
+    "recipeRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
     "components": {
       "type": "array",
       "minItems": 1,
       "maxItems": 64,
-      "items": { "$ref": "#/$defs/component" }
+      "items": {
+        "$ref": "#/$defs/component"
+      }
     }
   },
   "$defs": {
-    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
-    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$" },
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "bytes": { "type": "integer", "minimum": 0, "maximum": 4398046511104 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4398046511104
+    },
     "component": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "version", "kind", "title", "platforms", "capabilities", "artifacts", "license"],
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "title",
+        "platforms",
+        "capabilities",
+        "artifacts",
+        "license"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "version": { "$ref": "#/$defs/version" },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
         "kind": {
-          "enum": ["core", "addon", "library"],
+          "enum": [
+            "core",
+            "addon",
+            "library"
+          ],
           "description": "core: always installed with the app. addon: the user may add or remove it. library: only a dependency of other components; never shown as a choice."
         },
-        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
-        "description": { "type": "string", "maxLength": 500 },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
         "platforms": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["os", "arch"],
+            "required": [
+              "os",
+              "arch"
+            ],
             "properties": {
-              "os": { "enum": ["windows", "macos", "linux"] },
-              "arch": { "enum": ["x64", "arm64"] },
-              "via": { "enum": ["native", "wsl"] }
+              "os": {
+                "enum": [
+                  "windows",
+                  "macos",
+                  "linux"
+                ]
+              },
+              "arch": {
+                "enum": [
+                  "x64",
+                  "arm64"
+                ]
+              },
+              "via": {
+                "enum": [
+                  "native",
+                  "wsl"
+                ]
+              }
             }
           }
         },
         "appVersions": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["min"],
+          "required": [
+            "min"
+          ],
           "properties": {
-            "min": { "$ref": "#/$defs/version" },
-            "max": { "$ref": "#/$defs/version" }
+            "min": {
+              "$ref": "#/$defs/version"
+            },
+            "max": {
+              "$ref": "#/$defs/version"
+            }
           }
         },
         "dependsOn": {
@@ -62,29 +142,68 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["component"],
+            "required": [
+              "component"
+            ],
             "properties": {
-              "component": { "$ref": "#/$defs/id" },
-              "min": { "$ref": "#/$defs/version" }
+              "component": {
+                "$ref": "#/$defs/id"
+              },
+              "min": {
+                "$ref": "#/$defs/version"
+              }
             }
           }
         },
-        "conflicts": { "type": "array", "items": { "$ref": "#/$defs/id" } },
-        "capabilities": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
         "artifacts": {
           "type": "array",
           "maxItems": 16,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "sha256", "downloadBytes", "expandedBytes", "archive"],
+            "required": [
+              "id",
+              "sha256",
+              "downloadBytes",
+              "expandedBytes",
+              "archive"
+            ],
             "properties": {
-              "id": { "$ref": "#/$defs/id" },
-              "url": { "type": "string", "pattern": "^https://" },
-              "sha256": { "$ref": "#/$defs/sha256" },
-              "downloadBytes": { "$ref": "#/$defs/bytes" },
-              "expandedBytes": { "$ref": "#/$defs/bytes" },
-              "archive": { "enum": ["zip", "tar.gz", "none"] }
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://"
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "downloadBytes": {
+                "$ref": "#/$defs/bytes"
+              },
+              "expandedBytes": {
+                "$ref": "#/$defs/bytes"
+              },
+              "archive": {
+                "enum": [
+                  "zip",
+                  "tar.gz",
+                  "none"
+                ]
+              }
             }
           }
         },
@@ -93,21 +212,160 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "sha256"],
-            "properties": { "id": { "$ref": "#/$defs/id" }, "sha256": { "$ref": "#/$defs/sha256" } }
+            "required": [
+              "id",
+              "sha256"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
           }
         },
         "license": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["spdx"],
+          "required": [
+            "spdx"
+          ],
           "properties": {
-            "spdx": { "type": "string", "minLength": 1, "maxLength": 80 },
-            "noticesSha256": { "$ref": "#/$defs/sha256" },
-            "sourceOffer": { "type": "boolean" }
+            "spdx": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "noticesSha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "sourceOffer": {
+              "type": "boolean"
+            }
+          }
+        },
+        "produces": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/produces"
+          },
+          "description": "v0.2. Record kinds (registered in record-kinds.json) that this component makes: a file contract, never a code import."
+        },
+        "consumes": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/consumes"
+          },
+          "description": "v0.2. Record kinds this component needs to exist to do its job. SEED finds a producer, in any app, and adds it with its own dependencies; the app's own refusal stays the truth."
+        },
+        "satisfies": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "v0.2, library components only. Ids of catalog prerequisites (for example conda-env) that installing this component fulfils."
+        }
+      }
+    },
+    "recordVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 999
+    },
+    "produces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "version"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/recordVersion"
+        }
+      }
+    },
+    "consumes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "minVersion"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/id"
+        },
+        "minVersion": {
+          "$ref": "#/$defs/recordVersion"
+        },
+        "maxVersion": {
+          "$ref": "#/$defs/recordVersion"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema": {
+            "const": "seed.component-manifest/0.1"
+          }
+        },
+        "required": [
+          "schema"
+        ]
+      },
+      "then": {
+        "properties": {
+          "components": {
+            "items": {
+              "not": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "produces": true
+                    },
+                    "required": [
+                      "produces"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "consumes": true
+                    },
+                    "required": [
+                      "consumes"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "satisfies": true
+                    },
+                    "required": [
+                      "satisfies"
+                    ]
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "type": "array"
           }
         }
       }
     }
-  }
+  ]
 }
