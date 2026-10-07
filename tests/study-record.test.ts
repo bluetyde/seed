@@ -13,6 +13,7 @@ import { createProject, openProject } from "../src/core/projectStore";
 import { verifyStudyLog } from "../src/core/semantic";
 import { appendStudySteps, readStudyRecord, refMarker, studyRecordFile, type StepDraft } from "../src/core/studyRecord";
 import { addStudyNote } from "../src/core/studyNoteHost";
+import { recordRequestInStudy } from "../src/core/studyRecordHost";
 import { runSweepFromHostFile } from "../src/core/sweepHost";
 import { validate } from "../src/core/validate";
 import { makeHeader } from "./helpers/studyFixtures";
@@ -311,6 +312,55 @@ describe("runs write the record", () => {
     expect(runSteps.map((x) => (x.reason as string).match(/Sweep t, case (\d) of 3 \(delayMs=(\d+)\)/)?.slice(1, 3).join("/"))).toEqual(["1/10", "2/20", "3/30"]);
     expect(new Set(runSteps.map((x) => x.runs[0])).size).toBe(3);
     expect(f.rows().filter((x) => x.action === "oracle")).toHaveLength(1);
+  });
+});
+
+describe("what each outcome becomes (the recorder called with synthetic outcomes)", () => {
+  const rec = async (outcome: { ok: true; runId: string; state: string } | { ok: false }, decision: any, over: Record<string, unknown> = {}) => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const engineRoot = join(f.state, "engines", "x");
+    mkdirSync(engineRoot, { recursive: true });
+    const r = recordRequestInStudy({
+      c: { study: { studyId: "s1", tier: "A1", budget: f.budget, parameters: [] }, actor: agent, oracles: { evidenceSha256: f.evidenceSha } },
+      projectRoot: f.project, studiesFolder: "studies", projectId: f.header.projectId as string, engineRoot,
+      requestId: "q1", caseId: "approved", decision, outcome, ...over
+    });
+    return { f, r };
+  };
+  const allowed = { allow: true, via: "tier" };
+
+  it("a cancelled run is a cancel step; a run ended by a trip and a completed run are notes", async () => {
+    for (const [state, action] of [["cancelled", "cancel"], ["terminated-by-trip", "note"], ["completed", "note"], ["failed", "note"], ["interrupted", "note"]]) {
+      const { f, r } = await rec({ ok: true, runId: "run-1", state }, allowed);
+      expect(r, state).toMatchObject({ ok: true, appended: 3 });
+      expect(f.rows().at(-1)!.action, state).toBe(action);
+      expect(f.rows().at(-1)!.reason).toContain(`Audited terminal outcome: ${state}`);
+    }
+  });
+
+  it("an admission through a grant names the grant", async () => {
+    const { f } = await rec({ ok: true, runId: "run-1", state: "completed" }, { allow: true, via: "grant", grantId: "g-7" });
+    expect(f.rows()[2]!.reason).toMatch(/via grant \(grant g-7\)/);
+  });
+
+  it("an allowed decision whose start was refused (no run) writes nothing: the admission log has it", async () => {
+    const { f, r } = await rec({ ok: false }, allowed);
+    expect(r).toMatchObject({ ok: true, appended: 0 });
+    expect(existsSync(f.record)).toBe(false);
+  });
+
+  it("no decision at all (the request failed before the gate) writes nothing", async () => {
+    const { f, r } = await rec({ ok: false }, undefined);
+    expect(r).toMatchObject({ ok: true, appended: 0 });
+    expect(existsSync(f.record)).toBe(false);
+  });
+
+  it("a refusal is a gate-stop whose rule is the gate's", async () => {
+    const stop = { allow: false, errors: [{ code: "E_BUDGET_EXCEEDED", field: "", message: "too big", source: "seed" }], gateStop: { request: "run_case by agent:bot", rule: "budget" } };
+    const { f } = await rec({ ok: false }, stop);
+    expect(f.rows().at(-1)).toMatchObject({ action: "gate-stop", runs: [], gateStop: { rule: "budget" } });
+    expect(f.rows().at(-1)!.reason).toMatch(/too big/);
   });
 });
 
