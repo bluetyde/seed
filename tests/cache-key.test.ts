@@ -58,11 +58,17 @@ describe("the cache key: every component changes it", () => {
     ["an added setting", (p: CacheKeyParts) => (p.settings!.extra = true)],
     ["a nested setting", (p: CacheKeyParts) => ((p.settings!.nested as unknown) = { a: [1, 2] })],
     ["the seed", (p: CacheKeyParts) => (p.seed = 8)],
-    ["the seed being zero rather than unset", (p: CacheKeyParts) => (p.seed = 0)],
   ])("%s", (_name, change) => {
     const p = structuredClone(full);
     change(p);
     expect(key(p)).not.toBe(base);
+  });
+
+  it("a seed of zero is not the same as no seed (a stochastic run with no seed must not match a seeded one)", () => {
+    const unset = structuredClone(full);
+    delete unset.seed;
+    const zero = { ...structuredClone(full), seed: 0 };
+    expect(key(unset)).not.toBe(key(zero));
   });
 
   it.each(["engine", "dataLibrary", "materialRevisions", "mappingRecipe", "seed"] as const)("leaving out %s differs from having it (a miss, never a false hit)", (k) => {
