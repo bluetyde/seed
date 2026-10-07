@@ -110,6 +110,8 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 
 **E2 stays open** (superseded: the four items it names were closed later the same day, and the remaining decision is described in the E2 section above); the user had not decided its order yet at the time. Suggested order, with the reasons given in chat: the standalone-launch check, the resource limits in `describe`, one concurrency task for L4 to L6, then L7.
 
+**E2 is signed off (2026-10-06, late evening).** The user, in chat: "I sign off E2 then with all 4 accepted", after deciding the four residuals one by one and carrying the structural test into E3. Accepted: residuals 1 to 3 as limits of E2 (raw `RunManager`, recovery gaps, report workflow gaps) and 4 as a delegated follow-up. The reconciliation of the stale TODO boxes continues in the app sessions after the sign-off and does not reopen E2. The structural test that no file under `src/cli`, `src/mcp` or `src/main` imports `RunManager` is carried into E3 (TODO.md, E3 list). Limits carried forward: L1 (first to close), L2, L3 (E1), L4 (reduced, its remaining window stated), L10, and the three accepted residuals. A change to a contract from here is a new schema version with a migration.
+
 ## Closed after the sign-off
 
 **L4 to L6 (2026-10-06, E2 step 3, tests in `tests/project-store.test.ts` and `tests/concurrency.test.ts`, each fix shown to be needed by a mutation):**
