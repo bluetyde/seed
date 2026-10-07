@@ -21,13 +21,24 @@ Other exit items: open versus run (an adapter's `open` is optional and answered 
 
 ## E2: single-app runs
 
-E2 is **not ready to exit**. What the milestone asked for is largely done and better evidenced than when it was written, but four items are open:
+**State (updated 2026-10-06, late):** the four items this review found open are closed or reduced (listed below, with what is left of each). E2 is still **not declared ready to exit**: the TODO's own E2 block carries residuals that this review never weighed (see "Residuals the review has not weighed", after the list). Whether each of those blocks the exit or is accepted as a limit, and the exit itself, are the user's decisions. What the milestone asked for is largely done and better evidenced than when it was written. The four items, as they stood and how they ended:
 
 - Done since the milestone was written: the first real adapter and four more (RAFT, FEED, NODAL, OpenMC Studio, SNEED), each with app-owned oracle entries, a hash-pinned oracle set recorded with the app commit, direct-agreement tests (RAFT `raft-direct-agreement`, parity with the direct runner for the others), guarded CLI and stdio MCP, owner-mediated cancel and human recovery, and report export. The contracts were signed off final on 2026-10-05 (the TODO line that says the user has not said yes is stale).
 - **Open 1, closed 2026-10-06:** "standalone launch of the app unchanged by its adapter" is now checked against the real apps: every real oracle run leaves the app's own folder as found (a fingerprint test at the end of each oracle file) and each registered app starts with its own command, without SEED variables, and answers its health path (`tests/standalone-launch.test.ts`).
 - **Open 2, closed 2026-10-06:** per-adapter resource figures are measured and reported in `describe.resources` (contracts section 12.3). They are information; the host still enforces only wall time, and memory and disk stay advisory.
-- **Open 3, closed 2026-10-06 (L4 reduced, L6 wall limit pending your decision; see "Closed after the sign-off"):** the concurrency limits of the run manager and project store that Codex found again (L4 to L6 below) were already known after the first review and are not yet closed.
-- **Open 4:** the study record and report limits (L8 and L9; L7 closed 2026-10-06), and a failed oracle evaluation having no durable transition (L1).
+- **Open 3, closed or reduced 2026-10-06:** the concurrency limits of the run manager and project store (L4 to L6 below). L5 and L6 are closed (the wall limit is now part of the request payload, at the user's instruction), L4 is reduced and its remaining window is stated; the Codex review of these changes is done and its fixes are merged ("Closed after the sign-off" and "Codex review of the E2 changes").
+- **Open 4, closed 2026-10-06:** the study record and report limits L7, L8 and L9. A failed oracle evaluation having no durable transition (L1) is **not** closed: it was accepted as a known limit at the E0 sign-off and stays the first follow-up; it is listed here so it is not read as done.
+
+### Residuals the review has not weighed
+
+The TODO's E2 block (the items marked `[~]` or `[ ]`) names things that remain, and this review did not decide whether they block the exit. They are listed here so the decision is made on the whole picture:
+
+1. **Raw `RunManager` is a low-level primitive** ([A3], [A5]): the guarded host and dispatcher are the safe path; direct use now has the locks above but not the policy, oracle and admission checks.
+2. **Recovery gaps** ([A2], [A6]): early launch windows, recovery of failed, interrupted, trip or invalid records, broader partial-output handling, edit conflict, relocation and stale-result handling.
+3. **Report workflow:** accepted-study corrections, native history and recovery that stay adapter-specific, general recovered-run export and replay (planned), and the manual human sign-off of reports.
+4. **TODO boxes that look stale:** "Oracle index and runner" is still unticked although five apps have pinned oracle sets and the runner is built; four other E2 lines are `[~]`. They need reconciling against evidence, which I have not done.
+
+For each, the choice is: it blocks the E2 exit, or it is an accepted limit for E2 (as with L1 to L10 for E0).
 
 ## What Codex found, and what was done
 
@@ -90,7 +101,7 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 
 **E0 is signed off.** The user, in chat on 2026-10-06 after each limit had been explained one by one: "accept all ten, sign off E0". Limits L1 to L10 are accepted as known limits of E0; they stay listed here and in TODO.md so they are not forgotten (the strongest candidate to close first is L1, the durable oracle-failure transition; L2 is small once a reviewer record exists; L3 is E1 work). Material preservation moves to E1. A change to a contract from here is a new schema version with a migration, as for the v0.1 sign-off of 2026-10-05.
 
-**E2 stays open** (the four open items above); the user has not decided its order yet. Suggested order, with the reasons given in chat: the standalone-launch check, the resource limits in `describe`, one concurrency task for L4 to L6, then L7.
+**E2 stays open** (superseded: the four items it names were closed later the same day, and the remaining decision is described in the E2 section above); the user had not decided its order yet at the time. Suggested order, with the reasons given in chat: the standalone-launch check, the resource limits in `describe`, one concurrency task for L4 to L6, then L7.
 
 ## Closed after the sign-off
 
@@ -129,4 +140,4 @@ Two read-only passes over the diff of the E2 work (src/core/projectStore.ts, run
 ## What I ask
 
 - **E0:** accept L1 to L10 as known limits (or name the ones to fix first) and sign off the milestone. Contracts v0.1 are already signed off; material preservation moves to E1.
-- **E2:** keep it open; the four open items above close it. Order I suggest: standalone launch check, the resource limits in `describe`, then L4 to L6 as one concurrency task (a project-wide lock design), then L7.
+- **E2 (updated 2026-10-06, late):** the four items are done (see the E2 section). Decide for the four residuals under "Residuals the review has not weighed" whether each blocks the exit or is an accepted limit, then sign off E2 or send items back.
