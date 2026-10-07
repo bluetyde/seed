@@ -42,6 +42,7 @@ export type LockOptions = {
     readFile?: (path: string) => string;
     mkdir?: (path: string) => void;
     writeOwner?: (path: string, data: string) => void;
+    rename?: (from: string, to: string) => void;
   };
   /**
    * withProjectLockAsync only: how often the holder proves it is alive (default staleMs / 4, at most 30 s); 0 turns it off.
@@ -400,6 +401,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
   const removeTree = opts?.removeTree ?? ((p: string) => rmSync(p, { recursive: true, force: true }));
   const makeDir = opts?.io?.mkdir ?? ((p: string) => void mkdirSync(p));
   const readOwnerFile = opts?.io?.readFile;
+  const moveAside = opts?.io?.rename ?? ((a: string, b: string) => renameSync(a, b));
   const writeOwner = opts?.io?.writeOwner ?? ((p: string, d: string) => writeFileSync(p, d, { flag: "wx", encoding: "utf8" }));
   const deadline = Date.now() + waitMs;
   const lockedError = (): LockAcquireResult => ({
@@ -585,12 +587,17 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
           if (second.state === "stale") {
             const staleDir = join(seedDir, `lock.stale-${randomBytes(8).toString("hex")}`);
             try {
-              renameSync(lockDir, staleDir);
+              moveAside(lockDir, staleDir);
             } catch (err: unknown) {
-              if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-                return { ok: false, errors: [toInternalError(err)] };
+              const code = (err as NodeJS.ErrnoException).code ?? "";
+              if (code === "ENOENT") continue; // somebody else already moved it
+              if (TRANSIENT_CODES.has(code)) {
+                // something holds the stale folder for a moment (a scanner, another process reading it): not now, judge again
+                if (Date.now() >= deadline) return lockedError();
+                sleepSync(Math.min(10, Math.max(1, deadline - Date.now())));
+                continue;
               }
-              continue;
+              return { ok: false, errors: [toInternalError(err)] };
             }
             try {
               removeTree(staleDir);
