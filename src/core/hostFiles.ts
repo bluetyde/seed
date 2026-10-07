@@ -146,6 +146,12 @@ export function appendRefusal(stateRoot: string, event: unknown): void {
   appendFileSync(file, JSON.stringify({ schema: "seed.refusal/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
 }
 
+/** One line per sweep decision (admitted, refused, finished) in `sweeps.jsonl` of the state folder; not chained. */
+export function appendSweepRecord(stateRoot: string, event: unknown): void {
+  const file = safeChild(stateRoot, "sweeps.jsonl");
+  appendFileSync(file, JSON.stringify({ schema: "seed.sweep-record/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
+}
+
 export async function withEngineLease<T>(
   stateRoot: string,
   engineKey: string,

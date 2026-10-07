@@ -60,6 +60,33 @@
         }
       }
     },
+    "studyBudget": {
+      "type": "object",
+      "required": ["maxWallSeconds", "maxCores", "maxMemoryMB", "maxDiskMB"],
+      "additionalProperties": false,
+      "properties": {
+        "maxWallSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCores": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxMemoryMB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxDiskMB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCases": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "revision": {
       "type": "object",
       "required": ["hash", "counter"],

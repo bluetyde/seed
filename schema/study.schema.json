@@ -108,7 +108,7 @@
           }
         },
         "budget": {
-          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/budget"
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/studyBudget"
         },
         "tier": {
           "type": "string",

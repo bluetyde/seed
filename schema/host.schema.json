@@ -64,7 +64,7 @@
           ]
         },
         "budget": {
-          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/budget"
+          "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/studyBudget"
         },
         "parameters": {
           "type": "array",
@@ -99,6 +99,42 @@
         "budget",
         "parameters"
       ]
+    },
+    "sweeps": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["base", "axes"],
+        "properties": {
+          "base": {
+            "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+          },
+          "axes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "values"],
+              "properties": {
+                "id": {
+                  "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id"
+                },
+                "values": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "number" }
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "cases": {
       "type": "object",

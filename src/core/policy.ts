@@ -4,11 +4,14 @@ export type Tier = "A0" | "A1" | "A2" | "A3";
 export type ActorKind = "human" | "agent" | "system";
 export type Actor = { kind: ActorKind; name: string; model?: string; toolVersion?: string };
 export type Budget = { maxWallSeconds: number; maxCores: number; maxMemoryMB: number; maxDiskMB: number };
+/** The study's limits: per-case resources, and how many cases one sweep may have (default DEFAULT_MAX_CASES). */
+export type StudyBudget = Budget & { maxCases?: number };
+export const DEFAULT_MAX_CASES = 10;
 export type Bound = { id: string; min: number; max: number; unit?: string };
 export type Revision = { artifact: string; revision: string };
 
 /** What the gate needs to know about a study: the header fields a human set. */
-export type PolicyStudy = { studyId: string; tier: Tier; budget: Budget; parameters: Bound[] };
+export type PolicyStudy = { studyId: string; tier: Tier; budget: StudyBudget; parameters: Bound[] };
 
 /**
  * Minimum tier an operation needs. "grant" operations need a human-issued grant even at tier A3
@@ -58,6 +61,8 @@ export type GateRequest = {
   budget?: Budget;
   /** Parameter values the request sets, checked against the study's declared bounds. */
   params?: { id: string; value: number }[];
+  /** How many cases a sweep asks for; checked against the study's maxCases. */
+  cases?: number;
   /** Engine the request would use, and how many cases already run on it. */
   engine?: string;
   activeOnEngine?: number;
@@ -220,6 +225,18 @@ export function evaluateGate(req: GateRequest, ctx: GateContext): Decision {
           })
         );
       }
+    }
+  }
+  if (req.operation === "run_sweep") {
+    const limit = ctx.study.budget.maxCases ?? DEFAULT_MAX_CASES;
+    if (!Number.isSafeInteger(req.cases) || (req.cases as number) < 1) {
+      errors.push(err("E_SCHEMA_INVALID", "/cases", "a sweep must say how many cases it has (a positive integer)"));
+    } else if ((req.cases as number) > limit) {
+      errors.push(
+        err("E_BUDGET_EXCEEDED", "/cases", `the sweep has ${req.cases} cases, over the study limit of ${limit}`, {
+          range: { max: limit }
+        })
+      );
     }
   }
   if (req.params !== undefined) {

@@ -35,6 +35,7 @@ const req = (operation: string, actor: Actor = agent, extra: Partial<GateRequest
   operation,
   actor,
   studyId: "study-1",
+  ...(operation === "run_sweep" ? { cases: 1 } : {}),
   ...extra
 });
 const REV = [{ artifact: "a1", revision: "a".repeat(64) }];
@@ -213,7 +214,7 @@ describe("budgets, bounds and engine limit (acceptance 5)", () => {
   });
   it("parameters outside the bounds, undeclared or non-finite are refused with the range and unit", () => {
     const d = evaluateGate(
-      req("run_sweep", agent, { params: [{ id: "temp", value: 901 }, { id: "temp", value: 299 }, { id: "nope", value: 1 }, { id: "temp", value: Number.NaN }, { id: "temp", value: 300 }] }),
+      req("run_sweep", agent, { cases: 5, params: [{ id: "temp", value: 901 }, { id: "temp", value: 299 }, { id: "nope", value: 1 }, { id: "temp", value: Number.NaN }, { id: "temp", value: 300 }] }),
       ctx("A1")
     );
     expect(d.allow).toBe(false);
@@ -222,7 +223,7 @@ describe("budgets, bounds and engine limit (acceptance 5)", () => {
       expect(d.errors[0]).toMatchObject({ code: "E_BOUNDS_EXCEEDED", range: { min: 300, max: 900 }, unit: "K" });
       expect(d.gateStop.rule).toBe("bounds");
     }
-    expect(evaluateGate(req("run_sweep", agent, { params: [{ id: "temp", value: 900 }, { id: "temp", value: 300 }] }), ctx("A1")).allow).toBe(true);
+    expect(evaluateGate(req("run_sweep", agent, { cases: 2, params: [{ id: "temp", value: 900 }, { id: "temp", value: 300 }] }), ctx("A1")).allow).toBe(true);
   });
   it("a parameter named like an Object.prototype member is just undeclared", () => {
     const d = evaluateGate(req("run_case", agent, { params: [{ id: "constructor", value: 1 }] }), ctx("A1"));
