@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { callAdapter, type AdapterSpec } from "./adapterClient";
 import { appendLine, writeFileAtomic } from "./atomicFile";
@@ -173,61 +173,135 @@ const sleepMs = (ms: number): void => {
 };
 
 /**
+ * A claim is a folder with an `owner.json` that names its holder (process, host, time and a token only that holder knows): the request-log
+ * lock and the reservation of a request id. Rules shared by both:
+ *  - the holder writes owner.json with the "wx" flag, so a folder that was removed and made again by someone else while the holder was
+ *    paused is noticed (the write fails) instead of being taken over silently;
+ *  - only the holder's token releases a claim, so a holder that was judged abandoned cannot delete its successor's claim;
+ *  - an abandoned claim is removed under a takeover guard and judged again inside it, so two contenders cannot both remove and one of them
+ *    delete a live replacement.
+ */
+type ClaimOwner = { pid: number; host: string; time: string; token: string };
+
+function readClaimOwner(dir: string): ClaimOwner | null {
+  try {
+    const o = JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")) as Partial<ClaimOwner> | null;
+    if (o !== null && typeof o === "object" && typeof o.pid === "number" && typeof o.host === "string" && typeof o.time === "string" && typeof o.token === "string") return o as ClaimOwner;
+  } catch {
+    // none, or half written: judged by the age of the folder
+  }
+  return null;
+}
+
+/**
+ * True when the holder of a claim is gone: on this host its process is dead; with no readable owner the folder is older than `graceMs`
+ * (the folder exists a moment before its owner file); on another host a process id says nothing, so only a claim that names `foreignStaleMs`
+ * (short claims such as the request-log lock) is abandoned, once its time is older than that.
+ */
+function claimAbandoned(dir: string, graceMs: number, foreignStaleMs?: number): boolean {
+  const owner = readClaimOwner(dir);
+  if (owner !== null) {
+    if (owner.host === os.hostname()) {
+      try {
+        return !isAlive(owner.pid);
+      } catch {
+        return false;
+      }
+    }
+    const at = Date.parse(owner.time);
+    return foreignStaleMs !== undefined && !Number.isNaN(at) && Date.now() - at > foreignStaleMs;
+  }
+  try {
+    return Date.now() - statSync(dir).mtimeMs > graceMs;
+  } catch {
+    return false;
+  }
+}
+
+/** Removes an abandoned claim. Judged again under a takeover guard; false when it is not abandoned, gone, or another contender is judging. */
+function removeClaimIfAbandoned(dir: string, graceMs: number, foreignStaleMs?: number): boolean {
+  const guard = join(dirname(dir), ".takeover-" + basename(dir).replace(/^\./, ""));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      mkdirSync(guard);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // a guard left by a contender that died is removed once it is old; a fresh one means somebody else is judging right now
+      let old = false;
+      try {
+        old = Date.now() - statSync(guard).mtimeMs > 5000;
+      } catch {
+        old = false;
+      }
+      if (!old || attempt === 1) return false;
+      rmSync(guard, { recursive: true, force: true });
+    }
+  }
+  try {
+    if (!existsSync(dir) || !claimAbandoned(dir, graceMs, foreignStaleMs)) return false;
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  } finally {
+    rmSync(guard, { recursive: true, force: true });
+  }
+}
+
+/** Takes a claim: true when this call made the folder and wrote its owner file, false when somebody else holds it (or made it first). */
+export function takeClaim(dir: string, token: string, afterMkdir?: () => void): boolean {
+  // On Windows a folder that another process is deleting refuses mkdir for a moment (EPERM, EBUSY, EACCES): wait for it to go, briefly
+  for (let attempt = 0; ; attempt++) {
+    try {
+      mkdirSync(dir);
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") return false;
+      if ((code === "EPERM" || code === "EBUSY" || code === "EACCES") && attempt < 40) {
+        sleepMs(10);
+        continue;
+      }
+      throw err;
+    }
+  }
+  afterMkdir?.(); // test hook: a pause between making the folder and writing its owner
+  try {
+    writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString(), token } satisfies ClaimOwner), { flag: "wx" });
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // EEXIST: somebody replaced the folder and wrote its owner first; ENOENT: the folder was removed under us. Either way it is not ours.
+    if (code === "EEXIST" || code === "ENOENT") return false;
+    if (readClaimOwner(dir) === null) rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
+}
+
+/** Releases a claim, and only if the owner file still carries this holder's token. */
+function releaseClaim(dir: string, token: string): void {
+  if (readClaimOwner(dir)?.token === token) rmSync(dir, { recursive: true, force: true });
+}
+
+/**
  * Runs `fn` with exclusive use of the request log. Two managers (two processes) that each read the log, add their own entry and write it
- * back would lose one entry, and a lost entry lets that request id start a second run. The lock is a folder next to the log, held for
- * milliseconds; its owner is recorded, and a lock whose owner is gone (this host) or silent for `staleMs` is taken over.
+ * back would lose one entry, and a lost entry lets that request id start a second run. The lock is a claim next to the log, held for
+ * milliseconds: a holder that is dead on this host, or silent for `staleMs` on another, is replaced (see the rules above).
  */
 export function withRequestsLock<T>(requestsJsonPath: string, fn: () => T, opts?: { waitMs?: number; staleMs?: number }): T {
   const lockDir = requestsJsonPath + ".lock";
   const waitMs = opts?.waitMs ?? 10000;
   const staleMs = opts?.staleMs ?? 30000;
   const deadline = Date.now() + waitMs;
-  for (;;) {
-    try {
-      mkdirSync(lockDir);
-      writeFileSync(join(lockDir, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString() }));
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      if (reservationAbandoned(lockDir, staleMs)) {
-        rmSync(lockDir, { recursive: true, force: true });
-        continue;
-      }
-      if (Date.now() >= deadline) throw new Error("the request log is in use by another manager (" + lockDir + ")");
-      sleepMs(10);
-    }
+  const token = randomBytes(8).toString("hex");
+  while (!takeClaim(lockDir, token)) {
+    if (removeClaimIfAbandoned(lockDir, 5000, staleMs)) continue;
+    if (Date.now() >= deadline) throw new Error("the request log is in use by another manager (" + lockDir + ")");
+    sleepMs(10);
   }
   try {
     return fn();
   } finally {
-    rmSync(lockDir, { recursive: true, force: true });
-  }
-}
-
-/**
- * True when the owner of a folder-based claim (a request reservation or the request-log lock) is gone: on this host its process is dead,
- * or it names no owner and the folder is older than `graceMs` (a folder is created before its owner file is written). A claim of
- * another host is never judged abandoned here, because a process id says nothing about it; it ends when its manager ends it.
- */
-function reservationAbandoned(dir: string, graceMs: number): boolean {
-  let owner: { pid?: unknown; host?: unknown } | null = null;
-  try {
-    owner = JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")) as { pid?: unknown; host?: unknown } | null;
-  } catch {
-    owner = null;
-  }
-  if (owner !== null && typeof owner === "object" && typeof owner.pid === "number" && typeof owner.host === "string") {
-    if (owner.host !== os.hostname()) return false;
-    try {
-      return !isAlive(owner.pid);
-    } catch {
-      return false;
-    }
-  }
-  try {
-    return Date.now() - statSync(dir).mtimeMs > graceMs;
-  } catch {
-    return false;
+    releaseClaim(lockDir, token);
   }
 }
 
@@ -471,38 +545,28 @@ export class RunManager {
     // Reserve the request id on disk before any asynchronous work, so two managers on one project cannot both start it.
     if (this.testHooks?.beforeReserve) await this.testHooks.beforeReserve();
     const reservation = join(runsDir, ".reserve-" + sha256Hex(req.requestId).slice(0, 24));
-    try {
-      mkdirSync(reservation);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-        return {
-          ok: false,
-          errors: [
-            {
-              code: "E_REQUEST_CONFLICT",
-              field: "/requestId",
-              message: "this requestId is being processed by another manager or a previous start was interrupted; use a new requestId or run recover()",
-              source: "seed",
-            },
-          ],
-        };
-      }
-      throw err;
-    }
-
-    // The reservation records who holds it, so that recover() in another manager can tell a live holder from a stopped one.
-    try {
-      writeFileSync(join(reservation, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: this.now().toISOString() }));
-    } catch (err) {
-      rmSync(reservation, { recursive: true, force: true });
-      throw err;
+    // The reservation records who holds it, so that recover() in another manager can tell a live holder from a stopped one; losing it to a
+    // recovery that judged it abandoned while this call was paused is noticed here and ends the start.
+    const reservationToken = randomBytes(8).toString("hex");
+    if (!takeClaim(reservation, reservationToken)) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: "E_REQUEST_CONFLICT",
+            field: "/requestId",
+            message: "this requestId is being processed by another manager or a previous start was interrupted; use a new requestId or run recover()",
+            source: "seed",
+          },
+        ],
+      };
     }
     // The first look at the request log was before the reservation: a manager that finished this same request in between has recorded it
     // by now, and starting it again would run it twice. Look again, now that no other manager can start it.
     const again = readRequestsMap(requestsJsonPath);
     const late = !again.ok ? internalRefusal("/requests", again.message + "; refusing to start a run") : Object.hasOwn(again.map, req.requestId) ? await this.replayKnownRequest(req, payloadHash, again.map, runsDir) : null;
     if (late !== null) {
-      rmSync(reservation, { recursive: true, force: true });
+      releaseClaim(reservation, reservationToken);
       return late;
     }
 
@@ -538,7 +602,7 @@ export class RunManager {
       return errOutcome;
     } finally {
       this.inFlightByRequestId.delete(req.requestId);
-      rmSync(reservation, { recursive: true, force: true });
+      releaseClaim(reservation, reservationToken);
     }
   }
 
@@ -1625,10 +1689,19 @@ export class RunManager {
     // Only a reservation whose holder is gone goes: another manager that is running right now keeps its request (a reservation on this host
     // whose process is dead, or one that names no owner and is older than a few seconds; a reservation of another host is never judged here).
     for (const entry of entries) {
-      if (entry.isDirectory() && entry.name.startsWith(".reserve-") && !liveReservations.has(entry.name) && reservationAbandoned(join(runsDir, entry.name), 5000)) {
-        rmSync(join(runsDir, entry.name), { recursive: true, force: true });
+      if (entry.isDirectory() && entry.name.startsWith(".reserve-") && !liveReservations.has(entry.name)) {
+        removeClaimIfAbandoned(join(runsDir, entry.name), 5000);
       }
     }
+
+    // A run whose request is reserved by a manager that is alive belongs to that manager: recovery must not interrupt it.
+    const requestsNow = readRequestsMap(join(runsDir, "requests.json"));
+    const requestIdsOfRun = (runId: string): string[] => (requestsNow.ok ? Object.entries(requestsNow.map).filter(([, e]) => e.runId === runId).map(([id]) => id) : []);
+    const heldByLiveManager = (runId: string): boolean =>
+      requestIdsOfRun(runId).some((id) => {
+        const dir = join(runsDir, ".reserve-" + sha256Hex(id).slice(0, 24));
+        return existsSync(dir) && !claimAbandoned(dir, 5000);
+      });
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -1658,6 +1731,9 @@ export class RunManager {
         continue;
       }
       if (this.inFlightRuns.has(runId)) {
+        continue;
+      }
+      if (heldByLiveManager(runId)) {
         continue;
       }
 
