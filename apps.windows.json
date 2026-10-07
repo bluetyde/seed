@@ -79,6 +79,25 @@
           "FEED_PORT": "{port}"
         }
       }
+    },
+    {
+      "id": "sneed",
+      "catalog": "sneed",
+      "name": "SNEED",
+      "icon": "tree",
+      "healthPath": "/api/health",
+      "urlPath": "/",
+      "start": {
+        "command": "node",
+        "args": [
+          "node_modules/tsx/dist/cli.mjs",
+          "src/server/main.ts"
+        ],
+        "cwd": "{install}",
+        "env": {
+          "SNEED_PORT": "{port}"
+        }
+      }
     }
   ]
 }
