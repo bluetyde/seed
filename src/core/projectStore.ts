@@ -37,6 +37,12 @@ export type LockOptions = {
   afterManifestWrite?: () => void;
   /** Test hook: replaces the recursive delete used for lock folders (to force a failed release). */
   removeTree?: (path: string) => void;
+  /** Test hooks: replace the reads, folder creations and owner-file writes of the lock (to force the refusals Windows gives for a moment). */
+  io?: {
+    readFile?: (path: string) => string;
+    mkdir?: (path: string) => void;
+    writeOwner?: (path: string, data: string) => void;
+  };
   /**
    * withProjectLockAsync only: how often the holder proves it is alive (default staleMs / 4, at most 30 s); 0 turns it off.
    * A lock held by another host (where a process id says nothing) counts as abandoned only once its holder has been silent for staleMs.
@@ -302,10 +308,29 @@ function lastSign(lockDir: string, acquiredMs: number): number {
   }
 }
 
-function judgeLock(lockDir: string, ownerPath: string, o: Required<Pick<LockOptions, "staleMs" | "graceMs" | "isAlive" | "host" | "now">>): LockJudgement {
+function judgeLock(
+  lockDir: string,
+  ownerPath: string,
+  o: Required<Pick<LockOptions, "staleMs" | "graceMs" | "isAlive" | "host" | "now">>,
+  readFile: (p: string) => string = (p) => readFileSync(p, "utf8")
+): LockJudgement {
   let owner: { pid: number; host: string; acquiredAt: string } | null = null;
   try {
-    const parsed = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown> | null;
+    let text: string | undefined;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        text = readFile(ownerPath);
+        break;
+      } catch (err: unknown) {
+        // A file that its holder is deleting right now refuses a read for a moment (EPERM, EBUSY, EACCES on Windows). That is a lock in the
+        // middle of its release: wait a little, and if it still cannot be read the lock is simply held, not an internal error.
+        const code = (err as NodeJS.ErrnoException).code ?? "";
+        if (!TRANSIENT_CODES.has(code)) throw err;
+        if (attempt >= 5) return { state: "held" };
+        sleepSync(10);
+      }
+    }
+    const parsed = JSON.parse(text) as Record<string, unknown> | null;
     if (
       parsed !== null &&
       typeof parsed === "object" &&
@@ -345,6 +370,8 @@ function judgeLock(lockDir: string, ownerPath: string, o: Required<Pick<LockOpti
 }
 
 const RELEASE_RETRY_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY", "EACCES"]);
+/** What Windows answers for a moment while another process holds or deletes a file or folder. */
+const TRANSIENT_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
 
 function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
   const seedDir = join(dir, ".seed");
@@ -371,17 +398,32 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
     now: opts?.now ?? (() => new Date()),
   };
   const removeTree = opts?.removeTree ?? ((p: string) => rmSync(p, { recursive: true, force: true }));
+  const makeDir = opts?.io?.mkdir ?? ((p: string) => void mkdirSync(p));
+  const readOwnerFile = opts?.io?.readFile;
+  const writeOwner = opts?.io?.writeOwner ?? ((p: string, d: string) => writeFileSync(p, d, { flag: "wx", encoding: "utf8" }));
   const deadline = Date.now() + waitMs;
+  const lockedError = (): LockAcquireResult => ({
+    ok: false,
+    errors: [{ code: "E_PROJECT_LOCKED", field: "", message: `Project is locked: ${dir}`, source: "seed" }],
+  });
 
   for (;;) {
     let acquired = false;
+    let refused = false;
     try {
-      mkdirSync(lockDir);
+      makeDir(lockDir);
       acquired = true;
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-        return { ok: false, errors: [toInternalError(err)] };
-      }
+      const code = (err as NodeJS.ErrnoException).code ?? "";
+      // A folder that its holder is deleting right now refuses mkdir for a moment (EPERM, EBUSY, EACCES on Windows): the lock is being
+      // released, so wait and try again instead of reporting an internal error.
+      if (TRANSIENT_CODES.has(code)) refused = true;
+      else if (code !== "EEXIST") return { ok: false, errors: [toInternalError(err)] };
+    }
+    if (refused) {
+      if (Date.now() >= deadline) return lockedError();
+      sleepSync(Math.min(10, Math.max(1, deadline - Date.now())));
+      continue;
     }
 
     if (acquired) {
@@ -394,8 +436,17 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
         token,
       };
       try {
-        writeFileSync(ownerPath, JSON.stringify(ownerInfo, null, 2) + "\n", "utf8");
+        // "wx": a folder that was removed and made again by somebody else while this process was paused already has their owner file; it
+        // is theirs, not ours, and must not be overwritten
+        writeOwner(ownerPath, JSON.stringify(ownerInfo, null, 2) + "\n");
       } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code ?? "";
+        if (code === "EEXIST" || code === "ENOENT" || TRANSIENT_CODES.has(code)) {
+          // not our folder (replaced, removed, or being deleted right now): leave it alone and try again
+          if (Date.now() >= deadline) return lockedError();
+          sleepSync(Math.min(10, Math.max(1, deadline - Date.now())));
+          continue;
+        }
         try {
           removeTree(lockDir);
         } catch (cleanup: unknown) {
@@ -453,7 +504,7 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
     }
 
     // The lock exists. Judge it; a stale lock is taken over under the takeover guard.
-    const first = judgeLock(lockDir, ownerPath, judging);
+    const first = judgeLock(lockDir, ownerPath, judging, readOwnerFile);
     if (first.state === "error") {
       return { ok: false, errors: [first.error] };
     }
@@ -462,27 +513,72 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
     if (first.state === "stale") {
       opts?.beforeTakeover?.();
       let guarded = false;
-      try {
-        mkdirSync(guardDir);
-        guarded = true;
-      } catch (err: unknown) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-          return { ok: false, errors: [toInternalError(err)] };
-        }
-        // Another contender holds the guard. A guard that old was abandoned by a crashed contender.
+      // The guard is a claim like the lock: its folder holds an owner file with a token only its holder knows, so that a contender that
+      // was starved while it held the guard cannot, on its way out, delete the guard of the contender that took over from it.
+      const guardToken = randomBytes(8).toString("hex");
+      const guardOwnerPath = join(guardDir, "owner.json");
+      const readGuardOwner = (): { pid: number; host: string; token: string } | null => {
         try {
-          if (judging.now().getTime() - statSync(guardDir).mtimeMs > judging.graceMs) removeTree(guardDir);
-        } catch (guardErr: unknown) {
-          if ((guardErr as NodeJS.ErrnoException).code !== "ENOENT") {
-            return { ok: false, errors: [toInternalError(guardErr)] };
+          const o = JSON.parse(readFileSync(guardOwnerPath, "utf8")) as Record<string, unknown> | null;
+          return o !== null && typeof o === "object" && typeof o.pid === "number" && typeof o.host === "string" && typeof o.token === "string"
+            ? { pid: o.pid, host: o.host, token: o.token }
+            : null;
+        } catch {
+          return null;
+        }
+      };
+      // abandoned: its holder's process is gone (same host), or it names no readable holder and is older than graceMs
+      const guardAbandoned = (): boolean => {
+        const holder = readGuardOwner();
+        if (holder !== null && holder.host === judging.host) {
+          try {
+            return !judging.isAlive(holder.pid);
+          } catch {
+            return false;
           }
+        }
+        try {
+          return judging.now().getTime() - statSync(guardDir).mtimeMs > judging.graceMs;
+        } catch {
+          return false; // gone already
+        }
+      };
+      try {
+        makeDir(guardDir);
+        try {
+          writeOwner(guardOwnerPath, JSON.stringify({ pid: process.pid, host: judging.host, token: guardToken }));
+          guarded = true;
+        } catch (ownerErr: unknown) {
+          const c = (ownerErr as NodeJS.ErrnoException).code ?? "";
+          // not ours any more, or being deleted right now: somebody else is judging. An owner-less guard of ours expires after graceMs.
+          if (c !== "EEXIST" && c !== "ENOENT" && !TRANSIENT_CODES.has(c)) return { ok: false, errors: [toInternalError(ownerErr)] };
+        }
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code ?? "";
+        if (code === "EEXIST") {
+          // Another contender holds the guard, unless its holder is gone. An abandoned guard is judged again before every attempt to remove
+          // it: one that was removed and made again by a live contender in the meantime is left alone.
+          for (let attempt = 0; attempt < 20 && guardAbandoned(); attempt++) {
+            try {
+              removeTree(guardDir);
+              break;
+            } catch (guardErr: unknown) {
+              const c = (guardErr as NodeJS.ErrnoException).code ?? "";
+              if (c === "ENOENT") break;
+              if (!TRANSIENT_CODES.has(c)) return { ok: false, errors: [toInternalError(guardErr)] };
+              sleepSync(10);
+            }
+          }
+        } else if (!TRANSIENT_CODES.has(code)) {
+          // a folder that is being deleted right now refuses mkdir for a moment: somebody else is judging, so not now
+          return { ok: false, errors: [toInternalError(err)] };
         }
       }
       if (guarded) {
         try {
           // Judge again under the guard: only a guard holder removes a lock that is not its own, so a lock
           // that is stale now cannot be replaced before the rename below.
-          const second = judgeLock(lockDir, ownerPath, judging);
+          const second = judgeLock(lockDir, ownerPath, judging, readOwnerFile);
           if (second.state === "error") {
             return { ok: false, errors: [second.error] };
           }
@@ -504,11 +600,17 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
             }
           }
         } finally {
-          try {
-            removeTree(guardDir);
-          } catch {
-            // an abandoned guard is removed by the next contender once it is older than graceMs
+          // only the holder's own token releases the guard, and the check is repeated before every attempt
+          for (let attempt = 0; attempt < 20 && readGuardOwner()?.token === guardToken; attempt++) {
+            try {
+              removeTree(guardDir);
+              break;
+            } catch (releaseErr: unknown) {
+              if (!TRANSIENT_CODES.has((releaseErr as NodeJS.ErrnoException).code ?? "")) break;
+              sleepSync(10);
+            }
           }
+          // an owner-less or abandoned guard that could not be removed is taken over by the next contender once it is abandoned
         }
         continue;
       }
