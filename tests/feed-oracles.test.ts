@@ -99,12 +99,12 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  it("loads 33 entries, all pinned and valid", () => {
+  it("loads 49 entries, all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
-    expect(r.entries).toHaveLength(33);
-    expect(r.entries.filter((i) => i.entry.tag === "good")).toHaveLength(22);
-    expect(r.entries.filter((i) => i.entry.tag === "bad-input")).toHaveLength(9);
+    expect(r.entries).toHaveLength(49);
+    expect(r.entries.filter((i) => i.entry.tag === "good")).toHaveLength(34);
+    expect(r.entries.filter((i) => i.entry.tag === "bad-input")).toHaveLength(13);
     expect(r.entries.filter((i) => i.entry.tag === "known-limit")).toHaveLength(2);
   });
 
