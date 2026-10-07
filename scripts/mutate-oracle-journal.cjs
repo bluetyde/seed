@@ -44,7 +44,7 @@ for (let i = 0; i < M.length; i++) {
   if (!original.includes(from)) { rows.push([i, "NOT FOUND", from]); console.log(i, "NOT FOUND", from.slice(0, 60)); continue; }
   writeFileSync(file, original.replace(from, to));
   if (!execSync("git diff --stat", { encoding: "utf8" }).trim()) { rows.push([i, "NOT APPLIED", from]); continue; }
-  const r = spawnSync("npx", ["vitest", "run", "tests/oracle-journal.test.ts", "--reporter=dot"], { encoding: "utf8", timeout: 180000, shell: true });
+  const r = spawnSync("npx", ["vitest", "run", "tests/oracle-journal.test.ts", "tests/transfer-host.test.ts", "--reporter=dot"], { encoding: "utf8", timeout: 180000, shell: true });
   writeFileSync(file, original);
   const out = (r.stdout || "") + (r.stderr || "");
   const verdict = r.error ? "HUNG" : /(\d+) failed/.test(out) ? "caught" : /passed/.test(out) ? "SURVIVED" : "NO SUMMARY";

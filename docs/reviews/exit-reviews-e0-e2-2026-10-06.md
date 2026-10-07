@@ -93,7 +93,7 @@ Not reviewed in this pass: the run host, hostControl, CLI and MCP surfaces (revi
 
 ## Known limits left, for you to accept or send back
 
-- **L1** A failed oracle evaluation of unchanged inputs has no durable transition (see above).
+- **L1** A failed oracle evaluation of unchanged inputs has no durable transition (see above). **Closed 2026-10-07**: the oracle journal; a recorded failure for the current pins blocks until a human clears it, a pass never clears it (docs/policy-and-oracles.md).
 - **L2** Accepting changed oracle pins records no approval (identity, reason).
 - **L3** Material acceptance has no host operation and so no record (E1).
 - **L4** Lock takeover by age (paused contender; foreign host after 600 s). **Reduced 2026-10-06**: heartbeat, and a writer that lost its lock is refused (see Closed after the sign-off).
