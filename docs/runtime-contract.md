@@ -97,6 +97,10 @@ Component errors are local to this contract (the E0 error-code list is untouched
 | R6 offline | `E_OFFLINE_MISSING`, cache cost | W4 |
 | Add-ons: core-only, later add, remove, shared library kept, incompatible versions | `resolveSelection`, `planRemoval` on a fake manifest | W6 on the real OpenMC recipe |
 
+## Cross-app packages (manifest v0.2)
+
+A package of one app can need a record that a package of another app makes, and a library component can fulfil a catalog prerequisite. Both are additive fields of **manifest v0.2** (`produces`, `consumes`, `satisfies`); a v0.1 manifest keeps its exact meaning. The design, the record-kinds registry and the cross-app resolver are in [packages-cross-app.md](packages-cross-app.md).
+
 ## Decisions of the user (2026-10-07)
 
 1. **Install root.** Add-ons go in the same install root as the apps (today the user's `SEED/apps` folder), as `<root>/<app>/<component>/<version>/`. One folder to back up or delete; removing an app removes its managed add-ons.
