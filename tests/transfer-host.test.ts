@@ -11,6 +11,7 @@ import { runCli } from "../src/cli/seed";
 import { canonicalJson, sha256Hex } from "../src/core/canonical";
 import { readAdmissions, writeHostJson } from "../src/core/hostFiles";
 import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/oracle";
+import { recordEvaluation } from "../src/core/oracleJournal";
 import { createProject, openProject, saveProject } from "../src/core/projectStore";
 import { recipeDigest, type Recipe } from "../src/core/transfer";
 import { applyTransferFromHost, approveTransfer, proposeTransfer, saveTransferHostConfig, transferStatus, type TransferHostConfig } from "../src/core/transferHost";
@@ -318,6 +319,27 @@ describe("apply", () => {
       delete process.env.FAKE_TRANSFER_MODE;
       expect(await transferStatus(f.agentFile, { recipeId: "heat-1" })).toMatchObject({ state: "approved" });
     }
+  });
+
+  it("a failure recorded in the oracle journal stops propose and apply of a transfer to that app, although its evidence file still passes", async () => {
+    const f = await fixture();
+    expect((await propose(f)).ok).toBe(true);
+    const pins = f.config(f.agent).apps.dstapp!.acceptedPins;
+    recordEvaluation(
+      f.state,
+      { id: "dstapp", version: "0.1.0" },
+      { adapter: "dstapp", adapterVersion: "0.1.0", verdict: "fail", inputsVerified: true, blocked: true, blockedQuantities: [], results: [{ oracleId: "dst-one", entryVersion: 1, tag: "good", verdict: "fail" }], pins },
+      "c".repeat(64),
+      f.human
+    );
+    const refused = await propose(f);
+    expect(refused.ok).toBe(false);
+    expect((refused as any).errors[0].message).toMatch(/oracle/);
+    mkdirSync(join(f.project, "transfers"), { recursive: true });
+    writeFileSync(join(f.project, "transfers/heat-1.json"), JSON.stringify(f.recipe));
+    expect((await approve(f)).ok).toBe(true);
+    expect(codes((await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" })) as any)).toContain("E_NOT_PERMITTED /oracles");
+    expect(readFileSync(dstFile(f), "utf8")).toBe(f.dstCase);
   });
 
   it("a failed oracle set stops apply as well as propose", async () => {
