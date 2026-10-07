@@ -325,6 +325,21 @@ describe("the takeover guard", () => {
     expect(codeOf(r)).toBe("E_INTERNAL");
   });
 
+  it.each(["EEXIST", "ENOENT", "EPERM", "EBUSY", "EACCES"])("%s on the guard's owner file means somebody else is judging: wait, not an error", (code) => {
+    const d = project();
+    plant(d, deadPid());
+    const r = withProjectLock(d, () => 1, {
+      waitMs: 0,
+      io: {
+        writeOwner: (p, data) => {
+          if (p === join(guardDir(d), "owner.json")) throw errno(code);
+          writeFileSync(p, data, { flag: "wx" });
+        }
+      }
+    });
+    expect(codeOf(r)).toBe("E_PROJECT_LOCKED");
+  });
+
   it("a normal takeover leaves no guard and no stale folder behind", () => {
     const d = project();
     plant(d, deadPid());
