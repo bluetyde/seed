@@ -51,9 +51,11 @@ describe("the request log lock: contenders for an abandoned lock and a holder th
   const lib = join(__dirname, "..", "dist", "core", "runManager.js");
   const worker = join(__dirname, "fixtures", "requests-writer.cjs");
   const runWorker = (file: string, prefix: string, n: number) =>
-    new Promise<number | null>((resolve) => {
-      const c = spawn(process.execPath, [worker, lib, file, prefix, String(n)], { stdio: "ignore" });
-      c.on("exit", (code) => resolve(code));
+    new Promise<{ code: number | null; stderr: string }>((resolve) => {
+      const c = spawn(process.execPath, [worker, lib, file, prefix, String(n)], { stdio: ["ignore", "ignore", "pipe"] });
+      let stderr = "";
+      c.stderr!.on("data", (d) => (stderr = (stderr + d).slice(-1500)));
+      c.on("exit", (code) => resolve({ code, stderr }));
     });
 
   it("four processes that all start by finding a dead holder's lock add 30 entries each: none is lost, over several rounds", async () => {
@@ -62,8 +64,8 @@ describe("the request log lock: contenders for an abandoned lock and a holder th
       const file = join(runs, "requests.json");
       mkdirSync(file + ".lock");
       writeOwner(file + ".lock", { pid: deadPid(), host: os.hostname(), time: new Date().toISOString(), token: "dead" });
-      const codes = await Promise.all(["a", "b", "c", "d"].map((p) => runWorker(file, p, 30)));
-      expect(codes).toEqual([0, 0, 0, 0]);
+      const results = await Promise.all(["a", "b", "c", "d"].map((p) => runWorker(file, p, 30)));
+      expect(results.map((r) => r.code), results.map((r) => r.stderr).filter(Boolean).join(" | ")).toEqual([0, 0, 0, 0]);
       expect(Object.keys(JSON.parse(readFileSync(file, "utf8")))).toHaveLength(120);
     }
   }, 240000);
