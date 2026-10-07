@@ -310,6 +310,21 @@ describe("the takeover guard", () => {
     expect(JSON.parse(readFileSync(join(guardDir(d), "owner.json"), "utf8")).token).toBe("successor");
   });
 
+  it("a guard owner file that cannot be written for another reason than a refusal is an internal error", () => {
+    const d = project();
+    plant(d, deadPid());
+    const r = withProjectLock(d, () => 1, {
+      waitMs: 0,
+      io: {
+        writeOwner: (p, data) => {
+          if (p === join(guardDir(d), "owner.json")) throw errno("ENOSPC");
+          writeFileSync(p, data, { flag: "wx" });
+        }
+      }
+    });
+    expect(codeOf(r)).toBe("E_INTERNAL");
+  });
+
   it("a normal takeover leaves no guard and no stale folder behind", () => {
     const d = project();
     plant(d, deadPid());
