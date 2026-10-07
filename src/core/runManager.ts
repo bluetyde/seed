@@ -106,13 +106,36 @@ function lexicallyInside(parentAbs: string, childAbs: string): boolean {
 
 type RequestEntry = { payloadHash: string; runId: string };
 
-function readRequestsMap(
-  path: string
+/** Errors that Windows gives for a moment when another process (a scanner, an indexer, a rename in progress) holds a file or folder. */
+const TRANSIENT = new Set(["EPERM", "EBUSY", "EACCES"]);
+
+/**
+ * The request log. **Only a missing file (ENOENT) is an empty log.** A file that cannot be read for a moment (EPERM, EBUSY, EACCES) is retried
+ * and then reported as unreadable: reading it as empty would let the next writer overwrite every entry with its own (found by a stress run
+ * on a loaded machine: `existsSync` answers false on those errors, and entries were lost without any error).
+ */
+export function readRequestsMap(
+  path: string,
+  read: (p: string) => string = (p) => readFileSync(p, "utf8")
 ): { ok: true; map: Record<string, RequestEntry> } | { ok: false; message: string } {
-  if (!existsSync(path)) return { ok: true, map: {} };
+  let text: string | undefined;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      text = read(path);
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return { ok: true, map: {} };
+      if (code !== undefined && TRANSIENT.has(code) && attempt < 20) {
+        sleepMs(10);
+        continue;
+      }
+      return { ok: false, message: "the request log requests.json is unreadable" };
+    }
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(text);
   } catch {
     return { ok: false, message: "the request log requests.json is unreadable" };
   }
@@ -184,12 +207,23 @@ const sleepMs = (ms: number): void => {
  */
 type ClaimOwner = { pid: number; host: string; time: string; token: string };
 
-function readClaimOwner(dir: string): ClaimOwner | null {
-  try {
-    const o = JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")) as Partial<ClaimOwner> | null;
-    if (o !== null && typeof o === "object" && typeof o.pid === "number" && typeof o.host === "string" && typeof o.time === "string" && typeof o.token === "string") return o as ClaimOwner;
-  } catch {
-    // none, or half written: judged by the age of the folder
+export function readClaimOwner(dir: string, read: (p: string) => string = (p) => readFileSync(p, "utf8")): ClaimOwner | null {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      const o = JSON.parse(read(join(dir, "owner.json"))) as Partial<ClaimOwner> | null;
+      if (o !== null && typeof o === "object" && typeof o.pid === "number" && typeof o.host === "string" && typeof o.time === "string" && typeof o.token === "string") return o as ClaimOwner;
+      return null;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return null;
+      // a file held for a moment (EPERM, EBUSY, EACCES) or half written (a JSON error) is tried again: giving up at once would make a live
+      // holder look like it has no owner, and a holder that cannot find its own token would never release its claim
+      if (code === undefined || TRANSIENT.has(code)) {
+        sleepMs(10);
+        continue;
+      }
+      return null;
+    }
   }
   return null;
 }
@@ -219,52 +253,89 @@ function claimAbandoned(dir: string, graceMs: number, foreignStaleMs?: number): 
   }
 }
 
-/** Removes a folder, tolerating the moment on Windows when another process still holds a handle on something in it. */
-const rmTree = (p: string): void => rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
+/**
+ * Removes a folder in one attempt. There is deliberately no retry inside (rmSync's maxRetries): a delete that is retried by path can remove
+ * what somebody else made at that path after the first attempt had already taken the folder away, and for a claim that is a live holder's
+ * lock (found by tracing a stress run on a loaded machine: two processes inside the request-log lock at once, one of them because the
+ * other's release was retried). A retry must look again first: see removeWhile.
+ */
+const rmTree = (p: string): void => rmSync(p, { recursive: true, force: true });
 
-/** Removes an abandoned claim. Judged again under a takeover guard; false when it is not abandoned, gone, or another contender is judging. */
-export function removeClaimIfAbandoned(dir: string, graceMs: number, foreignStaleMs?: number, mkdir: (path: string) => void = (p) => void mkdirSync(p)): boolean {
-  const guard = join(dirname(dir), ".takeover-" + basename(dir).replace(/^\./, ""));
-  for (let attempt = 0; attempt < 2; attempt++) {
+/**
+ * Removes `dir` while `wanted()` is still true, looking again before every attempt. A transient refusal (EPERM, EBUSY, EACCES: something
+ * holds a handle for a moment) waits and tries again; if the folder has gone, or has become somebody else's, the loop ends without
+ * touching it. Returns false when it gave up (transient errors for too long), true when it ended any other way.
+ */
+export function removeWhile(dir: string, wanted: () => boolean, remove: (path: string) => void = rmTree): boolean {
+  for (let attempt = 0; ; attempt++) {
+    if (!wanted()) return true;
     try {
-      mkdir(guard);
-      break;
+      remove(dir);
+      return true;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      // On Windows a guard that another contender is deleting right now refuses mkdir for a moment: somebody else is judging, so not now
-      if (code === "EPERM" || code === "EBUSY" || code === "EACCES") return false;
-      if (code !== "EEXIST") throw err;
-      // a guard left by a contender that died is removed once it is old; a fresh one means somebody else is judging right now
-      let old = false;
-      try {
-        old = Date.now() - statSync(guard).mtimeMs > 5000;
-      } catch {
-        old = false;
-      }
-      if (!old || attempt === 1) return false;
-      rmTree(guard);
+      if (code === undefined || !TRANSIENT.has(code)) throw err;
+      if (attempt >= 20) return false;
+      sleepMs(10);
     }
   }
+}
+
+/** Removes an abandoned claim. Judged again under a takeover guard; false when it is not abandoned, gone, or another contender is judging. */
+export function removeClaimIfAbandoned(
+  dir: string,
+  graceMs: number,
+  foreignStaleMs?: number,
+  mkdir: (path: string) => void = (p) => void mkdirSync(p),
+  remove: (path: string) => void = rmTree
+): boolean {
+  // The guard is a claim like any other (owner file, token): a contender that was starved while it held it cannot, on the way out, delete the
+  // guard of the contender that took over from it.
+  const guard = join(dirname(dir), ".takeover-" + basename(dir).replace(/^\./, ""));
+  const guardToken = randomBytes(8).toString("hex");
+  let held: boolean;
   try {
-    if (!existsSync(dir) || !claimAbandoned(dir, graceMs, foreignStaleMs)) return false;
-    rmTree(dir);
-    return true;
+    held = takeClaim(guard, guardToken, undefined, undefined, mkdir);
+    if (!held) {
+      // a guard whose holder is gone (dead process, or no owner and old) is removed, judged again before every attempt; a live one means
+      // somebody else is judging right now
+      const staleGuard = () => existsSync(guard) && claimAbandoned(guard, 5000);
+      if (staleGuard() && removeWhile(guard, staleGuard, remove)) held = takeClaim(guard, guardToken, undefined, undefined, mkdir);
+    }
+  } catch (err) {
+    // On Windows a guard that another contender is deleting right now refuses mkdir for a moment: somebody else is judging, so not now
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== undefined && TRANSIENT.has(code)) return false;
+    throw err;
+  }
+  if (!held) return false;
+  try {
+    const abandoned = () => existsSync(dir) && claimAbandoned(dir, graceMs, foreignStaleMs);
+    if (!abandoned()) return false;
+    // judged again before every attempt: if the abandoned folder vanished and a live holder made a new one, that one is left alone
+    return removeWhile(dir, abandoned, remove) && !existsSync(dir);
   } finally {
-    rmTree(guard);
+    releaseClaim(guard, guardToken);
   }
 }
 
 /** Takes a claim: true when this call made the folder and wrote its owner file, false when somebody else holds it (or made it first). */
-export function takeClaim(dir: string, token: string, afterMkdir?: () => void): boolean {
+export function takeClaim(
+  dir: string,
+  token: string,
+  afterMkdir?: () => void,
+  write: (path: string, data: string) => void = (p, d) => writeFileSync(p, d, { flag: "wx" }),
+  mkdir: (path: string) => void = (p) => void mkdirSync(p)
+): boolean {
   // On Windows a folder that another process is deleting refuses mkdir for a moment (EPERM, EBUSY, EACCES): wait for it to go, briefly
   for (let attempt = 0; ; attempt++) {
     try {
-      mkdirSync(dir);
+      mkdir(dir);
       break;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "EEXIST") return false;
-      if ((code === "EPERM" || code === "EBUSY" || code === "EACCES") && attempt < 40) {
+      if (code !== undefined && TRANSIENT.has(code) && attempt < 40) {
         sleepMs(10);
         continue;
       }
@@ -273,20 +344,30 @@ export function takeClaim(dir: string, token: string, afterMkdir?: () => void): 
   }
   afterMkdir?.(); // test hook: a pause between making the folder and writing its owner
   try {
-    writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString(), token } satisfies ClaimOwner), { flag: "wx" });
+    write(join(dir, "owner.json"), JSON.stringify({ pid: process.pid, host: os.hostname(), time: new Date().toISOString(), token } satisfies ClaimOwner));
     return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    // EEXIST: somebody replaced the folder and wrote its owner first; ENOENT: the folder was removed under us. Either way it is not ours.
-    if (code === "EEXIST" || code === "ENOENT") return false;
+    // EEXIST: somebody replaced the folder and wrote its owner first; ENOENT: the folder was removed under us; EPERM, EBUSY, EACCES: it is
+    // being deleted right now. Either way it is not ours.
+    if (code === "EEXIST" || code === "ENOENT" || (code !== undefined && TRANSIENT.has(code))) return false;
     if (readClaimOwner(dir) === null) rmTree(dir);
     throw err;
   }
 }
 
 /** Releases a claim, and only if the owner file still carries this holder's token. */
-function releaseClaim(dir: string, token: string): void {
-  if (readClaimOwner(dir)?.token === token) rmTree(dir);
+export function releaseClaim(dir: string, token: string, remove: (path: string) => void = rmTree): void {
+  const ours = (): boolean => readClaimOwner(dir)?.token === token;
+  if (removeWhile(dir, ours, remove)) return;
+  // Still held by something after a few hundred milliseconds. The work under the claim is done and must not be reported as failed because its
+  // folder cannot be removed. Take the owner file away (if the folder is still ours) so it is no longer a live holder's: it is then taken
+  // over as abandoned once it is old, instead of blocking until this process ends.
+  try {
+    if (ours()) rmSync(join(dir, "owner.json"), { force: true });
+  } catch {
+    // nothing more to do: the folder expires with the process
+  }
 }
 
 /**
