@@ -38,7 +38,7 @@
     "transaction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "operation", "app", "component", "to", "state", "startedAt"],
+      "required": ["id", "operation", "app", "component", "state", "startedAt"],
       "properties": {
         "id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
         "operation": { "enum": ["install", "update", "remove"] },
