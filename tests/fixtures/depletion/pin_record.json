@@ -1,0 +1,120 @@
+{
+ "schema": "studio.depletion/0.1",
+ "time_steps_days": [
+  1.0,
+  4.0
+ ],
+ "regions": [
+  {
+   "name": "UO2 3.5%",
+   "cell_ids": [
+    1
+   ],
+   "heavy_metal_mass_kg": 0.0060900899584601315,
+   "power_w": [
+    231.423418421485,
+    231.423418421485
+   ],
+   "burnup_mwd_per_tu": [
+    37.99999999999999,
+    190.0
+   ]
+  }
+ ],
+ "k": [
+  [
+   1.3691197146032068,
+   0.0029353503440131927
+  ],
+  [
+   1.3282021133279225,
+   0.00669335823712722
+  ],
+  [
+   1.3235725145998898,
+   0.00527438711903367
+  ]
+ ],
+ "isotopics": {
+  "UO2 3.5%": {
+   "U234": [
+    0.0,
+    48923973657476.71,
+    282950321034119.06
+   ],
+   "U235": [
+    5.394672356039378e+20,
+    5.387225731411669e+20,
+    5.357530373296487e+20
+   ],
+   "U236": [
+    0.0,
+    1.3634268692007566e+17,
+    6.85559907156101e+17
+   ],
+   "U238": [
+    1.4873882353080002e+22,
+    1.4873536457360479e+22,
+    1.487209925924276e+22
+   ],
+   "Np237": [
+    0.0,
+    84699695303599.86,
+    2138843509612855.5
+   ],
+   "Np239": [
+    0.0,
+    2.6165095174533187e+17,
+    8.307174631485023e+17
+   ],
+   "Pu239": [
+    0.0,
+    3.936049514423837e+16,
+    7.413402588560902e+17
+   ],
+   "Xe135": [
+    0.0,
+    5387137891347721.0,
+    6188905799115231.0
+   ],
+   "Sm149": [
+    0.0,
+    793302540449284.5,
+    1.354702543704743e+16
+   ]
+  }
+ },
+ "provenance": {
+  "run": "20261008-000000-depletion-pin",
+  "integrator": "PredictorIntegrator",
+  "chain_level": 3,
+  "power_density_w_per_g": 38,
+  "particles": 2000,
+  "batches": 15,
+  "seed": 12345,
+  "units": {
+   "time_steps_days": "days",
+   "power_w": "W",
+   "burnup_mwd_per_tu": "MWd per tonne of initial heavy metal",
+   "isotopics": "atoms in the whole region",
+   "heavy_metal_mass_kg": "kg, at the start of the run"
+  },
+  "checks": {
+   "UO2 3.5%": {
+    "inventory": {
+     "ratio": 1.0037318396309585,
+     "meaning": "heavy-metal atoms lost over the fissions power x time implies",
+     "fission_q_mev": 194.4083,
+     "tolerance": 0.05,
+     "ok": true
+    }
+   }
+  },
+  "complete": true,
+  "steps_done": 2,
+  "steps_planned": 2,
+  "region_power": "the whole source rate",
+  "notes": []
+ },
+ "id": "adde6fb296433975e5944e27ad317d92cfeab2623e7f44526aaabbcec6c80a21"
+}
