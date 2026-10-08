@@ -91,6 +91,18 @@
           "watch": [
             "web/package-lock.json"
           ]
+        },
+        {
+          "label": "Install P&ID dependencies",
+          "cwd": "pid",
+          "command": "npm",
+          "args": [
+            "ci",
+            "--ignore-scripts"
+          ],
+          "watch": [
+            "pid/package-lock.json"
+          ]
         }
       ]
     },
