@@ -139,3 +139,33 @@ A convective boundary needs two things from one run, and a fuel case needs them 
 The NODAL adapter now writes `seed.quantity-data/0.2` series and a `seed.results-index/0.2` with dimensions for the channels it knows (temperature, wall temperature, pressure, mass flow, heat transfer coefficient, time) when their units are the matching ones (K or degC, Pa, kg/s, W/m2/K, s); another pair stays free text and the quantity is not offered to transfers. `tests/nodal-boundary.test.ts` runs the heated-pipe model through the adapter (real NODAL): `t_out` (coolant temperature at the pipe outlet) and `h_surf` (the wall's coefficient) become the primary and the `heat-transfer-coefficient` role of a recipe for a fake boundary target, the boundary values equal the committed golden vector's last values, and a time between two samples equals the golden vector's linear mean.
 
 What SEED cannot check: that the NODAL cell and the heat structure the two channels belong to are the axial region the recipe's `mapping.spatial.region` names. The recipe states the region (the target's vocabulary); the human who approves reads both. A shared geometry convention across NODAL and the fuel case stays an open item of plan 08.
+
+## 8. A record as the source: the burnup into FEED (2026-10-08)
+
+A transfer's source has been a **quantity of an adapter run** (recipe `seed.transfer-recipe/0.2`). FEED needs a burnup that comes from a **project file**, the depletion record OpenMC Studio writes (`studio.depletion/0.1`, record kind `depletion-record/1`, now `defined` in `record-kinds.json`). The recipe grew a second form, `seed.transfer-recipe/0.3`, with a record source; the 0.2 form is unchanged. Code: `src/core/depletionRecord.ts` (the record), `src/core/transfer.ts` (`validateRecipe`, `evaluateRecordTransfer`, `applyRecordTransfer`), `src/core/transferHost.ts`; schema `schema/transfer-recipe-record.schema.json`; tests `tests/transfer-record.test.ts` (43, with Studio's own record `tests/fixtures/depletion/pin_record.json` and a fake target `tests/fixtures/fake-transfer/burnup-target.cjs`); mutations `scripts/mutate-transfer-record.cjs` (26, all caught).
+
+```
+{ "schema": "seed.transfer-recipe/0.3", "recipeId": "...", "proposedBy": {actor}, "proposedAt": "...",
+  "source": { "kind": "record", "record": "depletion-record/1", "artifact": "<project artifact id of the record>",
+              "recordSha256": "<sha256 of the file>", "recordId": "<the record's own id, 64 hex>",
+              "region": "UO2 3.5%", "time": 5,                      // days from the start of the record
+              "revisionPins": [ { "artifact": "<same artifact>", "revision": "<recordSha256>" } ] },
+  "target": { "app": "feed", "artifact": "<case>", "revision": "<sha256>", "field": "burnup" },
+  "units":  { "field": "burnup_mwd_per_tu", "from": "MWd/tU", "to": "MWd/kgHM", "factor": 0.001, "basis": "heavy-metal" } }
+```
+
+**What SEED checks before the target sees anything** (states and approval are the same as for a run source; the pin is the record's artifact at the file's hash, so an approval covers exactly this record):
+
+| Check | Code |
+|---|---|
+| The unit conversion is the one SEED knows for the field (MWd/tU to MWd/kgHM, 1e-3, heavy metal) | `E_UNITS` |
+| The record file exists, is the pinned file (hash) and has the pinned id | `E_OUTPUT_INCOMPLETE` / `E_STALE_REVISION` |
+| The record is a `studio.depletion/0.1` with an id, whose id equals the SHA-256 of its canonical text (Studio's rule: sorted keys, no spaces, the top-level `id` left out, number and string tokens as written, so `190.0` is not `190`) | `E_RECORD_INVALID` / `E_RECORD_ID` |
+| The region exists in the record | `E_REGION_UNKNOWN` |
+| The time lies inside the record: cumulative burnup at the **end** of each step, linear inside a step from the previous end, 0 at t = 0; never extrapolated | `E_TIME_MAPPING` |
+| The target declares the field and accepts a `burnup` source (`describe.transfers`) | `E_UNSUPPORTED` / `E_UNITS` |
+
+**The request to the target** (`seed.transfer-request/0.3`, its own `transfer` command, same transport): `recipe`, `recipeDigest`, `source: {kind: "record", record, recordId, recordSha256, region, time, quantity: {name: "burnup", dimension: "burnup", unit: "MWd/kgHM", basis: "heavy-metal", value}, original: {unit: "MWd/tU", value}, interpolated}` and `target: {artifact, revision, content}`. The target maps it into its case (FEED: `burnup.value`, `basis`, and a `source` text containing the record id) and replies as for any transfer. Its physical refusals stay its own (FEED: fuel conductivity `uo2-nfi`, steady only, 0 to 62 MWd/kgHM). **The applied record** names the record (`sourceRecordId`, `sourceRecordSha256`) instead of a run. Only the target app's oracle evidence is checked for a record source (there is no run and no source adapter).
+
+Not done: a real FEED command behind the host test (FEED builds the 0.3 request side; the host and the core are tested with a fake target that follows FEED's published rules); a record from another kind or another field (each needs an entry in `RECORD_CONVERSIONS`); regions finer than a material (held with FEED).
+
