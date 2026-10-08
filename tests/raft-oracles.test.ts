@@ -27,6 +27,7 @@ import { connectSeedMcp } from "./helpers/mcp-client";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { oracleRequestId } from "./helpers/oracleRequest";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
 // adapter and the run manager. Needs the RAFT repo with the built headless runner and the entries; skipped otherwise.
@@ -93,7 +94,7 @@ async function observe(entry: OracleEntry, baseDir: string, gateSet?: SetResult)
     loadAuthority: async () => ({ context: { study }, currentPins: gateSet.pins, acceptedPins: gateSet.pins, oracleResult: gateSet }),
     audit: async event => { expect(event.decision.allow).toBe(true); writeFileSync(join(root, "admission.json"), JSON.stringify(event)); },
   }).start({ requestId: "guarded-real", caseId: "approved-case", budget }) :
-    await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
+    await mgr.start({ requestId: oracleRequestId(entry.oracleId), actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));

@@ -9,6 +9,7 @@ import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { oracleRequestId } from "./helpers/oracleRequest";
 
 // SNEED's own oracle entries (oracles/seed in the SNEED repository): hand-derived exact top-event probabilities (checked there against an
 // exhaustive enumeration) and bad-input refusals. They run through the adapter and the run manager. Needs the SNEED checkout built with
@@ -71,7 +72,7 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
     return first ? { kind: "refusal", code: first.code } : { kind: "verdict", verdict: "accepted" };
   }
   const mgr = new RunManager({ projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 100, callTimeoutMs: 60000 });
-  const out = await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { model: modelPath } });
+  const out = await mgr.start({ requestId: oracleRequestId(entry.oracleId), actor, artifact, inputs: entry.inputs, budget, settings: { model: modelPath } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));

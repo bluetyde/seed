@@ -10,6 +10,7 @@ import { loadOracleEntries, runOracleSet, unverifiedQuantities, type Observed, t
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { oracleRequestId } from "./helpers/oracleRequest";
 
 // FEED's own oracle entries (oracles/seed in the FEED repo, closed-form expected values) run through the adapter and the run
 // manager against the real headless runner and the real OFFBEAT solver. Needs the FEED repo with `npm run build`, its entries,
@@ -81,7 +82,7 @@ async function observe(entry: OracleEntry): Promise<Observed> {
     return first ? { kind: "refusal", code: first.code } : { kind: "verdict", verdict: "accepted" };
   }
   const mgr = new RunManager({ projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 200, callTimeoutMs: 60000 });
-  const out = await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
+  const out = await mgr.start({ requestId: oracleRequestId(entry.oracleId), actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
   if (entry.tag === "known-limit") {
     // The solver finished; the adapter must refuse to hand over the result. Read its own refusal.
@@ -99,13 +100,17 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  it("loads 53 entries, all pinned and valid", () => {
+  // Two sets are known while FEED merges its `claude/burnup-oracles` branch (2026-10-08): main's 53 entries and the branch's 72 (the 53 are byte-identical in
+  // both). Anything else is a silent addition or removal. Drop the 53 once FEED main has the 72.
+  const KNOWN_SETS = [
+    { total: 53, good: 34, badInput: 17, knownLimit: 2 },
+    { total: 72, good: 46, badInput: 24, knownLimit: 2 },
+  ];
+  it("loads a known set of entries (53, or FEED's 72 after its burnup oracles), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
-    expect(r.entries).toHaveLength(53);
-    expect(r.entries.filter((i) => i.entry.tag === "good")).toHaveLength(34);
-    expect(r.entries.filter((i) => i.entry.tag === "bad-input")).toHaveLength(17);
-    expect(r.entries.filter((i) => i.entry.tag === "known-limit")).toHaveLength(2);
+    const count = (tag: string) => r.entries.filter((i) => i.entry.tag === tag).length;
+    expect({ total: r.entries.length, good: count("good"), badInput: count("bad-input"), knownLimit: count("known-limit") }).toBeOneOf(KNOWN_SETS);
   });
 
   it("describe reports the coverage of the good entries", async () => {

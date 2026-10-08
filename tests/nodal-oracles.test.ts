@@ -9,6 +9,7 @@ import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { oracleRequestId } from "./helpers/oracleRequest";
 
 // NODAL's own oracle entries (oracles/seed in the NODAL repo): four analytic cases whose expected values come from formulas and integrals that
 // do not use the solver, golden-vector regression cases, and bad inputs. They run through the adapter and the run manager. Needs the NODAL repo
@@ -74,7 +75,7 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
     return first ? { kind: "refusal", code: first.code } : { kind: "verdict", verdict: "accepted" };
   }
   const mgr = new RunManager({ projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 100, callTimeoutMs: 60000 });
-  const out = await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { model: modelPath, ...(commands ? { commands } : {}) } });
+  const out = await mgr.start({ requestId: oracleRequestId(entry.oracleId), actor, artifact, inputs: entry.inputs, budget, settings: { model: modelPath, ...(commands ? { commands } : {}) } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));
