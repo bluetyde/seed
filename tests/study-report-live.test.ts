@@ -184,6 +184,21 @@ describe("with a live record the report is the record's study", () => {
     expect(c.ok).toBe(false); // no such request
   });
 
+  it("a run whose input file has changed since it ran is marked STALE, and only that run", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const r1 = await f.run("r1");
+    const model = JSON.parse(read(join(f.project, "models/case.json")));
+    writeFileSync(join(f.project, "models/case.json"), JSON.stringify({ ...model, edited: true }));
+    // the second run would refuse the edited file, so only the record of the first is checked: export the first
+    const r: any = await f.exportReport("r1");
+    expect(r.ok).toBe(true);
+    const html = saved(f.project, r).html;
+    expect(html).toContain("STALE");
+    expect(html.split("STALE").length - 1).toBeGreaterThanOrEqual(1);
+    expect(html).toContain(r1);
+  });
+
   it("a request made after the note gets a report that has it, in its own bundle", async () => {
     const f = await fixture();
     process.env.SEED_STUDY_HEADER = f.headerFile;
@@ -254,6 +269,18 @@ describe("a record that cannot be trusted stops the export, and nothing is saved
     const rec = JSON.parse(read(file));
     writeHostJson(file, { ...rec, settings: { ...(rec.settings ?? {}), injected: true } });
     expect(await refused(f, "r2")).toMatch(/saved run differs from audited terminal outcome/);
+  });
+
+  it("a cited run whose saved record names another request than the one bound to it", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const r1 = await f.run("r1");
+    await f.run("r2");
+    const file = join(f.project, "runs", r1, "run-record.json");
+    const rec = JSON.parse(read(file));
+    rec.extensions["seed.dispatch"].requestId = "r2";
+    writeHostJson(file, rec);
+    expect(await refused(f, "r2")).toMatch(/not the one bound to its request/);
   });
 
   it("a note that cites a run no request is bound to", async () => {
