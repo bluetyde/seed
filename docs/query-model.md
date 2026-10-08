@@ -19,7 +19,7 @@ A client (an agent, the CLI, an MCP tool) names a **registered case** and a **st
 4. Asks the adapter's `describe` and requires the capability `query-model`; an adapter without it is `E_UNSUPPORTED` and is not asked to query.
 5. Calls the adapter's `query` verb with the registered artifact and the query.
 6. Checks the reply: an object `answer` of at most 1,000,000 bytes, and a `modelSha256` equal to the file's hash (an answer about another file is `E_APP_FAILED`).
-7. Reads the model again: a file that changed while the query ran is `E_STALE_REVISION` and is not answered.
+7. Reads the model again: a file that changed, or can no longer be read, while the query ran is `E_STALE_REVISION`, is not answered, and is still recorded (step 8).
 8. **Writes the query record before answering** (below). If the record cannot be written, the query is refused with `E_INTERNAL` ("could not be recorded, so it is not answered").
 9. Returns `{ok: true, caseId, modelSha256, answer, receipt: {seq, hash}}`, or the typed errors.
 
@@ -35,7 +35,7 @@ A new adapter verb **`query`**, offered only by adapters that list the capabilit
 - Reply result: `{answer: {object}, modelSha256: "<64 hex>"}` (`schema/adapter-reply.schema.json`). A refusal is the usual typed errors; a code matching `^[EW]_[A-Z0-9_]{2,40}$` needs no registration.
 - The adapter must read only the named file, never run a solver, and never write to the project.
 
-**NODAL** (`adapters/nodal/cli.cjs`): checks the path stays inside the project, that the file's hash is the requested revision, writes the query to a file in the operating system's temporary folder (never the project), runs the NODAL runner's `--query` mode (`python -m nodal_studio.run MODEL --query QUERY`), and returns NODAL's answer unchanged apart from dropping its `ok` flag. NODAL's `E_QUERY_UNKNOWN_PART` stays; its other `E_QUERY_*` become `E_QUERY_INVALID`; `E_QUERY_MODEL` (a file that is not a NODAL model) becomes `E_SCHEMA_INVALID`. NODAL's `--query` is Python only.
+**NODAL** (`adapters/nodal/cli.cjs`): checks the path stays inside the project, that the file's hash is the requested revision, copies the bytes it hashed into a private folder in the operating system's temporary folder (never the project) and runs the NODAL runner's `--query` mode on that copy (`python -m nodal_studio.run COPY --query QUERY`), so the runner never reopens the project's file and an answer is always about the bytes that were hashed (a file replaced after the hash cannot be answered under the hash of the one that was checked). It returns NODAL's answer unchanged apart from dropping its `ok` flag. A runner that crashes gives a fixed sentence with its exit code (no traceback), and a path in a runner's own message is replaced by "the model". NODAL's `E_QUERY_UNKNOWN_PART` stays; its other `E_QUERY_*` become `E_QUERY_INVALID`; `E_QUERY_MODEL` (a file that is not a NODAL model) becomes `E_SCHEMA_INVALID`. NODAL's `--query` is Python only.
 
 ## Surfaces
 
@@ -63,4 +63,6 @@ Each answer equals what NODAL's own command prints for the same model and query,
 - A model that is still being drawn (open ports) can be asked: NODAL only requires the schema to hold.
 - The adapter and host do not limit how many queries a client asks; each is cheap and logged. A rate rule belongs with per-agent budgets (TODO, ideas).
 
-Tests: `tests/query-model.test.ts` (33: the host's refusals and every way an adapter can misbehave with a stub adapter, the four questions against real NODAL, the NODAL adapter called directly, the CLI and the MCP tool). Mutations: `scripts/mutate-query-model.cjs`, 28 mutants, all caught.
+**Review.** A Codex security-boundary pass (2026-10-08) found three things, all fixed: the runner reopened the project's file after the hash (now it reads a private copy); a failure to read the model after the adapter ran skipped the query log (now recorded); errors could name a path of this machine (an operating-system error is now a fixed sentence, a runner crash has no traceback). A fourth, found in NODAL's own code, is NODAL's: its `--query` crashes with an uncaught `TypeError` when a `unit` is a list or an object instead of answering `E_QUERY_BAD_UNIT` (reported to the NODAL session; SEED turns it into the fixed sentence).
+
+Tests: `tests/query-model.test.ts` (41: the host's refusals and every way an adapter can misbehave with a stub adapter, the four questions against real NODAL, the NODAL adapter called directly, the CLI and the MCP tool). Mutations: `scripts/mutate-query-model.cjs`, 34 mutants, all caught.
