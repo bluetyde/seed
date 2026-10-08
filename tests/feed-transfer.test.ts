@@ -93,7 +93,15 @@ describe.skipIf(!have)("FEED transfer command behind the SEED transfer core (rea
       const o = await callAdapter(spec, { schema: "seed.adapter-request/0.1", requestId: "req-d", actor: human, verb: "describe" }, { projectRoot: tmp, timeoutMs: 120000 });
       expect(o.ok).toBe(true);
       const reply = (o as any).reply;
-      expect(reply.result.transfers.map((t: any) => t.field)).toEqual(["heating-to-pin", "coolant-boundary"]);
+      const fields = reply.result.transfers.map((t: any) => t.field);
+      // FEED main lists two transfers; with the burnup transfer (FEED branch claude/burnup-transfer, 2026-10-08) a third, with its parameters
+      expect(fields.slice(0, 2)).toEqual(["heating-to-pin", "coolant-boundary"]);
+      expect([2, 3]).toContain(fields.length);
+      if (fields.length === 3) {
+        expect(fields[2]).toBe("burnup");
+        expect(reply.result.transfers[2].accepts).toEqual([{ dimension: "burnup", normalization: "none" }]);
+        expect(Object.keys(reply.result.transfers[2].parameters ?? {}).length).toBeGreaterThan(0);
+      }
       expect(reply.result.transfers[0].accepts).toContainEqual({ dimension: "energy", normalization: "per-source-particle" });
       // the coolant boundary: both forms, matched on exactly their roles
       expect(reply.result.transfers[1].accepts).toEqual([{ dimension: "temperature", normalization: "none", additional: [{ role: "heat-transfer-coefficient", dimension: "heat-transfer-coefficient" }] }, { dimension: "temperature", normalization: "none" }]);
