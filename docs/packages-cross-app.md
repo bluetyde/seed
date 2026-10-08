@@ -70,3 +70,11 @@ Rules the manifest checks enforce: **only an add-on may consume a record** (a co
 - The version of a record is a whole number the registry assigns; how it maps to the wire schema's own version (`studio.depletion/0.1`) is the registry entry's `wireSchema` field and the owner's job to keep true.
 
 Mutations of the new code: 36 (`scripts/mutate-packages.cjs`), all caught; two first survived and got tests (a consumer's maximum version against the registry; a kept component in a plan staying out of the grant).
+
+## Rules added by the 2026-10-08 review (batch 3)
+
+- **Installed means pinned.** A component at the catalog's version is "kept" only if its recorded artifact hashes (`artifactSha256`) are the ones the catalog pins now; otherwise it is planned as an update of the same version. A managed component with no recorded pins counts as not matching.
+- **An installed producer must be new enough.** A producer installed at a version below the manifest's does not stand for the record being asked for: its update is planned and goes into the grant.
+- **Conflicts count from both sides**, for what is selected and what stays installed.
+- **A platform that does not say how it runs (native or WSL) does not satisfy a component that names a mode.**
+- **Removal** touches only what the target brought in (what it depends on and what makes the records it consumes, transitively), never an unrelated component. It is refused while a component of any app (when `manifests` is given) consumes a record the target makes and no other installed component makes it.

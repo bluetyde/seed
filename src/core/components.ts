@@ -294,7 +294,7 @@ export type SelectionRequest = {
 };
 
 export function eligible(c: Component, platform: Platform, appVersion: string): ComponentError | null {
-  const ok = c.platforms.some((p) => p.os === platform.os && p.arch === platform.arch && (p.via === undefined || platform.via === undefined || p.via === platform.via));
+  const ok = c.platforms.some((p) => p.os === platform.os && p.arch === platform.arch && (p.via === undefined || p.via === platform.via));
   if (!ok) return { code: "E_COMPONENT_PLATFORM", component: c.id, message: `${c.id} is not available for ${platform.os} ${platform.arch}${platform.via ? ` (${platform.via})` : ""}` };
   const v = c.appVersions;
   if (v && (compareVersions(appVersion, v.min) < 0 || (v.max !== undefined && compareVersions(appVersion, v.max) > 0))) {
@@ -343,9 +343,10 @@ export function resolveSelection(req: SelectionRequest): SelectionPlan | { ok: f
     if (bad) errors.push(bad);
   }
   const staying = new Set<string>([...order, ...req.installed.filter((i) => i.app === req.manifest.app).map((i) => i.component)]);
-  for (const id of order) {
-    for (const x of byId.get(id)!.conflicts ?? []) {
-      if (staying.has(x)) errors.push({ code: "E_COMPONENT_CONFLICT", component: id, message: `${id} conflicts with ${x}, which is selected or installed` });
+  // a conflict is declared on one side only, often: it counts from either side, for the selected and for what stays installed
+  for (const id of staying) {
+    for (const x of byId.get(id)?.conflicts ?? []) {
+      if (staying.has(x) && (order.includes(id) || order.includes(x))) errors.push({ code: "E_COMPONENT_CONFLICT", component: order.includes(id) ? id : x, message: `${id} conflicts with ${x}, which is selected or installed` });
     }
   }
   if (errors.length) return fail(errors);
@@ -359,7 +360,10 @@ export function resolveSelection(req: SelectionRequest): SelectionPlan | { ok: f
     const have = here(id);
     const wants = (req.manifest.components.flatMap((x) => (order.includes(x.id) ? x.dependsOn ?? [] : [])).filter((d) => d.component === id));
     const need = wants.reduce<string | undefined>((m, d) => (d.min !== undefined && (m === undefined || compareVersions(d.min, m) > 0) ? d.min : m), undefined);
-    if (have && compareVersions(have.version, c.version) >= 0) {
+    // The same version is kept only if what is installed is what the catalog pins now: a changed or withdrawn artifact is not "already there".
+    const pinned = c.artifacts.map((a) => a.sha256).sort().join(",");
+    const samePins = have === undefined || have.origin === "adopted" || compareVersions(have.version, c.version) !== 0 || (have.artifactSha256 ?? []).slice().sort().join(",") === pinned;
+    if (have && samePins && compareVersions(have.version, c.version) >= 0) {
       steps.push({ component: id, action: "keep", from: have.version, to: have.version, selectedByUser: have.selectedByUser || asked.has(id) });
       continue;
     }
@@ -403,6 +407,8 @@ export type RemovalPlan = {
  */
 export function planRemoval(req: {
   manifest: Manifest;
+  /** Every app's manifest, so that a component of another app that consumes a record this one makes is seen. Default: this app's only. */
+  manifests?: readonly Manifest[];
   installed: readonly Installed[];
   remove: string;
   /** Component ids that a running launch or job uses (from the process-owner records). */
@@ -416,25 +422,45 @@ export function planRemoval(req: {
   if (def.kind === "core") return fail([{ code: "E_COMPONENT_CORE", component: req.remove, message: `${req.remove} is part of the core app; remove the app instead` }]);
   if (def.kind === "library") return fail([{ code: "E_COMPONENT_NOT_SELECTABLE", component: req.remove, message: `${req.remove} is a library; it goes when nothing needs it` }]);
 
-  const needers = mine
-    .filter((i) => i.component !== req.remove)
-    .filter((i) => (byId.get(i.component)?.dependsOn ?? []).some((d) => d.component === req.remove))
-    .map((i) => i.component)
-    .sort();
+  // Who needs whom, across the suite: a component needs what it depends on (same app) and the only remaining maker of a record it consumes.
+  const manifests = req.manifests ?? [req.manifest];
+  const defOf = (i: Installed) => manifests.find((m) => m.app === i.app)?.components.find((c) => c.id === i.component);
+  const makes = (p: Installed, o: Installed) =>
+    (defOf(o)?.consumes ?? []).some((n) => (defOf(p)?.produces ?? []).some((q) => q.record === n.record && q.version >= n.minVersion && (n.maxVersion === undefined || q.version <= n.maxVersion)));
+  const goingInstalls = new Set<Installed>([target]);
+  const needs = (o: Installed, p: Installed): boolean =>
+    (o.app === p.app && (defOf(o)?.dependsOn ?? []).some((d) => d.component === p.component)) ||
+    (makes(p, o) && !req.installed.some((x) => x !== p && x !== o && !goingInstalls.has(x) && makes(x, o)));
+  const label = (i: Installed) => (i.app === req.manifest.app ? i.component : `${i.app}/${i.component}`);
+  const needers = req.installed.filter((i) => i !== target && needs(i, target)).map(label).sort();
   if (needers.length) return fail([{ code: "E_COMPONENT_REQUIRED_BY", component: req.remove, message: `${req.remove} is needed by ${needers.join(", ")}` }]);
 
   const going = new Set([req.remove]);
+  // Only what the target itself brought in can go with it: what it depends on, and what makes the records it consumes, transitively. A
+  // component unrelated to the target is never part of this removal, however unneeded it looks.
+  const closure = new Set<string>();
+  const reach = (from: Installed) => {
+    for (const i of mine) {
+      if (closure.has(i.component) || i === from) continue;
+      if (needs(from, i) || (from.app === i.app && (defOf(from)?.dependsOn ?? []).some((d) => d.component === i.component))) {
+        closure.add(i.component);
+        reach(i);
+      }
+    }
+  };
+  reach(target);
   // libraries and add-ons SEED installed on the way (not chosen by the user), no longer needed once the target goes
   let grew = true;
   while (grew) {
     grew = false;
     for (const i of mine) {
-      if (going.has(i.component) || i.selectedByUser || i.origin === "adopted") continue;
+      if (going.has(i.component) || !closure.has(i.component) || i.selectedByUser || i.origin === "adopted") continue;
       const kind = byId.get(i.component)?.kind;
       if (kind === "core") continue;
-      const stillNeeded = mine.some((o) => !going.has(o.component) && o.component !== i.component && (byId.get(o.component)?.dependsOn ?? []).some((d) => d.component === i.component));
+      const stillNeeded = req.installed.some((o) => o !== i && !goingInstalls.has(o) && needs(o, i));
       if (!stillNeeded) {
         going.add(i.component);
+        goingInstalls.add(i);
         grew = true;
       }
     }

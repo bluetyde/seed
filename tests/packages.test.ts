@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { validateManifest, validateRecordKinds, type Installed, type Manifest, type Platform, type RecordRegistry } from "../src/core/components";
+import { planRemoval, validateManifest, validateRecordKinds, type Installed, type Manifest, type Platform, type RecordRegistry } from "../src/core/components";
 import { componentsSatisfying, resolveChain, validateSuite, type ChainRequest } from "../src/core/packages";
 
 // Cross-app packages (docs/packages-cross-app.md): the chains the research session named, on fake manifests of five apps.
@@ -29,7 +29,14 @@ const registry: RecordRegistry = {
   ]
 };
 
+// the same options give the same manifests (and the same artifact pins) for the whole file, so an installed record can carry the pins of its manifest
+const suiteCache = new Map<string, Manifest[]>();
 function suite(over: { dropDepletion?: boolean } = {}): Manifest[] {
+  const key = JSON.stringify(over);
+  if (!suiteCache.has(key)) suiteCache.set(key, buildSuite(over));
+  return structuredClone(suiteCache.get(key)!); // a test may edit what it gets
+}
+function buildSuite(over: { dropDepletion?: boolean } = {}): Manifest[] {
   const studio = manifest("studio", [
     comp("studio-core", "core", {}, 100),
     comp("openmc-env", "library", { satisfies: ["conda-env"] }, 2_000_000),
@@ -55,7 +62,9 @@ function suite(over: { dropDepletion?: boolean } = {}): Manifest[] {
 }
 const base = (over: Partial<ChainRequest> = {}): ChainRequest => ({ manifests: suite(), registry, installed: [], select: [], platform: linux, appVersions, ...over });
 const rec = (app: string, component: string, over: Partial<Installed> = {}): Installed => ({
-  app, component, version: "1.0.0", origin: "managed", location: `/seed/${app}/${component}`, manifestSha256: "a".repeat(64), selectedByUser: false, installedAt: "2026-10-07T00:00:00Z", ...over
+  app, component, version: "1.0.0", origin: "managed", location: `/seed/${app}/${component}`, manifestSha256: "a".repeat(64), selectedByUser: false, installedAt: "2026-10-07T00:00:00Z",
+  // what the installer would have recorded: the artifact pins of the manifest it installed from
+  artifactSha256: suite().find((m) => m.app === app)?.components.find((c: any) => c.id === component)?.artifacts.map((a: any) => a.sha256) ?? [], ...over
 });
 const names = (r: ReturnType<typeof resolveChain>) => (r.ok ? r.steps.map((s) => `${s.action}:${s.app}/${s.component}`) : []);
 const codes = (r: { ok: boolean; errors?: { code: string }[] }) => (r.ok ? [] : r.errors!.map((e) => e.code));
@@ -388,5 +397,39 @@ describe("environment prerequisites as library components", () => {
   it("two apps offering the same prerequisite are both listed, in a fixed order", () => {
     const ms = [...suite(), valid(manifest("other", [comp("other-core", "core"), comp("other-env", "library", { satisfies: ["conda-env"] })]))];
     expect(componentsSatisfying(ms, "conda-env").map((x) => `${x.app}/${x.component}`)).toEqual(["other/other-env", "studio/openmc-env"]);
+  });
+});
+
+// Findings of the Codex review of batch 3 (2026-10-08), each shown by a test that fails without its fix.
+describe("review batch 3: chains and removal across apps", () => {
+  it("an installed producer older than the manifest's does not stand for it: the update is planned and granted", () => {
+    const installed = [rec("studio", "studio-core"), rec("studio", "chain-file"), rec("studio", "openmc-env"), rec("studio", "studio-depletion", { selectedByUser: true, version: "0.5.0" })];
+    const r = resolveChain(base({ installed, select: [{ app: "raft", component: "raft-burnup" }] }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.chain[0]).toMatchObject({ producer: "studio/studio-depletion", how: "added" });
+    expect(r.steps.find((s) => s.app === "studio" && s.component === "studio-depletion")).toMatchObject({ action: "update", from: "0.5.0" });
+    expect(r.grant.map((g) => `${g.app}/${g.component}`)).toContain("studio/studio-depletion");
+  });
+
+  it("a producer is not removed while a component of another app consumes the record it makes, and is when none does", () => {
+    const manifests = suite();
+    const studio = manifests.find((m) => m.app === "studio")!;
+    const installed = [rec("studio", "studio-core"), rec("studio", "chain-file"), rec("studio", "openmc-env"), rec("studio", "studio-depletion", { selectedByUser: true }), rec("raft", "raft-core"), rec("raft", "raft-burnup", { selectedByUser: true })];
+    const refused = planRemoval({ manifest: studio, manifests, installed, remove: "studio-depletion" });
+    expect(refused.ok ? [] : refused.errors.map((e) => e.code)).toEqual(["E_COMPONENT_REQUIRED_BY"]);
+    expect(refused.ok ? "" : refused.errors[0]!.message).toContain("raft/raft-burnup");
+    expect(planRemoval({ manifest: studio, manifests, installed: installed.filter((i) => i.component !== "raft-burnup"), remove: "studio-depletion" }).ok).toBe(true);
+  });
+
+  it("a record maker that another consumer can do without is not what holds a removal: two makers, one may go", () => {
+    const manifests = suite();
+    const studio = manifests.find((m) => m.app === "studio")!;
+    // a second installed maker of depletion-record (a copy under another name) takes over the consumer's need
+    const copy = structuredClone(studio.components.find((c) => c.id === "studio-depletion")!);
+    copy.id = "studio-depletion-2";
+    studio.components.push(copy);
+    const installed = [rec("studio", "studio-core"), rec("studio", "chain-file"), rec("studio", "openmc-env"), rec("studio", "studio-depletion", { selectedByUser: true }), rec("studio", "studio-depletion-2", { selectedByUser: true, artifactSha256: copy.artifacts.map((a) => a.sha256) }), rec("raft", "raft-core"), rec("raft", "raft-burnup", { selectedByUser: true })];
+    expect(planRemoval({ manifest: studio, manifests, installed, remove: "studio-depletion" }).ok).toBe(true);
   });
 });
