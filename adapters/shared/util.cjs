@@ -223,6 +223,18 @@ function argvOf(cl) {
 
 const normPath = (x) => (win ? x.split(BACKSLASH).join("/").toLowerCase() : x);
 
+/**
+ * True when `value` is one whole argument of the command line `cl`. Windows quotes an argument that has a space, so the line is split with its
+ * quotes. A POSIX `ps` prints the arguments joined by spaces with no quotes at all, so an argument with a space in it (a project under
+ * "/Users/me/Claude Code Test") cannot be told from two: there the line is searched for the value between spaces. That stays a proof of
+ * ownership because what is asked for is a job token, an absolute path (it starts with a slash or a drive letter, so it cannot begin in the middle
+ * of another path) or a fixed word, never a loose fragment; a caller must not pass a relative fragment.
+ */
+function hasArg(cl, value) {
+  if (win) return argvOf(cl).map(normPath).includes(normPath(value));
+  return (" " + cl + " ").includes(" " + value + " ");
+}
+
 
 /** Canonical JSON (sorted keys): two parsed documents are the same exactly when these strings are equal. */
 function canonical(v) {
@@ -283,12 +295,11 @@ function ownsJobProcess(j, s, jobScript) {
   if (!s.tokenOk || !Number.isInteger(j.job.pid) || typeof j.job.token !== "string" || j.job.token.length === 0) return false;
   const cl = commandLine(j.job.pid);
   if (cl === null) return false;
-  const args = argvOf(cl).map(normPath);
-  return args.includes(normPath(jobScript)) && args.includes(normPath(j.absRunDir)) && args.includes(j.job.token);
+  return hasArg(cl, jobScript) && hasArg(cl, j.absRunDir) && hasArg(cl, j.job.token);
 }
 
 module.exports = {
   BACKSLASH, MAX_CAPTURE, HEARTBEAT_FRESH_MS, STARTUP_GRACE_MS, win, sameOrInside, winDir, portableRel, isAlive, commandLine, killTree, waitDead,
   atomicWrite, json, readJson, insideRoot, containedBelow, jobsDir, jobIdFor, jobIndexPath, findJob, snapshotProblem, appFailed, sha256,
-  argvOf, normPath, canonical, typed, jobState, ownsJobProcess,
+  argvOf, hasArg, normPath, canonical, typed, jobState, ownsJobProcess,
 };

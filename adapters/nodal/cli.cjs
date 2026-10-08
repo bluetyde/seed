@@ -31,6 +31,7 @@ const {
   appFailed,
   sha256,
   argvOf,
+  hasArg,
   normPath,
   canonical,
   typed,
@@ -287,9 +288,8 @@ function status(request, root, reply, fail) {
 function ownsRunner(j, pid) {
   const cl = commandLine(pid);
   if (cl === null) return false;
-  const args = argvOf(cl).map(normPath);
-  const model = normPath(path.join(j.absRunDir, "inputs", j.job.model));
-  return args.includes("nodal_studio.run") && args.includes(model);
+  const model = path.join(j.absRunDir, "inputs", j.job.model);
+  return hasArg(cl, "nodal_studio.run") && hasArg(cl, model);
 }
 
 async function cancel(request, root, reply, fail) {

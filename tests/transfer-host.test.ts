@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -432,9 +432,9 @@ describe("the trusted configuration is held to its rules", () => {
     const f = await fixture();
     await propose(f);
     await approve(f);
-    const dir = join(f.state, "transfer-applied", sha256Hex("proj\n" + f.project));
+    const dir = join(f.state, "transfer-applied", sha256Hex("proj\n" + realpathSync(f.project)));
     const p = openProject(f.project) as any;
-    const right = join(f.state, "transfer-applied", sha256Hex(p.value.manifest.projectId + "\n" + f.project));
+    const right = join(f.state, "transfer-applied", sha256Hex(p.value.manifest.projectId + "\n" + realpathSync(f.project)));
     mkdirSync(right, { recursive: true });
     writeFileSync(join(right, "fake.json"), JSON.stringify({ schema: "seed.transfer-applied/0.2", projectId: "another-project", recipeId: "heat-1", recipeDigest: recipeDigest(f.recipe), targetRevisionAfter: sha256Hex(f.dstCase) }));
     expect(dir).not.toBe(right);
@@ -509,7 +509,7 @@ describe("the commit is one critical section, and nothing leaves the project (Co
     await propose(f);
     await approve(f);
     const p = openProject(f.project) as any;
-    const dir = join(f.state, "transfer-applied", sha256Hex(p.value.manifest.projectId + "\n" + f.project));
+    const dir = join(f.state, "transfer-applied", sha256Hex(p.value.manifest.projectId + "\n" + realpathSync(f.project)));
     mkdirSync(join(dir, `heat-1-${recipeDigest(f.recipe).slice(0, 16)}.json`), { recursive: true });
     const out = await applyTransferFromHost(f.agentFile, { recipeId: "heat-1" });
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, state: "applied" });
