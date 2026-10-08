@@ -34,7 +34,7 @@ const MUT = [
   [C, "\"note\", \"query\", \"cancel\"", "\"note\", \"cancel\""],
   [N, "const res = await runPython(cfg, [modelCopy, \"--query\", queryFile]);", "const res = await runPython(cfg, [art.abs, \"--query\", queryFile]);"],
   [N, "return fail(typed(\"E_APP_FAILED\", \"\", \"the NODAL runner could not answer the query\" + (res.timedOut ? \" (timed out)\" : \" (exit \" + res.code + \")\")));", "return fail(appFailed(\"the NODAL runner could not answer the query\", res));"],
-  [N, ".split(tmp).join(\"the model\")", ""],
+  [N, ".split(modelCopy).join(\"the model\")", ""],
   [Q, "      } catch {\n        after = null;\n      }", "      } catch (e) {\n        throw e;\n      }"],
   [Q, "e instanceof Error && !system ? e.message", "e instanceof Error ? e.message"],
   [Q, "    } catch {\n      return fail(\"E_NOT_FOUND\", \"the model file of this case cannot be read\", \"/caseId\");\n    }", "    } catch (e) {\n      throw e;\n    }"]
