@@ -5,7 +5,7 @@
       "record": "depletion-record",
       "version": 1,
       "owner": "openmc-studio",
-      "status": "defined",
+      "status": "planned",
       "wireSchema": "studio.depletion/0.1",
       "summary": "A depletion run's time steps, power or flux normalisation, k at each step, per-material nuclide densities and provenance, on a heavy-metal basis.",
       "manual": "In OpenMC Studio, run a depletion (the Reactor Physics package; it needs the depletion chain file) and save its depletion record, a studio.depletion JSON written next to the statepoint. Give that file to the app that asks for it."
