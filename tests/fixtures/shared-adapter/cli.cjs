@@ -20,7 +20,7 @@ function run(request, root, reply, fail) {
   const marker = path.join(found.abs, "native-cancelled.txt");
   return startJob({
     root, request, absRunDir: found.abs, reply, fail,
-    record: { mode: s.mode, native: !!s.native, inputs: [] },
+    record: { mode: s.mode, native: !!s.native, unprove: !!s.unprove, inputs: [] },
     runSpec: s.missingRunner ? { command: path.join(found.abs, "no-such-runner.exe"), args: [] } : spec(RUNNER, [s.mode || "ok", out]),
     cancelSpec: s.native ? spec(CANCELLER, [marker]) : null,
     stopNative: s.native ? () => stopNative(marker) : null,
@@ -46,7 +46,16 @@ serve({
   cancel: (request, root, reply, fail) => cancelJob({
     request, root, reply, fail, ownsRunner,
     // the job record says whether this run has a native part outside the process tree
-    stopNative: (j) => (j.job.native ? stopNative(path.join(j.absRunDir, "native-cancelled.txt")) : Promise.resolve({ confirmed: true, stoppedOne: false })),
+    stopNative: async (j) => {
+      if (!j.job.native) return { confirmed: true, stoppedOne: false };
+      const r = await stopNative(path.join(j.absRunDir, "native-cancelled.txt"));
+      if (j.job.unprove) {
+        // models a wrapper whose proof of ownership is gone by the time the native stop returns (it ended, its number may be reused)
+        const hb = path.join(j.nativeDir, "heartbeat.json");
+        fs.writeFileSync(hb, JSON.stringify({ ...JSON.parse(fs.readFileSync(hb, "utf8")), token: "no-longer-this-job" }));
+      }
+      return r;
+    },
   }),
   collect: (_r, _root, _reply, fail) => fail(typed("E_UNSUPPORTED", "", "the fixture collects nothing")),
 }, "the fixture has no editor");

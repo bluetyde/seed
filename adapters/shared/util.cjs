@@ -48,9 +48,21 @@ function isAlive(pid) {
   }
 }
 
-/** Command line of a process, or null when it cannot be read (then it is not treated as ours). */
+/**
+ * Command line of a process, or null when it cannot be read (then it is not treated as ours). On Linux it is the exact argument list from
+ * /proc (an array: nothing is lost to quoting, an argument with spaces stays one); elsewhere it is the text that `ps` or Windows gives.
+ */
 function commandLine(pid) {
   if (!Number.isInteger(pid) || pid <= 1) return null;
+  if (process.platform === "linux") {
+    try {
+      const parts = fs.readFileSync("/proc/" + pid + "/cmdline", "utf8").split(String.fromCharCode(0));
+      if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
+      if (parts.length > 0) return parts;
+    } catch {
+      // no /proc entry (the process is gone, or /proc is hidden): ask ps below
+    }
+  }
   if (win) {
     const exe = winDir() + "/System32/WindowsPowerShell/v1.0/powershell.exe";
     const r = spawnSync(exe, ["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
@@ -200,6 +212,7 @@ const sha256 = (data) => crypto.createHash("sha256").update(data).digest("hex");
 
 /** The arguments of a command line: quoted parts stay whole, anything else splits at spaces. */
 function argvOf(cl) {
+  if (Array.isArray(cl)) return cl;
   const out = [];
   let cur = "";
   let quoted = false;
@@ -224,13 +237,15 @@ function argvOf(cl) {
 const normPath = (x) => (win ? x.split(BACKSLASH).join("/").toLowerCase() : x);
 
 /**
- * True when `value` is one whole argument of the command line `cl`. Windows quotes an argument that has a space, so the line is split with its
+ * True when `value` is one whole argument of the command line `cl`. On Linux `cl` is the exact argument list (from /proc) and nothing is
+ * ambiguous. Windows quotes an argument that has a space, so the line is split with its
  * quotes. A POSIX `ps` prints the arguments joined by spaces with no quotes at all, so an argument with a space in it (a project under
  * "/Users/me/Claude Code Test") cannot be told from two: there the line is searched for the value between spaces. That stays a proof of
  * ownership because what is asked for is a job token, an absolute path (it starts with a slash or a drive letter, so it cannot begin in the middle
  * of another path) or a fixed word, never a loose fragment; a caller must not pass a relative fragment.
  */
 function hasArg(cl, value) {
+  if (Array.isArray(cl)) return cl.includes(value); // an exact argument list (Linux): whole arguments only, spaces cannot confuse it
   if (win) return argvOf(cl).map(normPath).includes(normPath(value));
   return (" " + cl + " ").includes(" " + value + " ");
 }
