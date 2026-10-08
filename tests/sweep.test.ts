@@ -178,3 +178,19 @@ describe("the gate and maxCases", () => {
     expect(d.allow).toBe(false);
   });
 });
+
+describe("review batch 1: the ceiling on a sweep", () => {
+  it("a study limit of a billion does not let two long axes be expanded: the sweep is refused before any case is built", () => {
+    const values = (n: number) => Array.from({ length: n }, (_, i) => 300 + i * 0.001);
+    const t0 = Date.now();
+    const r = expandSweep("big", { base: "base", axes: [{ id: "temp", values: values(5000) }, { id: "flow", values: values(5000) }] }, cases, study({ maxCases: 1_000_000_000 }));
+    expect(r.ok ? [] : r.errors.map((e) => e.code)).toEqual(["E_BUDGET_EXCEEDED"]);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("the ceiling is 10000 cases, however high the study limit", () => {
+    const values = (n: number) => Array.from({ length: n }, (_, i) => 300 + i);
+    expect(expandSweep("ok", { base: "base", axes: [{ id: "temp", values: values(100) }, { id: "flow", values: values(100) }] }, cases, study({ maxCases: 1_000_000 })).ok).toBe(true);
+    expect(expandSweep("no", { base: "base", axes: [{ id: "temp", values: values(100) }, { id: "flow", values: values(101) }] }, cases, study({ maxCases: 1_000_000 })).ok).toBe(false);
+  });
+});

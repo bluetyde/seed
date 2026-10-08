@@ -75,8 +75,20 @@ export async function exportStudyReport(file: string, headerFile: string | undef
       const rows = readAdmissions(engine);
       const requestId = (request as any).requestId;
       const configHash = sha256Hex(configBytes);
-      const scope = (row: any) =>
-        row.event.projectId === project.value.manifest.projectId && row.event.configHash === configHash;
+      const inProject = (row: any) => row.event.projectId === project.value.manifest.projectId;
+      /**
+       * A run is verified against the configuration it was admitted under (the copy in the audit log). That configuration may differ from the
+       * present one only in the registered cases other than the run's own, and in the sweeps: adding a case mid-study does not unprove the runs
+       * before it. The study rules, the runtime, the adapter, the actor, the oracle evidence and the run's own case must be exactly the same.
+       */
+      const comparable = (audited: any, caseId: unknown): boolean => {
+        if (audited === null || typeof audited !== "object" || typeof caseId !== "string") return false;
+        const strip = (x: any) => {
+          const { sweeps: _s, cases, ...rest } = x;
+          return { ...rest, cases: { [caseId]: cases?.[caseId] ?? null } };
+        };
+        return canonicalJson(strip(audited)) === canonicalJson(strip(c));
+      };
       const folders = project.value.manifest.folders as { runs: string; studies: string };
       const runsRoot = safeChild(projectRoot, folders.runs, true);
       if (!inside(projectRoot, realpathSync(runsRoot))) throw Error("runs folder leaves project");
@@ -98,17 +110,23 @@ export async function exportStudyReport(file: string, headerFile: string | undef
       const verifyRun = (askId: string, expectRunId?: string) => {
         const admission = [...rows]
           .reverse()
-          .find((row: any) => scope(row) && row.event.phase === "request" && row.event.event.request?.requestId === askId);
+          .find(
+            (row: any) =>
+              inProject(row) &&
+              row.event.phase === "request" &&
+              row.event.event.request?.requestId === askId &&
+              comparable(row.event.event.configuration, row.event.event.request?.caseId)
+          );
         const nextRequest = admission && rows.find((row: any) => row.seq > admission.seq && row.event.phase === "request");
         const attemptRows = admission
-          ? rows.filter(row => row.seq >= admission.seq && row.seq < (nextRequest?.seq ?? Infinity) && scope(row))
+          ? rows.filter(row => row.seq >= admission.seq && row.seq < (nextRequest?.seq ?? Infinity) && inProject(row) && (row.event as any).configHash === (admission.event as any).configHash)
           : [];
         const decision = attemptRows.find((row: any) => row.event.phase === "decision" && row.event.event.requestId === askId);
         if (!admission || !decision) throw Error("no guarded admission for this request");
         const admitted = (admission.event as any).event;
         const gate = (decision.event as any).event;
-        if (!gate.decision.allow || canonicalJson(admitted.configuration) !== canonicalJson(c))
-          throw Error("refused admission or host configuration changed since run");
+        if (!gate.decision.allow || !comparable(admitted.configuration, admitted.request?.caseId))
+          throw Error("refused admission or the host configuration changed in more than other cases since the run");
         const registered = c.cases[admitted.request.caseId];
         if (!registered) throw Error("case is no longer registered");
         const runId = requests[askId]?.runId;

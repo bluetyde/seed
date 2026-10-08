@@ -15,6 +15,8 @@ export type ExpandedCase = { caseId: string; registered: RegisteredCase; values:
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,55}$/;
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 export const MAX_AXES = 4;
+/** The most cases any sweep is expanded to, whatever the study limit says. */
+export const HARD_MAX_CASES = 10000;
 
 const bad = (field: string, message: string): { ok: false; errors: TypedError[] } => ({
   ok: false,
@@ -45,7 +47,9 @@ export function expandSweep(
   if (def.axes.length < 1 || def.axes.length > MAX_AXES) {
     return bad(`/sweeps/${sweepId}/axes`, `a sweep has 1 to ${MAX_AXES} axes`);
   }
-  const limit = study.budget.maxCases ?? DEFAULT_MAX_CASES;
+  // The study's limit is a number a person typed: however large, a sweep is never expanded past a fixed ceiling, so a configuration cannot
+  // ask the host to build a billion cases before any request is judged.
+  const limit = Math.min(study.budget.maxCases ?? DEFAULT_MAX_CASES, HARD_MAX_CASES);
   const seen = new Set<string>();
   let total = 1;
   for (let a = 0; a < def.axes.length; a++) {
