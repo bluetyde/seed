@@ -264,7 +264,7 @@ async function query(request, root, reply, fail) {
         const code = String((e && e.code) || "");
         const mapped = QUERY_CODE[code] || (code.startsWith("E_QUERY_") ? "E_QUERY_INVALID" : "E_APP_FAILED");
         // the runner may quote the private copy's path: the client gets "the model", never a path of this machine
-        const text = String((e && e.message) || "the runner refused the query").split(tmp).join("the model").slice(0, 400);
+        const text = String((e && e.message) || "the runner refused the query").split(modelCopy).join("the model").split(tmp).join("a temporary folder").slice(0, 400);
         return typed(mapped, String((e && e.field) || ""), (code ? code + ": " : "") + text, "app-content");
       }));
     }
