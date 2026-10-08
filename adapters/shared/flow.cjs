@@ -147,7 +147,8 @@ async function startJob({ root, request, absRunDir, record: extra, runSpec, canc
       let stopped = false;
       try {
         if (stopNative) await stopNative();
-        await killTree(child.pid);
+        // Our own child: once it has exited its number may belong to somebody else, so it is signalled only while this process still sees it run.
+        if (child.exitCode === null && child.signalCode === null) await killTree(child.pid);
         stopped = await waitDead(child.pid, 3000);
       } catch {
         stopped = false;
@@ -266,8 +267,13 @@ async function cancelJob({ request, root, reply, fail, stopNative = null, ownsRu
     if (first.notOwned) return fail(typed("E_NOT_OWNED", "/jobId", "the native process of this run cannot be shown to be its own"));
     if (!first.confirmed) return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
   }
-  // 2. Then the wrapper and the runner, only after the command line proved they are this job's.
-  await killTree(j.job.pid);
+  // 2. Then the wrapper and the runner, only after the command line proved they are this job's. Stopping the native run can take long, and
+  //    the wrapper may have ended meanwhile and its number been given to another process: prove it again just before the signal.
+  if (ownsJobProcess(j, jobState(j.nativeDir, j.job, extraStatuses), SHARED_JOB)) {
+    await killTree(j.job.pid);
+  } else if (isAlive(j.job.pid)) {
+    return fail(typed("E_NOT_OWNED", "/jobId", "the process behind this job is no longer shown to be owned by this run; it was not signalled"));
+  }
   const dead = await waitDead(j.job.pid, 5000);
   const childDead = childPid !== null ? await waitDead(childPid, 5000) : true;
   if (!dead || !childDead) return reply({ ok: true, result: { jobId: request.jobId, lifecycle: "running", cancelled: false } });
