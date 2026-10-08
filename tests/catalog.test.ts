@@ -31,6 +31,15 @@ describe("catalog", () => {
     expect(r.repos.map((x) => x.id)).toEqual(["second"]);
   });
 
+  it("NODAL installs the P&ID generator's dependencies after the web ones, and reinstalls them when their lockfile changes", () => {
+    const c = parseCatalog(readFileSync(join(__dirname, "..", "catalog.json"), "utf-8"));
+    const nodal = c.repos.find((r) => r.id === "nodal-studio")!;
+    expect(nodal.steps.map((s) => [s.cwd, s.command, s.args, s.watch])).toEqual([
+      ["web", "npm", ["ci", "--ignore-scripts"], ["web/package-lock.json"]],
+      ["pid", "npm", ["ci", "--ignore-scripts"], ["pid/package-lock.json"]],
+    ]);
+  });
+
   it("allows a local address only when asked (tests)", () => {
     const local = { ...ok, url: "C:/tmp/origin.git" };
     expect(cat(local).repos).toHaveLength(0);
