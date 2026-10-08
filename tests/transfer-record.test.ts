@@ -93,6 +93,11 @@ describe("the depletion record as a source", () => {
     ["a negative burnup", (d) => { d.regions[0].burnup_mwd_per_tu = [-1, 2]; }],
     ["a burnup that is not a number", (d) => { d.regions[0].burnup_mwd_per_tu = ["a", 2]; }],
     ["two regions with one name", (d) => { d.regions.push(structuredClone(d.regions[0])); }],
+    ["no unit declaration", (d) => { delete d.provenance.units; }],
+    ["a burnup declared in another unit", (d) => { d.provenance.units.burnup_mwd_per_tu = "MWd per kilogram of heavy metal"; }],
+    ["times declared in another unit", (d) => { d.provenance.units.time_steps_days = "hours"; }],
+    ["a burnup that decreases", (d) => { d.regions[0].burnup_mwd_per_tu = [100, 50]; }],
+    ["steps whose sum is more than a number can hold", (d) => { d.time_steps_days = [1e308, 1e308]; }],
     ["no regions", (d) => { d.regions = []; }],
     ["a region with no name", (d) => { d.regions[0].name = ""; }],
   ])("refuses, with a valid id, a record with %s", (_n, f) => {
@@ -103,6 +108,11 @@ describe("the depletion record as a source", () => {
     const text = JSON.stringify(d);
     const id = require("node:crypto").createHash("sha256").update(canonicalRecordText(text), "utf8").digest("hex");
     const p = parseDepletion(JSON.stringify({ ...d, id }));
+    expect(p.ok ? [] : p.errors.map((e) => e.code)).toEqual(["E_RECORD_INVALID"]);
+  });
+
+  it("text that was not valid UTF-8 (read as U+FFFD) is refused: its file hash would not stand for these bytes", () => {
+    const p = parseDepletion(RECORD.replace('"UO2 3.5%"', '"UO2 3.5%' + String.fromCharCode(0xfffd) + '"'));
     expect(p.ok ? [] : p.errors.map((e) => e.code)).toEqual(["E_RECORD_INVALID"]);
   });
 
@@ -238,6 +248,23 @@ describe("applying a record recipe", () => {
     expect(same.ok ? [] : same.errors.map((e) => e.field)).toEqual(["/output"]);
     const bad = await apply(recipeOf(), async () => ({ nonsense: true }));
     expect(bad.ok).toBe(false);
+  });
+
+  it("a record that is another valid record at the second read is not sent to the target (the approved one is what is sent)", async () => {
+    const d = JSON.parse(RECORD);
+    d.regions[0].burnup_mwd_per_tu = [38, 999];
+    delete d.id;
+    const id = require("node:crypto").createHash("sha256").update(canonicalRecordText(JSON.stringify(d)), "utf8").digest("hex");
+    const other = JSON.stringify({ ...d, id });
+    expect(parseDepletion(other)).toMatchObject({ ok: true });
+    let reads = 0, called = false;
+    const r = recipeOf();
+    const base = viewOf({ approvals: [approvalFor(r)] });
+    const out = await apply(r, async () => { called = true; return { ok: true, output: { content: "x" } }; }, { ...base, readData: () => (++reads === 1 ? RECORD : other) });
+    expect(out.ok).toBe(false);
+    expect(out.ok ? [] : out.errors.map((e) => e.code)).toEqual(["E_STALE_REVISION"]);
+    expect(called).toBe(false);
+    expect(reads).toBeGreaterThan(1);
   });
 
   it("a record that was damaged since the approval is not sent to the target", async () => {

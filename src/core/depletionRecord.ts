@@ -92,6 +92,9 @@ export function canonicalRecordText(text: string): string {
   return out;
 }
 
+/** What a record must say its numbers are, word for word as Studio writes it. */
+const RECORD_UNITS = { time_steps_days: "days", burnup_mwd_per_tu: "MWd per tonne of initial heavy metal" } as const;
+
 export type ParsedDepletion = {
   recordId: string;
   timeStepsDays: number[];
@@ -102,6 +105,9 @@ export type ParsedDepletion = {
 export function parseDepletion(text: string): { ok: true; record: ParsedDepletion } | { ok: false; errors: TypedError[] } {
   const bad = (code: string, field: string, message: string) => ({ ok: false as const, errors: [err(code, field, message)] });
   if (Buffer.byteLength(text) > MAX_RECORD_BYTES) return bad("E_RECORD_INVALID", "", "the record is larger than 8 MiB");
+  // bytes that are not UTF-8 were turned into U+FFFD when the file was read: the text no longer says which bytes the file has, so the file hash
+  // pinned for it cannot be trusted to stand for this text
+  if (text.includes(String.fromCharCode(0xfffd))) return bad("E_RECORD_INVALID", "", "the record is not valid UTF-8 text");
   let doc: any;
   try {
     doc = JSON.parse(text);
@@ -124,6 +130,13 @@ export function parseDepletion(text: string): { ok: true; record: ParsedDepletio
   if (!Array.isArray(steps) || steps.length === 0 || !steps.every((x: unknown) => typeof x === "number" && Number.isFinite(x) && x > 0)) {
     return bad("E_RECORD_INVALID", "/time_steps_days", "time_steps_days must be a non-empty list of numbers above 0");
   }
+  // the times are summed to the end of each step: a sum that leaves the range of numbers would make every time inside it map to a wrong value
+  if (!Number.isFinite(steps.reduce((a: number, d: number) => a + d, 0))) return bad("E_RECORD_INVALID", "/time_steps_days", "the steps add up to more than a number can hold");
+  // the units are the record's own declaration: only the ones SEED converts from are accepted, never assumed
+  const declared = doc.provenance?.units;
+  if (declared?.time_steps_days !== RECORD_UNITS.time_steps_days || declared?.burnup_mwd_per_tu !== RECORD_UNITS.burnup_mwd_per_tu) {
+    return bad("E_RECORD_INVALID", "/provenance/units", `the record must declare time_steps_days as ${JSON.stringify(RECORD_UNITS.time_steps_days)} and burnup_mwd_per_tu as ${JSON.stringify(RECORD_UNITS.burnup_mwd_per_tu)}`);
+  }
   if (!Array.isArray(doc.regions) || doc.regions.length === 0) return bad("E_RECORD_INVALID", "/regions", "the record has no regions");
   const regions: ParsedDepletion["regions"] = [];
   for (const [n, r] of (doc.regions as any[]).entries()) {
@@ -132,6 +145,8 @@ export function parseDepletion(text: string): { ok: true; record: ParsedDepletio
     if (!Array.isArray(b) || b.length !== steps.length || !b.every((x: unknown) => typeof x === "number" && Number.isFinite(x) && x >= 0)) {
       return bad("E_RECORD_INVALID", `/regions/${n}/burnup_mwd_per_tu`, "burnup_mwd_per_tu must hold one number (0 or more) per time step");
     }
+    // burnup is cumulative: a value below the one before it would send a later transfer back to an earlier state
+    if (b.some((x: number, i: number) => i > 0 && x < b[i - 1])) return bad("E_RECORD_INVALID", `/regions/${n}/burnup_mwd_per_tu`, "burnup_mwd_per_tu is cumulative and must not decrease from one step to the next");
     regions.push({ name: r.name, burnupMwdPerTu: b });
   }
   if (new Set(regions.map((r) => r.name)).size !== regions.length) return bad("E_RECORD_INVALID", "/regions", "two regions have the same name");
