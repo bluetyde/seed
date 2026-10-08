@@ -20,6 +20,7 @@ export type PolicyStudy = { studyId: string; tier: Tier; budget: StudyBudget; pa
 export const OPERATION_RULES = {
   describe: "A0",
   validate: "A0",
+  query_model: "A0",
   read: "A0",
   collect: "A0",
   status: "A1",

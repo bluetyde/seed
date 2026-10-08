@@ -55,7 +55,7 @@ async function serve(handlers, openMessage) {
   try {
     if (!request || request.verb !== verb) return fail(typed("E_SCHEMA_INVALID", "/verb", "the request verb does not match the command"));
     if (verb === "open" && !handlers.open) return fail(typed("E_VERB_UNKNOWN", "/verb", openMessage || "this adapter does not open an editor"));
-    if (!["describe", "open", "validate", "run", "status", "cancel", "collect"].includes(verb) || typeof handlers[verb] !== "function") return fail(typed("E_VERB_UNKNOWN", "/verb", "unknown verb"));
+    if (!["describe", "open", "validate", "run", "status", "cancel", "collect", "query"].includes(verb) || typeof handlers[verb] !== "function") return fail(typed("E_VERB_UNKNOWN", "/verb", "unknown verb"));
     return await handlers[verb](request, root, reply, fail);
   } catch (err) {
     return fail(typed("E_INTERNAL", "", "adapter failure: " + (err && err.message)));

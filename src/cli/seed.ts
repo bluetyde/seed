@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import { runFromHostFile } from "../core/fileRunHost";
 import { runSweepFromHostFile } from "../core/sweepHost";
 import { addStudyNote } from "../core/studyNoteHost";
+import { queryFromHostFile } from "../core/queryHost";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { proposeConclusion } from "../core/conclusionDraft";
@@ -60,9 +61,9 @@ export async function runCli(
     },
   });
   const transferVerbs = ["transfer-propose", "transfer-status", "transfer-apply"];
-  if (argv.length !== 1 || !["run", "sweep", "note", "cancel", "report", "draft-conclusion", ...transferVerbs].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "sweep", "note", "query", "cancel", "report", "draft-conclusion", ...transferVerbs].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|sweep|note|cancel|report|draft-conclusion|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|sweep|note|query|cancel|report|draft-conclusion|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   const isTransfer = transferVerbs.includes(argv[0]!);
@@ -91,7 +92,9 @@ export async function runCli(
             ? await runSweepFromHostFile(hostConfig!, request)
             : argv[0] === "note"
               ? addStudyNote(hostConfig!, request)
-              : await runFromHostFile(hostConfig!, request);
+              : argv[0] === "query"
+                ? await queryFromHostFile(hostConfig!, request)
+                : await runFromHostFile(hostConfig!, request);
   return {
     code: !outcome.ok
       ? 2

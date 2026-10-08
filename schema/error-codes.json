@@ -98,5 +98,13 @@
   "E_EXISTS": {
     "severity": "error",
     "meaning": "target already exists"
+  },
+  "E_QUERY_INVALID": {
+    "severity": "error",
+    "meaning": "a model query is not a valid question (unknown operation, filter, unit or range)"
+  },
+  "E_QUERY_UNKNOWN_PART": {
+    "severity": "error",
+    "meaning": "a model query names a part the model does not have"
   }
 }
