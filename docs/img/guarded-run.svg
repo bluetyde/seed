@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" width="900" height="430" role="img" aria-labelledby="t d">
+  <title id="t">A guarded run</title>
+  <desc id="d">A request names only a registered case and a budget. The gate checks tier, budget, bounds, grants and pinned oracle evidence. The decision is written to the audit log before anything runs. The adapter runs the app, the outcome is written to the audit log and a run record is saved, a step is added to the study record, and a report later re-verifies the run from the audit log. A refused request is logged and nothing runs.</desc>
+  <style>
+    .bg { fill: #ffffff; stroke: #c9d1d9; }
+    .box { fill: #eef3fb; stroke: #4a6fa5; stroke-width: 1.5; }
+    .gate { fill: #fff4dc; stroke: #b7791f; stroke-width: 2; }
+    .log { fill: #e9f6ec; stroke: #2f855a; stroke-width: 1.5; }
+    .no { fill: #fde8e8; stroke: #c53030; stroke-width: 1.5; }
+    .t { font: 600 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1a202c; text-anchor: middle; }
+    .s { font: 12.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #2d3748; text-anchor: middle; }
+    .n { font: 700 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #4a5568; text-anchor: middle; }
+    .ar { stroke: #4a5568; stroke-width: 1.8; fill: none; marker-end: url(#h); }
+    .dash { stroke: #c53030; stroke-width: 1.6; fill: none; stroke-dasharray: 6 4; marker-end: url(#hr); }
+  </style>
+  <defs>
+    <marker id="h" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker>
+    <marker id="hr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c53030"/></marker>
+  </defs>
+  <rect class="bg" x="0.5" y="0.5" width="899" height="429" rx="10"/>
+
+  <!-- row 1 -->
+  <rect class="box" x="30" y="40" width="180" height="110" rx="8"/>
+  <text class="n" x="120" y="30">1</text>
+  <text class="t" x="120" y="68">Request</text>
+  <text class="s" x="120" y="92">a registered case</text><text class="s" x="120" y="110">and a budget; no paths,</text><text class="s" x="120" y="128">commands or settings</text>
+
+  <rect class="gate" x="250" y="40" width="190" height="110" rx="8"/>
+  <text class="n" x="345" y="30">2</text>
+  <text class="t" x="345" y="68">Gate</text>
+  <text class="s" x="345" y="92">tier, budget, bounds,</text><text class="s" x="345" y="110">grants, pinned oracle</text><text class="s" x="345" y="128">evidence, one at a time</text>
+
+  <rect class="log" x="480" y="40" width="180" height="110" rx="8"/>
+  <text class="n" x="570" y="30">3</text>
+  <text class="t" x="570" y="68">Decision logged</text>
+  <text class="s" x="570" y="92">written to the audit log</text><text class="s" x="570" y="110">before anything runs</text>
+
+  <rect class="box" x="700" y="40" width="170" height="110" rx="8"/>
+  <text class="n" x="785" y="30">4</text>
+  <text class="t" x="785" y="68">Adapter runs it</text>
+  <text class="s" x="785" y="92">the app does the</text><text class="s" x="785" y="110">calculation; its own</text><text class="s" x="785" y="128">checks stay its own</text>
+
+  <path class="ar" d="M210 95 H248"/><path class="ar" d="M440 95 H478"/><path class="ar" d="M660 95 H698"/>
+
+  <!-- refused -->
+  <rect class="no" x="250" y="205" width="190" height="62" rx="8"/>
+  <text class="t" x="345" y="231">Refused</text>
+  <text class="s" x="345" y="251">logged; nothing runs</text>
+  <path class="dash" d="M345 150 V203"/>
+
+  <!-- row 2 -->
+  <rect class="log" x="700" y="205" width="170" height="110" rx="8"/>
+  <text class="n" x="760" y="195">5</text>
+  <text class="t" x="785" y="233">Outcome logged</text>
+  <text class="s" x="785" y="257">run record saved, its</text><text class="s" x="785" y="275">files hashed</text>
+  <path class="ar" d="M785 150 V203"/>
+
+  <rect class="box" x="480" y="205" width="180" height="110" rx="8"/>
+  <text class="n" x="570" y="195">6</text>
+  <text class="t" x="570" y="233">Study record</text>
+  <text class="s" x="570" y="257">a chained step; notes</text><text class="s" x="570" y="275">and conclusions join it</text>
+  <path class="ar" d="M698 260 H662"/>
+
+  <rect class="box" x="250" y="335" width="410" height="68" rx="8"/>
+  <text class="n" x="455" y="325">7</text>
+  <text class="t" x="455" y="362">Report, whenever you want one</text>
+  <text class="s" x="455" y="383">re-verifies every run it cites against the audit log and the saved files</text>
+  <path class="ar" d="M570 315 V333"/>
+
+  <!-- note -->
+  <rect class="no" x="30" y="205" width="180" height="198" rx="8"/>
+  <text class="t" x="120" y="233">Only a person can</text>
+  <text class="s" x="120" y="257">accept a changed oracle</text><text class="s" x="120" y="275">approve a transfer</text><text class="s" x="120" y="293">clear a recorded failure</text><text class="s" x="120" y="323">An agent has no way to</text><text class="s" x="120" y="341">ask for these</text>
+</svg>
