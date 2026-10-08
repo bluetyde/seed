@@ -11,7 +11,7 @@
  *
  * The journal is written only by the human-only admin CLI; an agent-facing tool cannot append to it.
  */
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { sha256Hex } from "./canonical";
 import { appendAdmission, inside, readAdmissions, regularFile, safeChild } from "./hostFiles";
@@ -30,7 +30,7 @@ export type EvaluationEvent = {
   actor: { kind: string; name: string };
 };
 export type ClearanceEvent = { type: "clearance"; clears: string; reason: string; actor: { kind: string; name: string } };
-export type JournalBlock = { blocked: boolean; reason?: string; rowHash?: string };
+export type JournalBlock = { blocked: boolean; reason?: string; rowHash?: string; openFailures?: number };
 
 /** The folder of one adapter's journal, created on first use. Refuses links and anything that leaves the state folder. */
 export function journalRoot(state: string, adapterId: string, create = false): string | null {
@@ -69,21 +69,25 @@ export function journalBlock(state: string, adapterId: string, adapterVersion: s
   } catch {
     return { blocked: true, reason: "the oracle journal is unreadable or its hash chain is broken" };
   }
-  let open: { hash: string; reason: string } | null = null;
+  // Every failure that stands, oldest first: a clearance removes only the one it names, so clearing the newest never hides an older one.
+  const open = new Map<string, string>();
   for (const row of rows) {
     const e = row.event as Record<string, any> | null;
     if (e === null || typeof e !== "object") return { blocked: true, reason: "the oracle journal has a malformed row" };
     if (e.type === "evaluation") {
       if (e.adapterVersion !== adapterVersion || e.pins === undefined || comparePins(e.pins, currentPins).length > 0) continue;
-      if (e.verdict === "fail") open = { hash: row.hash, reason: `a recorded oracle evaluation failed (${row.time})` };
+      if (e.verdict === "fail") open.set(row.hash, `a recorded oracle evaluation failed (${row.time})`);
       // a pass does not clear a failure: only a human's clearance does
     } else if (e.type === "clearance") {
-      if (open !== null && e.clears === open.hash) open = null;
+      if (typeof e.clears === "string") open.delete(e.clears);
     } else {
       return { blocked: true, reason: "the oracle journal has a row of an unknown kind" };
     }
   }
-  return open === null ? { blocked: false } : { blocked: true, reason: open.reason, rowHash: open.hash };
+  if (open.size === 0) return { blocked: false };
+  // the newest standing failure is the one a clearance names first; the others stay until each is cleared
+  const [hash, reason] = [...open.entries()][open.size - 1]!;
+  return { blocked: true, reason, rowHash: hash, openFailures: open.size };
 }
 
 /** Appends one evaluation. A set that did not run says nothing and is refused. The caller has checked who may record. */
@@ -125,6 +129,8 @@ export function readResultFile(path: string, project: string): { result: SetResu
   if (typeof path !== "string" || !isAbsolute(path)) throw Error("resultFile must be an absolute path");
   regularFile(path);
   if (inside(project, realpathSync(path))) throw Error("an oracle result must live outside the project");
+  // a second name for the same file (a hard link) could be a file of the project under a path outside it
+  if (statSync(path).nlink > 1) throw Error("an oracle result must not be a linked file");
   const bytes = readFileSync(path);
   return { result: JSON.parse(bytes.toString("utf8")) as SetResult, sha256: sha256Hex(bytes) };
 }

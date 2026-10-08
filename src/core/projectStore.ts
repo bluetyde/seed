@@ -300,12 +300,23 @@ const BEAT_FILE = "beat";
  * heartbeat is written to a new file that must not exist yet and renamed over `beat`, so it never writes through a link that the project
  * put at `beat` (a rename replaces the link itself); reading a planted `beat` can only give a wrong time, never harm.
  */
-function lastSign(lockDir: string, acquiredMs: number): number {
-  try {
-    const beat = Number(readFileSync(join(lockDir, BEAT_FILE), "utf8").trim());
-    return Number.isFinite(beat) ? Math.max(acquiredMs, beat) : acquiredMs;
-  } catch {
-    return acquiredMs;
+function lastSign(lockDir: string, acquiredMs: number, nowMs: number, staleMs: number): number {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const beat = Number(readFileSync(join(lockDir, BEAT_FILE), "utf8").trim());
+      // The folder is the project's to plant: a time that lies further ahead than a lock may be left alone is no sign of life, or one
+      // planted file would keep a dead lock for ever.
+      if (!Number.isFinite(beat) || beat > nowMs + staleMs) return acquiredMs;
+      return Math.max(acquiredMs, beat);
+    } catch (err: unknown) {
+      // A beat that its holder is renaming over right now refuses a read for a moment (Windows): that is a live holder, not a stale lock.
+      if (TRANSIENT_CODES.has((err as NodeJS.ErrnoException).code ?? "")) {
+        if (attempt >= 5) return nowMs;
+        sleepSync(10);
+        continue;
+      }
+      return acquiredMs;
+    }
   }
 }
 
@@ -360,7 +371,7 @@ function judgeLock(
       return alive ? { state: "held" } : { state: "stale" };
     }
     const acquired = new Date(owner.acquiredAt).getTime();
-    return !Number.isNaN(acquired) && nowMs - lastSign(lockDir, acquired) > o.staleMs ? { state: "stale" } : { state: "held" };
+    return !Number.isNaN(acquired) && nowMs - lastSign(lockDir, acquired, nowMs, o.staleMs) > o.staleMs ? { state: "stale" } : { state: "held" };
   }
   try {
     return nowMs - statSync(lockDir).mtimeMs > o.graceMs ? { state: "stale" } : { state: "held" };
@@ -482,16 +493,27 @@ function acquireLock(dir: string, opts?: LockOptions): LockAcquireResult {
           // a missed beat is only a smaller margin; the next one or the release tells whether the lock is still ours
         }
       };
+      // The lock was taken over while its holder worked: the folder is left alone, but the holder is told, because what it did under the
+      // lock may have raced the writer that took over.
+      const lostAtRelease = (why: string): TypedError => ({
+        code: "E_PROJECT_LOCKED",
+        field: "",
+        message: `the project lock was no longer this writer's when it was released (${why}); what was done under it may have raced another writer, reopen the project and check it`,
+        source: "seed",
+      });
       const release = (): TypedError | null => {
+        let removing = false;
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
             const current = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown } | null;
-            if (current === null || current.token !== token) return null; // not ours any more: leave it alone
+            if (current === null || current.token !== token) return lostAtRelease("another owner holds it"); // leave it alone
+            removing = true;
             removeTree(lockDir);
             return null;
           } catch (err: unknown) {
             const code = (err as NodeJS.ErrnoException).code;
-            if (code === "ENOENT" || err instanceof SyntaxError) return null; // already gone, or replaced by another owner
+            // gone while this release was deleting it is our own doing; gone before is a takeover
+            if (code === "ENOENT" || err instanceof SyntaxError) return removing ? null : lostAtRelease("it is gone or unreadable");
             if (RELEASE_RETRY_CODES.has(code ?? "") && attempt < 3) {
               sleepSync(25);
               continue;
@@ -703,25 +725,22 @@ export function saveProject(
   }
   let result: StoreResult<Project>;
   try {
-    result = saveLocked(dir, manifest, expectedRevision, opts);
+    result = lockScope.run(acq.scope, () => saveLocked(dir, manifest, expectedRevision, opts, lockFence(dir)));
   } catch (err: unknown) {
     acq.release();
     throw err;
   }
   const releaseError = acq.release();
   if (releaseError !== null) {
-    return { ok: false, errors: [{ ...releaseError, message: (result.ok ? "the project was saved, but " : "") + releaseError.message }] };
+    // a save that already said the lock was lost says it best; any other refusal is kept and the release problem is added to it
+    if (!result.ok) return result.errors.some((e) => e.code === releaseError.code) ? result : { ok: false, errors: [...result.errors, releaseError] };
+    return { ok: false, errors: [{ ...releaseError, message: "the project was saved, but " + releaseError.message }] };
   }
   return result;
 }
 
-/** Saves while the caller already holds the writer lock (inside withProjectLock or withProjectLockAsync): one critical section for a file change and its revision. */
-export function saveProjectHeld(
-  dir: string,
-  manifest: Record<string, unknown>,
-  expectedRevision: string,
-  opts?: LockOptions & { now?: () => Date }
-): StoreResult<Project> {
+/** The check a save makes against the lock scope it runs in, before the write and again after it. */
+function lockFence(dir: string): (after?: boolean) => TypedError | null {
   const fence = (after = false): TypedError | null => {
     const held = lockScope.getStore();
     const lost = (why: string): TypedError => ({
@@ -740,7 +759,17 @@ export function saveProjectHeld(
       return lost("it is gone or unreadable");
     }
   };
-  return saveLocked(dir, manifest, expectedRevision, opts, fence);
+  return fence;
+}
+
+/** Saves while the caller already holds the writer lock (inside withProjectLock or withProjectLockAsync): one critical section for a file change and its revision. */
+export function saveProjectHeld(
+  dir: string,
+  manifest: Record<string, unknown>,
+  expectedRevision: string,
+  opts?: LockOptions & { now?: () => Date }
+): StoreResult<Project> {
+  return saveLocked(dir, manifest, expectedRevision, opts, lockFence(dir));
 }
 
 function saveLocked(
