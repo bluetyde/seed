@@ -6,7 +6,7 @@ const P = "src/core/studyReportHost.ts";
 const MUT = [
   [P, "if (!live.ok) throw Error(", "if (false) throw Error("],
   [P, "if (canonicalJson(bare) !== canonicalJson(header)) throw Error(", "if (false) throw Error("],
-  [P, "if (!cited.includes(runId)) throw Error(", "if (false) throw Error("],
+  [P, "useLive = cited.includes(runId);", "useLive = true;"],
   [P, "if (id === runId) continue;", ""],
   [P, "if (!/^r-[A-Za-z0-9_-]+$/.test(id)) throw Error(\"the live study record cites an invalid run id\");", ""],
   [P, "if (typeof otherRequest !== \"string\") throw Error(", "if (false) throw Error("],
