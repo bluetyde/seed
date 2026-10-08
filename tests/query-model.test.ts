@@ -321,6 +321,9 @@ describe.skipIf(!py)("the NODAL adapter's query reads a private copy of the byte
       "import json, os, sys, time",
       "model = sys.argv[1]",
       "time.sleep(float(os.environ.get('STUB_DELAY', '0')))",
+      "if os.environ.get('STUB_MODE') == 'refuse':",
+      "    print(json.dumps({'ok': False, 'errors': [{'code': 'E_QUERY_MODEL', 'field': '', 'message': 'not a NODAL model: ' + model}]}))",
+      "    sys.exit(2)",
       "if os.environ.get('STUB_MODE') == 'crash':",
       "    raise RuntimeError('boom at ' + model + ' in ' + os.getcwd())",
       "print(json.dumps({'ok': True, 'modelPath': model, 'content': open(model, encoding='utf-8').read()}))",
@@ -376,6 +379,15 @@ describe.skipIf(!py)("the NODAL adapter's query reads a private copy of the byte
     expect(r.errors[0].message).toMatch(/^the NODAL runner could not answer the query \(exit \d+\)$/);
     expect(JSON.stringify(r)).not.toContain(repo);
     expect(JSON.stringify(r)).not.toContain(root);
+  }, 60000);
+
+  it("a runner's own refusal that quotes the path it was given is passed on with the path replaced by 'the model'", async () => {
+    const text = '{"format":"x"}';
+    const root = project(text), repo = fakeRepo();
+    const r = await ask(root, repo, sha256Hex(text), { STUB_MODE: "refuse" });
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]).toMatchObject({ code: "E_SCHEMA_INVALID", message: "E_QUERY_MODEL: not a NODAL model: the model" });
+    expect(JSON.stringify(r)).not.toContain(require("node:os").tmpdir());
   }, 60000);
 });
 
