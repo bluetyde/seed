@@ -185,7 +185,7 @@ async function describe(reply, fail) {
       app: { id: "nodal", name: "NODAL Studio", version: String(d.engine.version) },
       engine: { name: String(d.engine.name), version: String(d.engine.version) },
       formats: [{ id: String(d.modelFormat.format), version: "0.1" }],
-      capabilities: [...(Array.isArray(d.capabilities) ? d.capabilities : []).map(String), "validate", "run", "cancel", "collect"],
+      capabilities: [...(Array.isArray(d.capabilities) ? d.capabilities : []).map(String), "validate", "run", "cancel", "collect", "query-model"],
       parameters: [{ id: "recordDt", type: "number", unit: "s", min: 0 }],
       // These are the quantity kinds a model output can have; a result carries the outputs the model names.
       quantities: Object.keys(d.quantities).sort().map((q) => ({ name: q, unit: String(d.quantities[q]), normalization: "none" })),
@@ -222,6 +222,44 @@ async function validate(request, root, reply, fail) {
   // The runner's refusal decides, not the codes it happens to list (a list of only W_ codes is still a refusal).
   if (refused && !problems.some((p) => p.code.startsWith("E_"))) problems.push(typed("E_APP_FAILED", "", "the runner refused the model; its reasons were only warnings", "app-content"));
   reply({ ok: true, result: { valid: !problems.some((p) => p.code.startsWith("E_")), problems } });
+}
+
+/**
+ * The `query` verb: NODAL's read-only `--query` mode (docs/model-query.md in the NODAL repo) over one model file. The query goes to the runner
+ * through a file in the operating system's temporary folder (never the project), the model is checked against the revision in the request first,
+ * and the answer is NODAL's own, unchanged. Nothing is run and nothing is written in the project.
+ */
+const QUERY_CODE = { E_QUERY_UNKNOWN_PART: "E_QUERY_UNKNOWN_PART", E_QUERY_MODEL: "E_SCHEMA_INVALID", E_NOT_FOUND: "E_NOT_FOUND" };
+async function query(request, root, reply, fail) {
+  const cfg = runnerConfig();
+  if (!cfg) return fail(setupError());
+  const art = insideRoot(root, request.artifact && request.artifact.path);
+  if (art.escaped) return fail(typed("E_PATH_TRAVERSAL", "/artifact/path", "the model path leaves the project"));
+  if (art.missing) return fail(typed("E_NOT_FOUND", "/artifact/path", "the model file does not exist"));
+  const bytes = fs.readFileSync(art.abs);
+  const modelSha256 = sha256(bytes);
+  if (modelSha256 !== request.artifact.revision.hash) return fail(typed("E_STALE_REVISION", "/artifact/revision/hash", "the model file does not match the revision named in the request"));
+  const tmp = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "seed-nodal-query-"));
+  try {
+    const queryFile = path.join(tmp, "query.json");
+    fs.writeFileSync(queryFile, JSON.stringify(request.query));
+    const res = await runPython(cfg, [art.abs, "--query", queryFile]);
+    const out = parseJson(res.stdout);
+    if (res.code === 0 && out && out.ok === true) {
+      const { ok: _ok, ...answer } = out;
+      return reply({ ok: true, result: { answer, modelSha256 } });
+    }
+    if (res.code === 2 && out && out.ok === false && Array.isArray(out.errors) && out.errors.length > 0) {
+      return fail(...out.errors.slice(0, 20).map((e) => {
+        const code = String((e && e.code) || "");
+        const mapped = QUERY_CODE[code] || (code.startsWith("E_QUERY_") ? "E_QUERY_INVALID" : "E_APP_FAILED");
+        return typed(mapped, String((e && e.field) || ""), (code ? code + ": " : "") + String((e && e.message) || "the runner refused the query").slice(0, 400), "app-content");
+      }));
+    }
+    return fail(appFailed("the NODAL runner could not answer the query", res));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 async function run(request, root, reply, fail) {
@@ -447,4 +485,4 @@ function collect(request, root, reply, fail) {
   reply({ ok: true, warnings, result: { jobId: request.jobId, lifecycle: "completed", resultsIndex: request.runDir + "/results.json", resultsSha256: sha256(text) } });
 }
 
-serve({ describe: (_request, _root, reply, fail) => describe(reply, fail), validate, run, status, cancel, collect }, "NODAL's editor is its web app; this headless adapter does not open it");
+serve({ describe: (_request, _root, reply, fail) => describe(reply, fail), validate, run, status, cancel, collect, query }, "NODAL's editor is its web app; this headless adapter does not open it");

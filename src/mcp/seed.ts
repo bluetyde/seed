@@ -5,6 +5,7 @@ import { supervisedRun } from "./supervisor";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { addStudyNote } from "../core/studyNoteHost";
+import { queryFromHostFile, MAX_QUERY_BYTES } from "../core/queryHost";
 import { applyTransferFromHost, proposeTransfer, transferStatus } from "../core/transferHost";
 
 export const MAX_MCP_BYTES = 1_048_576;
@@ -100,6 +101,35 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
         schema: "seed.mcp-reply/0.1",
         ...(await exportStudyReport(hostConfig, studyHeader, request)),
       };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !reply.ok,
+      };
+    },
+  );
+  server.registerTool(
+    "seed_query_model",
+    {
+      title: "Ask a registered model an exact question",
+      description:
+        `Ask a registered case's model a read-only, structured question (for NODAL: summary, list, connected, neighbors; see the adapter's query documentation). Only requestId, caseId and a query object are accepted: no path, actor or grant. The model file must still be the revision registered for the case. The answer is a fact about the model file, not a physical result, and carries the model's sha256 so a claim can cite exactly which model was asked. Nothing is run and no project file is written; every query is recorded in the host's query log before it is answered. The query is limited to ${MAX_QUERY_BYTES} bytes. An adapter that does not advertise the query-model capability refuses.`,
+      inputSchema: z
+        .object({
+          requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+          caseId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+          query: z.record(z.unknown()),
+        })
+        .strict(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...(await queryFromHostFile(hostConfig, request)) };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(reply) }],
         structuredContent: reply,

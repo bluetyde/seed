@@ -15,7 +15,8 @@
         "run",
         "status",
         "cancel",
-        "collect"
+        "collect",
+        "query"
       ]
     },
     "requestId": {
@@ -586,6 +587,36 @@
               },
               "resultsSha256": {
                 "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/sha256"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "verb": {
+            "const": "query"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "type": "object",
+            "required": ["answer", "modelSha256"],
+            "additionalProperties": false,
+            "properties": {
+              "answer": {
+                "type": "object"
+              },
+              "modelSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
               }
             }
           }
