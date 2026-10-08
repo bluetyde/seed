@@ -32,6 +32,7 @@ const {
   appFailed,
   sha256,
   argvOf,
+  hasArg,
   normPath,
   typed,
   jobState,
@@ -324,8 +325,7 @@ function ownsRunner(j, pid) {
   const bundle = bundlePath();
   const cl = commandLine(pid);
   if (!bundle || cl === null) return false;
-  const args = argvOf(cl).map(normPath);
-  return args.includes(normPath(bundle)) && args.includes("run") && args.includes(normPath(path.join(j.absRunDir, "native", "out")));
+  return hasArg(cl, bundle) && hasArg(cl, "run") && hasArg(cl, path.join(j.absRunDir, "native", "out"));
 }
 
 async function cancel(request, root, reply, fail) {
