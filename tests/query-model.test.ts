@@ -140,6 +140,13 @@ describe("query_model with a stub adapter: what the host checks", () => {
     expect(f.logRows()).toEqual([]);
   });
 
+  it("an adapter whose describe refuses is not asked to query, and its refusal is passed on", async () => {
+    process.env.QUERY_STUB_MODE = "describe-refuse";
+    const f = stubHost();
+    expect(errs(await f.ask({}))).toEqual(["E_SETUP_REQUIRED"]);
+    expect(f.logRows()).toEqual([]);
+  });
+
   it("an answer about another model than the one asked is refused, and the refusal is recorded", async () => {
     process.env.QUERY_STUB_MODE = "wrong-hash";
     const f = stubHost();
@@ -293,6 +300,24 @@ describe.skipIf(!haveNodal)("query_model against the real NODAL runner: the four
     const { ok: _ok, ...want } = JSON.parse(direct.stdout);
     expect(o.answer).toEqual(want);
     expect(readFileSync(f.model, "utf8")).toBe(drainModel(nodalRepo!)); // never changes the model
+  }, 120000);
+
+  it("the NODAL adapter checks the model itself, whoever calls it: a stale revision, a path that leaves the project and a missing file", async () => {
+    const f = nodal();
+    const ask = (artifact: Record<string, unknown>) => {
+      const r = spawnSync(process.execPath, [resolve(__dirname, "../adapters/nodal/cli.cjs"), "query"], {
+        input: JSON.stringify({ schema: "seed.adapter-request/0.1", verb: "query", requestId: "direct", actor: agent, artifact, query: { op: "summary" } }),
+        encoding: "utf8", env: { ...process.env, SEED_PROJECT_ROOT: f.project },
+      });
+      expect(r.status).toBe(0);
+      const reply = JSON.parse(r.stdout.trim().split(String.fromCharCode(10)).pop()!);
+      return reply.ok ? ["ok"] : reply.errors.map((e: any) => e.code);
+    };
+    const good = { path: "models/m/model.json", revision: { hash: f.hash, counter: 1 } };
+    expect(ask(good)).toEqual(["ok"]);
+    expect(ask({ ...good, revision: { hash: "f".repeat(64), counter: 1 } })).toEqual(["E_STALE_REVISION"]);
+    expect(ask({ path: "../outside.json", revision: good.revision })).toEqual(["E_PATH_TRAVERSAL"]);
+    expect(ask({ path: "models/m/none.json", revision: good.revision })).toEqual(["E_NOT_FOUND"]);
   }, 120000);
 
   it("a bad question is refused with SEED's typed code and recorded", async () => {
