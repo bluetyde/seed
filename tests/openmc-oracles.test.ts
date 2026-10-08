@@ -9,6 +9,7 @@ import { evaluateGate } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
+import { oracleRequestId } from "./helpers/oracleRequest";
 
 // OpenMC Studio's own oracle entries (oracles/seed in the OpenMC repository): analytic cases whose expected values come from formulas and from
 // cross sections read out of the nuclear data library (a void ball's track length, absorption and track length in a pure B-10 slab), with
@@ -80,7 +81,7 @@ async function observe(entry: OracleEntry, baseDir: string): Promise<Observed> {
     return first ? { kind: "refusal", code: first.code } : { kind: "verdict", verdict: "accepted" };
   }
   const mgr = new RunManager({ projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 200, callTimeoutMs: 180000 });
-  const out = await mgr.start({ requestId: "req-" + entry.oracleId, actor, artifact, inputs: entry.inputs, budget, settings: { project: projectPath, model: modelPath, threads: 1 } });
+  const out = await mgr.start({ requestId: oracleRequestId(entry.oracleId), actor, artifact, inputs: entry.inputs, budget, settings: { project: projectPath, model: modelPath, threads: 1 } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
   if (out.state !== "completed") throw new Error("run ended " + out.state);
   const index = JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8"));

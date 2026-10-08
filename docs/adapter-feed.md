@@ -85,3 +85,9 @@ A case may state limits (FEED `docs/temperature-limits.md`); FEED then reports o
 - **Quantity `temperature_limit_margin`** (K): the smallest margin over the rules that applied. Present only when at least one rule applied; a case without limits, or with none in force, has no such quantity. Each rule's own margin is in `extensions.feed.limits` (`id`, `verdict`, `marginK`, null when not in force) so an oracle entry can also pin a single rule from the check list.
 - A margin is not an integrity assessment: FEED computes no stress, and the note on the data file says so.
 - Values FEED would pin first: K-State hot element 639.4 K to the 1150 C rule; UT $4.40 pulse 325.7 K.
+
+## Oracle count while FEED merges its burnup oracles (2026-10-08)
+
+FEED's branch `claude/burnup-oracles` has **72 entries (46 good, 24 bad-input, 2 known-limit)**; main has 53 (34, 17, 2). The 53 are byte-identical in both. `tests/feed-oracles.test.ts` accepts exactly these two sets, so a silent addition or removal still fails it, and FEED can merge without breaking SEED's suite. Once FEED main has the 72, the 53 is dropped from the test. Run against a fresh clone of the branch (`SEED_FEED_REPO`, `npm run build`), the whole 72-entry set passes through the adapter with the real solver. The 19 new entries use only the generic quantities (`temperature_peak`, `temperature_surface`) and refusal codes, so no adapter change was needed.
+
+The test helper `tests/helpers/oracleRequest.ts` makes the request id of an oracle run: `req-<oracleId>`, or a hash of it when that would pass the 64-character id limit (one new FEED entry id is 62 characters). It is used by the FEED, NODAL, OpenMC, SNEED and RAFT oracle tests.
