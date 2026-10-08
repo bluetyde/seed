@@ -273,7 +273,7 @@ async function fixture(over: { tier?: "A0" | "A1" | "A2" | "A3" } = {}) {
   const dst = await appOracles(root, "dst", "dstapp");
   const config = (actor: TransferHostConfig["actor"]): TransferHostConfig => ({
     schema: "seed.transfer-host/0.1", projectRoot: project, stateRoot: state, actor, study: { studyId: "study-1", tier: over.tier ?? "A2", budget, parameters: [] },
-    apps: { dstapp: { ...dst, transfer: { command: process.execPath, args: [target], fields: [{ field: "burnup", accepts: [{ dimension: "burnup", normalization: "none" }] }] } } },
+    apps: { dstapp: { ...dst, transfer: { command: process.execPath, args: [target], fields: [{ field: "burnup", parameters: { region: "the record's region name", time: "days from the start of the record" }, accepts: [{ dimension: "burnup", normalization: "none" }] }] } } },
   } as unknown as TransferHostConfig);
   const agentFile = join(root, "agent-host.json"), humanFile = join(root, "human-host.json");
   saveTransferHostConfig(agentFile, config(agent));

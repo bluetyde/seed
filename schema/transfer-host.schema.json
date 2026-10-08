@@ -101,6 +101,7 @@
                   "required": ["field", "accepts"],
                   "properties": {
                     "field": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/id" },
+                    "parameters": { "type": "object" },
                     "accepts": {
                       "type": "array",
                       "minItems": 1,
