@@ -6,6 +6,7 @@
  * the one set of components a single grant must name. Pure: no file, no process, no network.
  */
 import {
+  compareVersions,
   eligible,
   resolveSelection,
   type ComponentError,
@@ -138,7 +139,9 @@ export function resolveChain(req: ChainRequest): ChainPlan | { ok: false; errors
   if (errors.length) return fail(errors);
 
   const allComponents = req.manifests.flatMap((m) => m.components.map((c) => ({ app: m.app, c })));
-  const installedHere = (app: string, id: string) => req.installed.some((i) => i.app === app && i.component === id);
+  // An installed component stands for the manifest's only if it is at least that version: an older one may not make the record being asked for.
+  const installedHere = (app: string, id: string, atLeast?: string) =>
+    req.installed.some((i) => i.app === app && i.component === id && (atLeast === undefined || compareVersions(i.version, atLeast) >= 0));
   const chain: ChainEdge[] = [];
   const edges = new Map<string, string[]>();
   let plans = new Map<string, ReturnType<typeof resolveSelection>>();
@@ -169,13 +172,13 @@ export function resolveChain(req: ChainRequest): ChainPlan | { ok: false; errors
         edges.set(me, (comp.dependsOn ?? []).map((d) => key(app, d.component)));
         for (const need of comp.consumes ?? []) {
           const candidates = allComponents.filter(({ c }) => (c.produces ?? []).some((q) => q.record === need.record && q.version >= need.minVersion && (need.maxVersion === undefined || q.version <= need.maxVersion)));
-          const usable = candidates.filter(({ app: a, c }) => eligible(c, req.platform, req.appVersions[a] ?? "0.0.0") === null || installedHere(a, c.id));
+          const usable = candidates.filter(({ app: a, c }) => eligible(c, req.platform, req.appVersions[a] ?? "0.0.0") === null || installedHere(a, c.id, c.version));
           const info = req.registry.kinds.find((k) => k.record === need.record);
           const done = (how: ChainEdge["how"], who: string) => {
             chain.push({ consumer: me, record: need.record, minVersion: need.minVersion, producer: who, how });
             edges.get(me)!.push(who);
           };
-          const inst = usable.find(({ app: a, c }) => installedHere(a, c.id));
+          const inst = usable.find(({ app: a, c }) => installedHere(a, c.id, c.version));
           if (inst) {
             done("installed", key(inst.app, inst.c.id));
             continue;

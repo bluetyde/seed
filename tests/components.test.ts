@@ -29,7 +29,9 @@ const linux: Platform = { os: "linux", arch: "x64" };
 const win: Platform = { os: "windows", arch: "x64", via: "wsl" };
 const rec = (component: string, version: string, over: Partial<Installed> = {}): Installed => ({
   app: "fakeapp", component, version, origin: "managed", location: `/seed/${component}/${version}`,
-  manifestSha256: "a".repeat(64), selectedByUser: false, installedAt: "2026-10-07T00:00:00Z", ...over
+  manifestSha256: "a".repeat(64), selectedByUser: false, installedAt: "2026-10-07T00:00:00Z",
+  // what the installer would have recorded: the artifact pins of the manifest it installed from
+  artifactSha256: manifest().components.find((c) => c.id === component)?.artifacts.map((a) => a.sha256) ?? [], ...over
 });
 const coreOnly = [rec("fakeapp-core", "1.2.0", { selectedByUser: true })];
 const codes = (r: { ok: boolean; errors?: { code: string }[] }) => (r.ok ? [] : r.errors!.map((e) => e.code));
@@ -387,5 +389,42 @@ describe("the install-state and process-owner records", () => {
     expect(validateProcessOwner({ ...owner(), endpoint: "http://example.com:80/" }).ok).toBe(false);
     expect(validateProcessOwner({ ...owner(), endpoint: "http://127.0.0.1.evil.example:80/" }).ok).toBe(false);
     expect(validateProcessOwner({ ...owner(), supervisor: "somebody" }).ok).toBe(false);
+  });
+});
+
+// Findings of the Codex review of batch 3 (components and packages, 2026-10-08), each shown by a test that fails without its fix.
+describe("review batch 3: components", () => {
+  it("an installed version whose artifact pins are not the catalog's now is not 'already there': it is planned as an update", () => {
+    const have = [...coreOnly, rec("shared-libs", "2.0.0"), rec("fake-cad", "0.3.0", { selectedByUser: true, artifactSha256: ["f".repeat(64)] })];
+    const r = resolveSelection({ manifest: manifest(), installed: have, select: ["fake-cad"], platform: linux, appVersion: "1.5.0" });
+    expect(r.ok && r.steps.find((s) => s.component === "fake-cad")).toMatchObject({ action: "update", from: "0.3.0", to: "0.3.0" });
+    expect(r.ok && r.steps.find((s) => s.component === "shared-libs")).toMatchObject({ action: "keep" });
+  });
+
+  it("a conflict declared by something installed counts although the selected component declares none", () => {
+    const m = raw();
+    for (const c of m.components) if (c.id === "fake-legacy") delete c.conflicts; // only fake-nodal names the conflict
+    const v = validateManifest(m);
+    if (!v.ok) throw new Error(JSON.stringify(v.errors));
+    const have = [...coreOnly, rec("shared-libs", "2.0.0"), rec("fake-nodal", "0.1.0", { selectedByUser: true })];
+    const r = resolveSelection({ manifest: v.manifest, installed: have, select: ["fake-legacy"], platform: linux, appVersion: "1.5.0" });
+    expect(codes(r)).toEqual(["E_COMPONENT_CONFLICT"]);
+  });
+
+  it("a platform that does not say how it runs (native or WSL) does not satisfy a component that needs WSL", () => {
+    const m = manifest();
+    const wslOnly = { ...m, components: m.components.map((c) => (c.id === "fakeapp-core" ? { ...c, platforms: [{ os: "windows" as const, arch: "x64" as const, via: "wsl" as const }] } : c)) };
+    expect(codes(resolveSelection({ manifest: wslOnly, installed: [], select: [], platform: { os: "windows", arch: "x64" }, appVersion: "1.5.0" }))).toEqual(["E_COMPONENT_PLATFORM"]);
+    expect(resolveSelection({ manifest: wslOnly, installed: [], select: [], platform: win, appVersion: "1.5.0" }).ok).toBe(true);
+  });
+
+  it("removing an add-on removes nothing that is unrelated to it, however unneeded that looks", () => {
+    const m = raw();
+    m.components.push({ ...structuredClone(m.components[1]), id: "lonely-lib", version: "1.0.0", capabilities: [] });
+    const v = validateManifest(m);
+    if (!v.ok) throw new Error(JSON.stringify(v.errors));
+    const have = [...coreOnly, rec("shared-libs", "2.0.0"), rec("lonely-lib", "1.0.0"), rec("fake-cad", "0.3.0", { selectedByUser: true })];
+    const r = planRemoval({ manifest: v.manifest, installed: have, remove: "fake-cad" });
+    expect(r.ok && r.steps).toEqual([{ component: "fake-cad", action: "remove" }, { component: "shared-libs", action: "remove" }]);
   });
 });
