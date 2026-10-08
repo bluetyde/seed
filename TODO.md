@@ -131,6 +131,8 @@ Virtual Reactor now has a merged headless entry point and app-owned oracle entri
 - [x] 2026-10-07 (`tests/structure.test.ts`, 19 tests, merged) Structural test: no file under `src/cli`, `src/mcp` or `src/main` imports `RunManager` (the guarded dispatcher and host control are the only builders in production code, checked by search on 2026-10-06; this makes it a failing test). Residual 1 of the E2 review, carried here by the user's decision of 2026-10-06.
 - [ ] E3 exit review: **[codex]**.
 
+- [x] 2026-10-08 **`query_model`** (research session Plan 1 step 4, decided by the user): a read-only SEED verb that asks a registered model exact questions: adapter verb `query` (capability `query-model`, additive to contract 0.1), gate operation `query_model` at A0, host entry `src/core/queryHost.ts` with a chained query log written before the answer, CLI `query`, MCP `seed_query_model`, NODAL adapter over NODAL's `--query`; [query-model.md](docs/query-model.md), decision D7; `tests/query-model.test.ts` 33 (the four plan questions against real NODAL, the stub adapter's failure modes, the adapter called directly); 28 mutants, all caught. Left: a query as a step of the study record; other apps' vocabularies.
+
 ## E4: reviewed transfer ([plan 08](docs/plans/08-transfers-and-pipelines.md))
 
 Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' own plans).

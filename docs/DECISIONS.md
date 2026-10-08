@@ -46,3 +46,11 @@ Design decisions with their reasons, newest last. A decision changes only by a n
 - **Decision:** no framework change now. The shell stays plain TypeScript and HTML. Decide when the Study and Report views are designed (E3).
 - **Why:** E0 to E2 add only a project and run list. The load worry (many jobs updating) is solved by a virtualized table and batched updates, not by the framework choice.
 - **Constraints already fixed:** the report is deterministic HTML generated from the study record and run graph, works offline, and includes data tables as text alternatives to charts; views and reports share one small SVG chart approach. If a framework is adopted, React or Preact with Vite is the leading candidate.
+
+## D7 (2026-10-08): A read-only `query_model` verb, as an additive adapter verb
+
+- **Decision (user, 2026-10-08):** a read-only SEED verb `query_model` answers exact questions about an app's model (first NODAL: which pipes are 3 inch, is A connected to B, counts by kind). It is **tier A0** (the gate operation `query_model`), takes only a registered case id and a structured query, and records every query that reaches the app in a host-side chained log before it answers.
+- **How, within the signed-off contract:** a new adapter verb `query`, offered only by adapters that list the capability `query-model`; v0.1 stays as it is (an adapter that does not know the verb never receives it), recorded here because it is the first verb added after the E0 sign-off. Adapter-style error codes need no registration (the core code list stays 25).
+- **Why not a mode of `validate`:** `validate` answers valid or invalid; a query answers with data, which needs its own reply shape and its own size limit.
+- **Not decided:** a query as a step of the study record; other apps' query vocabularies. Details: [query-model.md](query-model.md).
+
