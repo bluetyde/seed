@@ -33,10 +33,22 @@ The only agent-writable thing is a note: CLI `node dist/cli/seed.js note` or MCP
 
 ## Not done
 
-- **The report export still rebuilds its own steps** from the admission log. Switching it to read this record (so the report shows notes and every run of the study) is the next step; until then a note appears in the record and not yet in a report.
+- ~~The report export still rebuilds its own steps~~ **Done 2026-10-08**: see [the report reads the record](#the-report-reads-the-record) below.
 - **No reconciliation**: a step lost because an append failed is not backfilled from the admission log yet.
 - **Replay** (re-running a recorded run and comparing), **feeding comparisons into the report**, and **cache reuse as a step** ("reused from run X", [compare-and-cache.md](compare-and-cache.md)) are not built.
 - The oracle step is written once per evidence set (by key); a set that is replaced by another and later returns is not written a second time.
 - Limits: the record is one file (8 MB); a study that outgrows it needs a new study. Deleting the *last* rows cannot be told from a shorter record by the chain alone (as with the admission log); the project folder is the trust boundary.
 
 Mutations of this code: 33; 29 caught; 3 equivalent (a check the schema makes redundant, twice, and a branch the first branch makes unreachable); 1 untested (the length of the lock wait). `scripts/mutate-study-record.cjs`.
+
+## The report reads the record
+
+`exportStudyReport` ([studyReportHost.ts](../src/core/studyReportHost.ts)) now treats the live record as the study of the report. For the request it is given:
+
+- **A record exists**: its rows go into the report unchanged (the bundle's `study.jsonl` is byte for byte the verified record), so every note and every step shows. The record must pass its chain check, its header row must be the human header the host was given, and it must cite the run of the request; any of these failing is a refusal (`E_NOT_PERMITTED`) and nothing is saved. There is no silent fallback to a made-up study.
+- **Every run the record cites is in the report**, each proven from the audit log the way the run of the request is (a guarded admission, an allowing decision, an audited terminal outcome whose hash matches the saved run record, the oracle pins, the saved files). A cited run that cannot be proven refuses the whole report, because the report would otherwise say less than the record. A cited run must be the one bound to its own request.
+- **Bundle layout**: the run of the request keeps the single-run layout (`inputs/`, `outputs/`); every other cited run is under `runs/<runId>/inputs|outputs/`. `evidence.json` gains `liveRecord` (`rows`, `head`) and `otherRuns` (request, audit references, decision, outcome, run record, stale flag).
+- **No record** (the host had no header while the run happened): the report is built from the audit log as before (the three-step study of one request), and its `generatedBy` says single-case.
+- A saved bundle is immutable: exporting the same request again is refused, and a note added afterwards does not change the saved report; the next export (another request) has it.
+
+Tests: `tests/study-report-live.test.ts` (16). Mutations: `scripts/mutate-study-report.cjs`, 20; 12 caught at first and 2 more after tests were added (the stale mark, the run bound to its request); 6 left, none a gap in the new logic: the run-id pattern check (the record's schema already refuses a bad id), the request-id type check (a missing one is refused one line later), two race guards that re-read files at the end of the export, and the oracle-pin and export-gate checks carried over from the old code (the pins are also fixed by the host configuration comparison; the real-RAFT test covers the export path).
