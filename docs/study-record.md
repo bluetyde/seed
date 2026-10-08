@@ -25,6 +25,8 @@ A failed, interrupted or tripped run is a step like any other: the record never 
 
 **A step is written once.** Each step carries a short marker at the end of its reason, `(ref 3fa9c1d27be04a66)`, the first 16 hex digits of the hash of its key (the request id and what it records, or the note id and its content). A replay of the same request finds its markers and writes nothing; a step's own text cannot imitate another step's marker, because the marker is always appended last by the writer.
 
+**Every row of the record is chained** (hash and prev); a record whose rows carry none is refused, although the general log checker accepts an unchained log. A note may cite only a run of this study (its run record names the study), because the report later verifies every run the record cites. Reconciliation writes only requests audited under this study's present rules (tier, budget, parameters); the others are named in `skippedOtherPolicy` and stay in the audit log.
+
 **The record never changes a run.** It is derived from what the host has just audited. If appending fails (a damaged record, a header that does not match, a full file) the run's outcome is unchanged, the reason goes to the host's `diagnostics.jsonl` (stage `study-record`), and the admission log still holds everything. No header configured means no record and no diagnostic: it is simply not kept.
 
 ## What an agent may add: notes

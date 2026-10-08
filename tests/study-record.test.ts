@@ -489,3 +489,46 @@ describe("notes", () => {
     expect(f.rows().at(-1)!.reason).toContain("from the CLI");
   });
 });
+
+// Findings of the Codex review of batch 2 (study record, reconciliation, report, 2026-10-08), each shown by a test that fails without its fix.
+describe("review batch 2: notes and chains", () => {
+  const note = (file: string, over: Record<string, unknown> = {}) => addStudyNote(file, { noteId: "n1", text: "The second run looks off", ...over });
+
+  it("a note cannot cite a run of another study: it would be kept for good and the report could never verify it", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const out = (await runFromHostFile(f.hostFile, f.request("r1"))) as { runId: string };
+    const recordFile = join(f.project, "runs", out.runId, "run-record.json");
+    const doc = JSON.parse(readFileSync(recordFile, "utf8"));
+    doc.extensions["seed.dispatch"].studyId = "some-other-study";
+    writeFileSync(recordFile, JSON.stringify(doc));
+    const before = readFileSync(f.record, "utf8");
+    const refused = note(f.hostFile, { runs: [out.runId] });
+    expect(refused).toMatchObject({ ok: false });
+    expect((refused as { errors: { code: string; message: string }[] }).errors[0]).toMatchObject({ code: "E_NOT_FOUND" });
+    expect(readFileSync(f.record, "utf8")).toBe(before);
+  });
+
+  it("the same note again answers with the row of that note, not the last row of the record", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const first = note(f.hostFile) as { seq: number };
+    note(f.hostFile, { noteId: "n2", text: "A later thought" });
+    const again = note(f.hostFile) as { state: string; seq: number };
+    expect(again.state).toBe("already-recorded");
+    expect(again.seq).toBe(first.seq);
+    expect(f.rows()[again.seq]!.reason).toContain("The second run looks off");
+  });
+
+  it("a record whose rows carry no hashes is not the live record, even though the log checker lets an unchained log through", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    expect(note(f.hostFile)).toMatchObject({ ok: true });
+    const stripped = f.rows().map((r) => { const { hash: _h, prev: _p, ...rest } = r; return JSON.stringify(rest); }).join("\n") + "\n";
+    writeFileSync(f.record, stripped);
+    expect(verifyStudyLog(stripped.trim().split("\n"))).toEqual([]); // the general checker accepts it
+    const read = readStudyRecord(f.record);
+    expect(read.ok).toBe(false);
+    expect(note(f.hostFile, { noteId: "n3", text: "after" })).toMatchObject({ ok: false });
+  });
+});

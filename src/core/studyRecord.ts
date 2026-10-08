@@ -64,7 +64,12 @@ export function readStudyRecord(file: string): { ok: true; lines: string[]; rows
   const lines = text.slice(0, -1).split("\n");
   const problems = verifyStudyLog(lines);
   if (problems.length) return { ok: false, errors: problems };
-  return { ok: true, lines, rows: lines.map((l) => JSON.parse(l) as Record<string, any>) };
+  const rows = lines.map((l) => JSON.parse(l) as Record<string, any>);
+  // The log checker lets an unchained log through (a log a person wrote by hand has no hashes). This record is written only by SEED, and every
+  // row of it is chained: rows without hashes are not this record, whatever they say.
+  const unchained = rows.findIndex((r) => typeof r.hash !== "string" || (r.prev !== null && typeof r.prev !== "string") || (r.seq === 0) !== (r.prev === null));
+  if (unchained >= 0) return err("E_SCHEMA_INVALID", `row ${unchained + 1} of the study record is not chained (hash and prev)`);
+  return { ok: true, lines, rows };
 }
 
 const chain = (body: Record<string, unknown>, prev: string | null): string => {

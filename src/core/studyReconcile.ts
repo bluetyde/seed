@@ -10,7 +10,7 @@
  */
 import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { sha256Hex } from "./canonical";
+import { canonicalJson, sha256Hex } from "./canonical";
 import { validateHostConfiguration } from "./fileRunHost";
 import { inside, readAdmissions, readHostJson, regularFile, safeChild } from "./hostFiles";
 import { openProject } from "./projectStore";
@@ -46,6 +46,9 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
 
     const drafts: StepDraft[] = [];
     const unfinished: { requestId: string; why: string }[] = [];
+    const otherPolicy: string[] = [];
+    const policyOf = (s: { tier?: unknown; budget?: unknown; parameters?: unknown } | undefined) => canonicalJson({ tier: s?.tier, budget: s?.budget, parameters: s?.parameters });
+    const myPolicy = policyOf(c.study);
     let requests = 0;
     const requestRows = rows.filter((r) => (r.event as { phase?: unknown }).phase === "request");
     for (const [i, row] of requestRows.entries()) {
@@ -55,6 +58,12 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
       if (cfg?.study?.studyId !== c.study.studyId) continue;
       const requestId = ev.event?.request?.requestId, caseId = ev.event?.request?.caseId;
       if (typeof requestId !== "string" || typeof caseId !== "string" || typeof cfg?.oracles?.evidenceSha256 !== "string") continue;
+      // The same study id under other rules (tier, budget, parameters) is not this study's record: the report would refuse those runs, so they
+      // are named and left in the audit log.
+      if (policyOf(cfg.study as never) !== myPolicy) {
+        otherPolicy.push(requestId);
+        continue;
+      }
       requests++;
       const next = requestRows[i + 1]?.seq ?? Infinity;
       const attempt = rows.filter((r) => r.seq >= row.seq && r.seq < next && (r.event as { configHash?: unknown }).configHash === ev.configHash);
@@ -89,8 +98,10 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
     const recordFile = studyRecordFile(projectRoot, (project.value.manifest.folders as { studies: string }).studies, c.study.studyId, !dryRun);
     const existing = readStudyRecord(recordFile);
     if (!existing.ok) return fail(existing.errors.map((e) => e.message).join("; "));
-    const missing = drafts.filter((d) => !existing.rows.some((r) => typeof r.reason === "string" && r.reason.endsWith(refMarker(d.key))));
-    const summary = { requestsScanned: requests, stepsFromLog: drafts.length, stepsMissing: missing.length, unfinished };
+    // one request can be audited twice (a replay): its steps are counted once
+    const seen = new Set<string>();
+    const missing = drafts.filter((d) => !existing.rows.some((r) => typeof r.reason === "string" && r.reason.endsWith(refMarker(d.key))) && !seen.has(d.key) && !!seen.add(d.key));
+    const summary = { requestsScanned: requests, stepsFromLog: drafts.length, stepsMissing: missing.length, unfinished, ...(otherPolicy.length ? { skippedOtherPolicy: otherPolicy } : {}) };
     if (dryRun) return { ok: true, state: "dry-run", ...summary, would: missing.map((d) => ({ key: d.key, action: d.action, runs: d.runs ?? [] })) };
     if (missing.length === 0) return { ok: true, state: "nothing-to-do", ...summary, appended: 0 };
     const r = appendStudySteps(recordFile, header, missing, projectRoot);

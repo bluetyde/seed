@@ -10,7 +10,7 @@ import { validateHostConfiguration } from "./fileRunHost";
 import { inside, readHostJson, regularFile, safeChild } from "./hostFiles";
 import { evaluateGate } from "./policy";
 import { openProject } from "./projectStore";
-import { appendStudySteps, studyRecordFile } from "./studyRecord";
+import { appendStudySteps, readStudyRecord, refMarker, studyRecordFile } from "./studyRecord";
 import { loadLiveHeader } from "./studyRecordHost";
 
 type Outcome = { ok: true; state: string; seq?: number } | { ok: false; errors: { code: string; field: string; message: string; source: "seed" }[] };
@@ -46,6 +46,14 @@ export function addStudyNote(file: string, request: unknown): Outcome {
       if (!existsSync(safeChild(runsRoot, id, true)) || !existsSync(safeChild(safeChild(runsRoot, id, true), "run-record.json"))) {
         return fail("E_NOT_FOUND", `run ${id} is not a run of this project`, "/runs");
       }
+      // a note is kept for good and the report later verifies every run the record cites: a run of another study could never be verified here
+      let dispatch: { studyId?: unknown } | undefined;
+      try {
+        dispatch = readHostJson(safeChild(safeChild(runsRoot, id, true), "run-record.json"))?.extensions?.["seed.dispatch"];
+      } catch {
+        dispatch = undefined;
+      }
+      if (dispatch?.studyId !== c.study.studyId) return fail("E_NOT_FOUND", `run ${id} is not a run of this study`, "/runs");
     }
     const key = `note:${r.noteId}:${sha256Hex(JSON.stringify([r.text, runs]))}`;
     const out = appendStudySteps(
@@ -55,7 +63,10 @@ export function addStudyNote(file: string, request: unknown): Outcome {
       projectRoot
     );
     if (!out.ok) return { ok: false, errors: out.errors.map((e) => ({ ...e, source: "seed" as const })) };
-    return { ok: true, state: out.appended > 0 ? "note-added" : "already-recorded", seq: out.rows - 1 };
+    // the row of this note: the last one when it was just written, the earlier one when the same note was recorded before
+    const after = readStudyRecord(studyRecordFile(projectRoot, folders.studies, c.study.studyId));
+    const mine = after.ok ? after.rows.findIndex((row) => typeof row.reason === "string" && row.reason.endsWith(refMarker(key))) : -1;
+    return { ok: true, state: out.appended > 0 ? "note-added" : "already-recorded", seq: mine >= 0 ? mine : out.rows - 1 };
   } catch (e) {
     return fail("E_SETUP_REQUIRED", e instanceof Error ? e.message : "note failed");
   }

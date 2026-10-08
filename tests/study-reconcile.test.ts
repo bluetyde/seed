@@ -333,3 +333,31 @@ describe("the admin verb", () => {
     expect((await runCli(["reconcile-study"], Readable.from(["{}"]), "/nonexistent")).code).toBe(2);
   });
 });
+
+// Findings of the Codex review of batch 2 (2026-10-08), each shown by a test that fails without its fix.
+describe("review batch 2: reconciliation", () => {
+  it("a request audited twice (a replay) is counted once: the dry run does not promise steps the append would skip", async () => {
+    const f = await setup();
+    await runFromHostFile(f.hostFile, f.request("r1"));
+    await runFromHostFile(f.hostFile, f.request("r1"));
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const dry = ok(f.reconcile(true));
+    const real = ok(f.reconcile());
+    expect(dry.stepsMissing).toBe(dry.would.length);
+    expect(dry.stepsMissing).toBe(real.appended);
+    expect(new Set(dry.would.map((w: any) => w.key)).size).toBe(dry.would.length);
+  });
+
+  it("runs made under other study rules (same study id, another budget) are named and left in the audit log, not written under the current header", async () => {
+    const f = await setup();
+    await runFromHostFile(f.hostFile, f.request("r1"));
+    const budget = { ...f.budget, maxCores: 2 };
+    const changed: HostConfiguration = { ...f.config, actor: human, study: { ...f.config.study, budget } };
+    saveHostConfiguration(f.adminFile, changed);
+    writeHostJson(f.headerFile, { ...f.header, budget });
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const r = ok(f.reconcile());
+    expect(r).toMatchObject({ state: "nothing-to-do", requestsScanned: 0, stepsMissing: 0, skippedOtherPolicy: ["r1"] });
+    expect(f.rows()).toEqual([]);
+  });
+});
