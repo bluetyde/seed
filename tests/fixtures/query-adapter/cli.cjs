@@ -21,6 +21,7 @@ process.stdin.on("end", () => {
   const root = process.env.SEED_PROJECT_ROOT || process.cwd();
   const mode = process.env.QUERY_STUB_MODE || "ok";
   const out = (doc) => process.stdout.write(JSON.stringify({ schema: "seed.adapter-reply/0.1", verb, requestId: req.requestId, errors: [], warnings: [], ...doc }) + "\n");
+  if (verb === "describe" && mode === "describe-garbage") return process.stdout.write("this is not a reply" + String.fromCharCode(10));
   if (verb === "describe" && mode === "describe-refuse") return out({ ok: false, errors: [{ code: "E_SETUP_REQUIRED", field: "", message: "the app is not set up", source: "seed" }] });
   if (verb === "describe") {
     return out({

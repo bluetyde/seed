@@ -147,6 +147,15 @@ describe("query_model with a stub adapter: what the host checks", () => {
     expect(f.logRows()).toEqual([]);
   });
 
+  it("an adapter that answers describe with something that is not a reply is refused with the transport's reason, not as an internal failure", async () => {
+    process.env.QUERY_STUB_MODE = "describe-garbage";
+    const f = stubHost();
+    const o: any = await f.ask({});
+    expect(o.ok).toBe(false);
+    expect(o.errors.map((e: any) => e.code)).not.toContain("E_INTERNAL");
+    expect(f.logRows()).toEqual([]);
+  });
+
   it("an answer about another model than the one asked is refused, and the refusal is recorded", async () => {
     process.env.QUERY_STUB_MODE = "wrong-hash";
     const f = stubHost();
