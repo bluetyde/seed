@@ -321,3 +321,48 @@ describe("a record that cannot be trusted stops the export, and nothing is saved
     expect((await f.exportReport("r1") as any).ok).toBe(true); // the record is unchanged and still good
   });
 });
+
+// Option C (decided 2026-10-08): a run is verified against the configuration it was admitted under; the present one may differ from it only in
+// the other registered cases and the sweeps.
+describe("a host configuration that changes during the study", () => {
+  const refused = async (f: Awaited<ReturnType<typeof fixture>>, id: string) => {
+    const r: any = await f.exportReport(id);
+    expect(r.ok).toBe(false);
+    expect(f.bundleDirs()).toEqual([]);
+    return r.errors.map((e: any) => e.message).join("; ") as string;
+  };
+  const edit = (f: Awaited<ReturnType<typeof fixture>>, change: (c: HostConfiguration) => HostConfiguration) => {
+    const now = JSON.parse(read(f.hostFile)) as HostConfiguration;
+    saveHostConfiguration(f.hostFile, change(now));
+  };
+
+  it("adding another case does not unprove the runs before it: both runs are in the report", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const r1 = await f.run("r1");
+    edit(f, (c) => ({ ...c, cases: { ...c.cases, other: c.cases.approved! } }));
+    const r2 = await f.run("r2");
+    const r: any = await f.exportReport("r2");
+    expect(r).toMatchObject({ ok: true, runId: r2 });
+    const evidence = JSON.parse(read(join(saved(f.project, r).dir, "evidence.json")));
+    expect(evidence.otherRuns.map((o: any) => [o.requestId, o.runId])).toEqual([["r1", r1]]);
+  });
+
+  it("changing the run's own case still unproves it", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    await f.run("r1");
+    edit(f, (c) => ({ ...c, cases: { ...c.cases, approved: { ...c.cases.approved!, settings: { scenario: "success", delayMs: 20 } } } }));
+    await f.run("r2");
+    expect(await refused(f, "r2")).toMatch(/no guarded admission/);
+  });
+
+  it("changing who acts (or the runtime, the oracle evidence, the study rules) still unproves the runs before it", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    await f.run("r1");
+    edit(f, (c) => ({ ...c, actor: { kind: "agent", name: "another-bot", model: "fixture" } }));
+    await f.run("r2");
+    expect(await refused(f, "r2")).toMatch(/no guarded admission/);
+  });
+});

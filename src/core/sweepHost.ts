@@ -141,7 +141,9 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
         { sweep: { sweepId, index: results.indexOf(row) + 1, count: results.length, values: row.values } }
       );
       if (!outcome.ok) {
-        row.state = "refused";
+        // an error that carries a run id is a calculation that ran and whose record could not be completed: it is not a refusal
+        row.state = typeof outcome.runId === "string" ? "ran-unrecorded" : "refused";
+        if (typeof outcome.runId === "string") row.runId = outcome.runId;
         row.errors = outcome.errors;
         stoppedAt = { caseId: row.caseId, reason: outcome.errors[0]?.message ?? "refused" };
         break;
@@ -154,8 +156,14 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
       }
     }
     const complete = stoppedAt === undefined;
-    note({ phase: "finished", complete, ...(stoppedAt ? { stoppedAt } : {}), results: results.map((x) => ({ caseId: x.caseId, state: x.state, runId: x.runId })) });
-    return { ok: true, sweepId, requestId, results, complete, ...(stoppedAt ? { stoppedAt } : {}) };
+    // The cases have run by now: a sweep log that cannot take its closing row must not turn them into a setup failure with no run ids.
+    let recordingError: string | undefined;
+    try {
+      note({ phase: "finished", complete, ...(stoppedAt ? { stoppedAt } : {}), results: results.map((x) => ({ caseId: x.caseId, state: x.state, runId: x.runId })) });
+    } catch (e) {
+      recordingError = "the sweep ran but its closing row could not be written to the sweep log: " + (e instanceof Error ? e.message : "write failed");
+    }
+    return { ok: true, sweepId, requestId, results, complete, ...(stoppedAt ? { stoppedAt } : {}), ...(recordingError ? { recordingError } : {}) };
   } catch (e) {
     const message = e instanceof Error ? e.message : "sweep setup failed";
     return refusal(message, "E_SETUP_REQUIRED");

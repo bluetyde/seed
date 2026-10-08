@@ -465,3 +465,15 @@ describe.skipIf(!haveNodal)("query_model against the real NODAL runner: the four
     expect(o.errors[0].code).toBe("E_SCHEMA_INVALID");
   }, 120000);
 });
+
+describe("review batch 1: the adapter is run only as approved", () => {
+  it("a runtime file that changed since the host approved it is not run for a query, and nothing is recorded", async () => {
+    const f = stubHost();
+    expect(errs(await f.ask({ op: "summary" }))).toEqual([]);
+    writeFileSync(join(f.root, "dummy.json"), "{ }");
+    const o: any = await f.ask({ op: "summary" }, { requestId: "q2" });
+    expect(errs(o)).toEqual(["E_NOT_PERMITTED"]);
+    expect(o.errors[0].message).toMatch(/runtime bundle changed/);
+    expect(f.logRows()).toHaveLength(1); // only the first query
+  });
+});

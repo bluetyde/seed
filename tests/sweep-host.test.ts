@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { canonicalJson, sha256Hex } from "../src/core/canonical";
 import { allCases, runFromHostFile, saveHostConfiguration, validateHostConfiguration, type HostConfiguration } from "../src/core/fileRunHost";
 import { writeHostJson } from "../src/core/hostFiles";
@@ -10,8 +10,33 @@ import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/o
 import { createProject } from "../src/core/projectStore";
 import { runSweepFromHostFile } from "../src/core/sweepHost";
 
+// Switches for the review-batch-1 tests below: every other test runs the real code (both mocks pass everything through while a switch is off).
+const faults = vi.hoisted(() => ({ failFinishedRow: false, ranButUnrecorded: false }));
+vi.mock("../src/core/hostFiles", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../src/core/hostFiles")>();
+  return {
+    ...m,
+    appendSweepRecord: (state: string, event: any) => {
+      if (faults.failFinishedRow && event?.phase === "finished") throw Error("no space left on device");
+      return m.appendSweepRecord(state, event);
+    },
+  };
+});
+vi.mock("../src/core/fileRunHost", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../src/core/fileRunHost")>();
+  return {
+    ...m,
+    runFromHostFile: async (...a: Parameters<typeof m.runFromHostFile>) => {
+      if (faults.ranButUnrecorded) return { ok: false as const, errors: [{ code: "E_INTERNAL", field: "", message: "the outcome could not be audited", source: "seed" as const }], runId: "r-ran" };
+      return m.runFromHostFile(...a);
+    },
+  };
+});
+
 const dirs: string[] = [];
 afterEach(() => {
+  faults.failFinishedRow = false;
+  faults.ranButUnrecorded = false;
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -301,5 +326,28 @@ describe("the command line", () => {
   it("the other verbs keep their exit codes: a completed run exits 0", async () => {
     const f = await fixture();
     expect(cli(f.file, { requestId: "c1", caseId: "approved", budget }, "run").status).toBe(0);
+  });
+});
+
+// Findings of the Codex review of batch 1 (2026-10-08), each shown by a test that fails without its fix.
+describe("review batch 1: sweeps", () => {
+  it("a case that ran but whose outcome could not be audited keeps its run id and is not called a refusal", async () => {
+    const f = await fixture();
+    faults.ranButUnrecorded = true;
+    const r = await runSweepFromHostFile(f.file, f.request);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.results[0]).toMatchObject({ state: "ran-unrecorded", runId: "r-ran" });
+    expect(r.results.slice(1).map((x) => x.state)).toEqual(["not-started", "not-started"]);
+  });
+
+  it("when the closing row cannot be written the finished cases are still returned, with the recording error named", async () => {
+    const f = await fixture();
+    faults.failFinishedRow = true;
+    const r: any = await runSweepFromHostFile(f.file, f.request);
+    expect(r.ok).toBe(true);
+    expect(r.complete).toBe(true);
+    expect(r.results.every((x: any) => typeof x.runId === "string")).toBe(true);
+    expect(r.recordingError).toMatch(/closing row could not be written.*no space left/);
   });
 });

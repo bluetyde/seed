@@ -70,6 +70,11 @@ export async function queryFromHostFile(file: string, request: unknown): Promise
     );
     if (!decision.allow) return { ok: false, errors: decision.errors };
 
+    // The adapter is run only as approved: the same check as before a calculation.
+    const runtimeFile = realpathSync(c.runtime.path);
+    regularFile(runtimeFile);
+    if (sha256Hex(readFileSync(runtimeFile)) !== c.runtime.sha256) return fail("E_NOT_PERMITTED", "runtime bundle changed since host approval");
+
     const described = await callAdapter(
       c.adapter,
       { schema: "seed.adapter-request/0.1", verb: "describe", requestId: "query-describe", actor: c.actor },
