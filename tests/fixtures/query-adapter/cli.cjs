@@ -4,6 +4,7 @@
 //   no-capability describe does not advertise query-model
 //   wrong-hash    answers about another model
 //   mutate        changes the model file while it "runs"
+//   remove        deletes the model file while it "runs"
 //   big           answers with more than a megabyte
 //   refuse        refuses with a typed code
 //   silent        refuses with no reason
@@ -42,6 +43,7 @@ process.stdin.on("end", () => {
   const bytes = fs.readFileSync(file);
   const sha = crypto.createHash("sha256").update(bytes).digest("hex");
   if (mode === "mutate") fs.writeFileSync(file, Buffer.concat([bytes, Buffer.from(" ")]));
+  if (mode === "remove") fs.unlinkSync(file);
   if (mode === "refuse") return out({ ok: false, errors: [{ code: "E_QUERY_INVALID", field: "/query/op", message: "E_QUERY_UNKNOWN_OP: no such op", source: "app-content" }] });
   if (mode === "silent") return out({ ok: false, errors: [] });
   if (mode === "big") return out({ ok: true, result: { answer: { filler: "x".repeat(1020000) }, modelSha256: sha } });

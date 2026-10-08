@@ -56,7 +56,12 @@ export async function queryFromHostFile(file: string, request: unknown): Promise
       regularFile(abs);
       return sha256Hex(readFileSync(abs));
     };
-    const before = readModel();
+    let before: string;
+    try {
+      before = readModel();
+    } catch {
+      return fail("E_NOT_FOUND", "the model file of this case cannot be read", "/caseId");
+    }
     if (before !== artifact.revision.hash) return fail("E_STALE_REVISION", "the model file is not the revision registered for this case", "/caseId");
 
     const decision = evaluateGate(
@@ -90,7 +95,16 @@ export async function queryFromHostFile(file: string, request: unknown): Promise
       else result = { ok: true, answer: reply.result.answer, modelSha256: reply.result.modelSha256 };
     }
     // A model that changed while it was asked is not answered, however the adapter replied.
-    if (result.ok && readModel() !== before) result = { ok: false, errors: [{ code: "E_STALE_REVISION", field: "/caseId", message: "the model file changed while the query ran", source: "seed" }] };
+    // A file that can no longer be read is the same refusal, and it is recorded like any other outcome after the adapter ran.
+    if (result.ok) {
+      let after: string | null;
+      try {
+        after = readModel();
+      } catch {
+        after = null;
+      }
+      if (after !== before) result = { ok: false, errors: [{ code: "E_STALE_REVISION", field: "/caseId", message: after === null ? "the model file could not be read after the query ran" : "the model file changed while the query ran", source: "seed" }] };
+    }
 
     // No answer without a record: the question, the model and the answer's hash go to the host's own chained query log first.
     const logRoot = safeChild(state, "queries", true);
@@ -118,7 +132,10 @@ export async function queryFromHostFile(file: string, request: unknown): Promise
     if (!result.ok) return result;
     return { ok: true, caseId, modelSha256: result.modelSha256, answer: result.answer, receipt: { seq: logged.value.seq, hash: logged.value.hash } };
   } catch (e) {
+    // An operating-system error (ENOENT and the like) names a path of this machine: the client gets a fixed sentence. Our own messages and codes pass.
     const code = (e as { code?: unknown })?.code;
-    return fail(typeof code === "string" && /^E_[A-Z_]+$/.test(code) ? code : "E_INTERNAL", e instanceof Error ? e.message : "query failed");
+    const ours = typeof code === "string" && /^E_[A-Z_]+$/.test(code);
+    const system = typeof code === "string" && !ours;
+    return fail(ours ? code : "E_INTERNAL", e instanceof Error && !system ? e.message : "the query could not be completed");
   }
 }
