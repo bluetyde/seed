@@ -220,6 +220,39 @@ describe("what is not written", () => {
     expect(r.appended).toBe(3); // only r1
   });
 
+  it("an allowed request that never finished does not take a later request's outcome, nor a row of another host configuration", async () => {
+    const f = await setup();
+    await runFromHostFile(f.hostFile, f.request("r1"));
+    const log = readAdmissions(f.engine);
+    const request = log.find((l: any) => l.event.phase === "request")! as any;
+    const decision = log.find((l: any) => l.event.phase === "decision")! as any;
+    appendAdmission(f.engine, { ...request.event, event: { ...request.event.event, request: { ...request.event.event.request, requestId: "lost" } } });
+    appendAdmission(f.engine, { ...decision.event, event: { ...decision.event.event, requestId: "lost" } });
+    appendAdmission(f.engine, { phase: "outcome", actor: request.event.actor, projectId: request.event.projectId, configHash: "another-host-configuration", event: { ok: true, runId: "r-foreign", state: "completed" } });
+    await runFromHostFile(f.hostFile, f.request("r2")); // a later request with its own outcome
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const r = ok(f.reconcile());
+    expect(r.unfinished).toEqual([{ requestId: "lost", why: "allowed, but no outcome was audited" }]);
+    const runs = f.rows().flatMap((x) => x.runs ?? []);
+    expect(runs).not.toContain("r-foreign");
+    expect(f.rows().filter((x) => x.action === "run")).toHaveLength(2); // r1 and r2 only
+  });
+
+  it("rows of another project in the shared engine log are not scanned", async () => {
+    const f = await setup();
+    await runFromHostFile(f.hostFile, f.request("r1"));
+    const log = readAdmissions(f.engine);
+    for (const phase of ["request", "decision", "outcome"]) {
+      const row = log.find((l: any) => l.event.phase === phase)! as any;
+      const event = phase === "request" ? { ...row.event.event, request: { ...row.event.event.request, requestId: "foreign" } } : phase === "decision" ? { ...row.event.event, requestId: "foreign" } : { ...row.event.event, runId: "r-foreign-project" };
+      appendAdmission(f.engine, { ...row.event, projectId: "someone-else's-project", event });
+    }
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const r = ok(f.reconcile());
+    expect(r.requestsScanned).toBe(1);
+    expect(f.rows().flatMap((x) => x.runs ?? [])).not.toContain("r-foreign-project");
+  });
+
   it("a request of another study is not scanned", async () => {
     const f = await setup();
     await runFromHostFile(f.hostFile, f.request("r1"));
