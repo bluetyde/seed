@@ -221,6 +221,36 @@ describe("with a live record the report is the record's study", () => {
   });
 });
 
+describe("a record that does not cite the run of the request", () => {
+  it("leaves the report a single-case one, built from the audit log, and the evidence says the record did not cite it", async () => {
+    const f = await fixture();
+    const r1 = await f.run("r1"); // made before the host had a header: not in the record
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    await f.run("r2");
+    f.note("n", "A note about the other run OTHERRUNNOTE");
+    const r: any = await f.exportReport("r1");
+    expect(r).toMatchObject({ ok: true, runId: r1 });
+    const s = saved(f.project, r);
+    expect(s.html).toContain("single-case");
+    expect(s.html).not.toContain("OTHERRUNNOTE");
+    expect(read(join(s.dir, "study.jsonl")).trim().split("\n")).toHaveLength(4);
+    const evidence = JSON.parse(read(join(s.dir, "evidence.json")));
+    expect(evidence.liveRecord).toMatchObject({ rows: 5, citesThisRun: false });
+    expect(evidence.otherRuns).toBeUndefined();
+  });
+
+  it("still refuses when that record has a broken chain", async () => {
+    const f = await fixture();
+    await f.run("r1");
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    await f.run("r2");
+    writeFileSync(f.record, read(f.record).replace('"action":"note"', '"action":"edit"'));
+    const r: any = await f.exportReport("r1");
+    expect(r.ok).toBe(false);
+    expect(f.bundleDirs()).toEqual([]);
+  });
+});
+
 describe("a record that cannot be trusted stops the export, and nothing is saved", () => {
   const refused = async (f: Awaited<ReturnType<typeof fixture>>, id: string) => {
     const r: any = await f.exportReport(id);
@@ -250,14 +280,6 @@ describe("a record that cannot be trusted stops the export, and nothing is saved
     writeHostJson(f.headerFile, other);
     const msg = await refused(f, "r1");
     expect(msg.length).toBeGreaterThan(0);
-  });
-
-  it("a record that does not cite the run of the request (the run was made before the study had a header)", async () => {
-    const f = await fixture();
-    await f.run("r1"); // no header: nothing recorded
-    process.env.SEED_STUDY_HEADER = f.headerFile;
-    await f.run("r2");
-    expect(await refused(f, "r1")).toMatch(/does not cite the run of this request/);
   });
 
   it("a cited run whose saved record was changed after it finished", async () => {

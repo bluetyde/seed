@@ -193,20 +193,22 @@ export async function exportStudyReport(file: string, headerFile: string | undef
       );
       if (!exportDecision.allow) return { ok: false as const, errors: exportDecision.errors };
 
-      // The live study record (docs/study-record.md), when the study has one, is the study of the report: its notes and every run it cites appear.
-      // A record that fails its chain, has another header than the human one, or does not cite this run is a refusal, never a silent fallback.
+      // The live study record (docs/study-record.md), when the study has one and it cites this run, is the study of the report: its notes and every
+      // run it cites appear. A record that fails its chain or has another header than the human one is a refusal, never a silent fallback. A record
+      // that does not cite this run (the run happened before the host had a header) leaves the report a single-case one, and the evidence says so.
       const liveFile = studyRecordFile(projectRoot, folders.studies, header.studyId);
       const live = readStudyRecord(liveFile);
       if (!live.ok) throw Error("the live study record is not valid: " + live.errors.map(e => e.message).join("; "));
       const others: ReturnType<typeof verifyRun>[] = [];
-      let studyLines: string[];
+      let studyLines: string[] = [];
+      let useLive = false;
       if (live.lines.length > 0) {
         const { prev: _p, hash: _h, ...bare } = live.rows[0]!;
         if (canonicalJson(bare) !== canonicalJson(header)) throw Error("the live study record has another human header than the one given to the host");
         const cited: string[] = [];
         for (const row of live.rows.slice(1)) for (const id of Array.isArray(row.runs) ? row.runs : []) if (!cited.includes(id)) cited.push(id);
-        if (!cited.includes(runId)) throw Error("the live study record does not cite the run of this request; its steps are missing or the record is from another study");
-        for (const id of cited) {
+        useLive = cited.includes(runId);
+        for (const id of useLive ? cited : []) {
           if (id === runId) continue;
           if (!/^r-[A-Za-z0-9_-]+$/.test(id)) throw Error("the live study record cites an invalid run id");
           const other = readHostJson(safeChild(safeChild(runsRoot, id, true), "run-record.json"));
@@ -214,8 +216,9 @@ export async function exportStudyReport(file: string, headerFile: string | undef
           if (typeof otherRequest !== "string") throw Error("a run cited by the live study record has no request id");
           others.push(verifyRun(otherRequest, id));
         }
-        studyLines = live.lines;
-      } else {
+        if (useLive) studyLines = live.lines;
+      }
+      if (!useLive) {
         const entries: any[] = [
           header,
           {
@@ -266,7 +269,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
         studyLines,
         runs: Object.fromEntries(allRuns.map(r => [r.runId, r.reportRun])),
         staleRunIds: allRuns.filter(r => r.stale).map(r => r.runId),
-        generatedBy: others.length > 0 || live.lines.length > 0 ? "SEED guarded study report/0.2 (live study record)" : "SEED guarded single-case report/0.1",
+        generatedBy: useLive ? "SEED guarded study report/0.2 (live study record)" : "SEED guarded single-case report/0.1",
         requireBoundSeries: true,
       });
       if (!report.ok) return { ok: false as const, errors: report.errors };
@@ -343,7 +346,10 @@ export async function exportStudyReport(file: string, headerFile: string | undef
         record,
         stale,
         snapshotFiles,
-        ...(live.lines.length > 0
+        ...(live.lines.length > 0 && !useLive
+          ? { liveRecord: { rows: live.lines.length, head: live.rows[live.rows.length - 1]!.hash, citesThisRun: false } }
+          : {}),
+        ...(useLive
           ? {
               liveRecord: { rows: live.lines.length, head: live.rows[live.rows.length - 1]!.hash },
               otherRuns: others.map(r => ({
@@ -366,7 +372,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
         sha256Hex(readFileSync(file)) !== sha256Hex(configBytes) ||
         canonicalJson(readHostJson(headerFile)) !== canonicalJson(header) ||
         allRuns.some(r => canonicalJson(readHostJson(safeChild(r.runRoot, "run-record.json"))) !== canonicalJson(r.record)) ||
-        (live.lines.length > 0 && readFileSync(liveFile, "utf8") !== studyLines.join("\n") + "\n")
+        (useLive && readFileSync(liveFile, "utf8") !== studyLines.join("\n") + "\n")
       )
         throw Error("study evidence changed during export");
       for (const r of allRuns) for (const output of r.record.outputs ?? []) checked(r.runRoot, output.path, output.sha256);
