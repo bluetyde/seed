@@ -34,7 +34,7 @@ The only agent-writable thing is a note: CLI `node dist/cli/seed.js note` or MCP
 ## Not done
 
 - ~~The report export still rebuilds its own steps~~ **Done 2026-10-08**: see [the report reads the record](#the-report-reads-the-record) below.
-- **No reconciliation**: a step lost because an append failed is not backfilled from the admission log yet.
+- ~~No reconciliation~~ **Done 2026-10-08**: see [Reconciliation](#reconciliation) below.
 - **Replay** (re-running a recorded run and comparing), **feeding comparisons into the report**, and **cache reuse as a step** ("reused from run X", [compare-and-cache.md](compare-and-cache.md)) are not built.
 - The oracle step is written once per evidence set (by key); a set that is replaced by another and later returns is not written a second time.
 - Limits: the record is one file (8 MB); a study that outgrows it needs a new study. Deleting the *last* rows cannot be told from a shorter record by the chain alone (as with the admission log); the project folder is the trust boundary.
@@ -52,3 +52,21 @@ Mutations of this code: 33; 29 caught; 3 equivalent (a check the schema makes re
 - A saved bundle is immutable: exporting the same request again is refused, and a note added afterwards does not change the saved report; the next export (another request) has it.
 
 Tests: `tests/study-report-live.test.ts` (17). Mutations: `scripts/mutate-study-report.cjs`, 20; 12 caught at first and 2 more after tests were added (the stale mark, the run bound to its request); 6 left, none a gap in the new logic: the run-id pattern check (the record's schema already refuses a bad id), the request-id type check (a missing one is refused one line later), two race guards that re-read files at the end of the export, and the oracle-pin and export-gate checks carried over from the old code (the pins are also fixed by the host configuration comparison; the real-RAFT test covers the export path).
+
+## Reconciliation
+
+A step can be missing from the record: an append failed (the run was never touched; the failure is in the host diagnostics), or the run happened before the host had a human header. The admission log still holds everything, so a human can have the missing steps written from it.
+
+```
+SEED_ADMIN_HOST_CONFIG=<host file whose actor is a human>  SEED_STUDY_HEADER=<the human header>
+echo '{"dryRun": true}' | node dist/cli/admin.js reconcile-study     # what would be written
+echo '{}'              | node dist/cli/admin.js reconcile-study     # write it
+```
+
+- **Human only** (the admin CLI; the agent CLI and the MCP server have no such verb). The human header must be given and match the host, as for the live record. It refuses while a calculation holds the engine, and when the record fails its chain.
+- **Only appended, once.** Existing rows are never edited or removed. The steps are built by the same function as the live append (`stepDrafts`), so a step has the same key whichever way it arrives and a step already in the record is skipped; a replayed request adds nothing; a second reconciliation finds nothing to do.
+- **Marked and dated by the audit log.** Every step written starts with "Backfilled from the audit log." and carries the time of the audit row (the decision, or the outcome for the outcome step), not the time of the backfill. Its actor is the actor of the request in the log, not the human who ran the backfill. A backfilled step sits after the rows that were there, so the order of rows is the order of writing, and the times show the order of events.
+- **Not written:** a request with no audited gate decision, and an allowed one with no audited outcome, are listed under `unfinished` and not written. A request of another study, or of another project in the same engine log, is not scanned. What the log does not hold is not reconstructed: a sweep's case numbers are not in the log, so a backfilled sweep case does not say which case it was.
+- After a reconciliation the report export finds the earlier runs in the record, so the report is the multi-run report instead of the single-case fallback.
+
+Tests: `tests/study-reconcile.test.ts` (21). Mutations: `scripts/mutate-study-reconcile.cjs`, 22; 20 caught, 2 equivalent (the outcome row cannot come before its decision inside one attempt; an outcome row with a run id and `ok: false` is never audited).
