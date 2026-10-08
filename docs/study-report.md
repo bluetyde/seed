@@ -1,6 +1,6 @@
 # Single-case study and report workflow
 
-The guarded CLI and MCP can now turn a terminal RAFT calculation into a saved study/report bundle. Run the registered case first, then export using its original request ID. The report is reconstructed from the durable admission decision and terminal outcome, not from client claims. This is the first single-case workflow; live append-only multi-run studies and replay remain planned. Desktop human-reviewed derivatives are described in [conclusion review](conclusion-review.md).
+The guarded CLI and MCP can now turn a terminal RAFT calculation into a saved study/report bundle. Run the registered case first, then export using its original request ID. The report is reconstructed from the durable admission decision and terminal outcome, not from client claims. This began as a single-case workflow. **Since 2026-10-08 the export reads the live study record when the host kept one** ([study-record.md](study-record.md#the-report-reads-the-record)): notes and every run of the study appear, each run proven from the audit log. Replay remains planned. Desktop human-reviewed derivatives are described in [conclusion review](conclusion-review.md).
 
 ## Trusted human setup
 
