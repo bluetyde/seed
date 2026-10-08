@@ -72,8 +72,9 @@ const vector = (name: string): Vec => JSON.parse(readFileSync(join(vectorsDir, `
 /** A project holding the synthetic library and one golden vector as a RAFT case. */
 function raftProject(name = "scram", edit: (c: Record<string, any>) => void = () => {}) {
   const root = newProject();
-  cpSync(coreDir, join(root, "models", "raft", "lib"), { recursive: true });
   const vec = vector(name);
+  // A vector may name its own library folder (the boron one); a vector that overrides library fields in code (the heat-law ones) cannot be a case folder.
+  cpSync(vec.libraryFixture ? join(repo, "schema", "vectors", vec.libraryFixture) : coreDir, join(root, "models", "raft", "lib"), { recursive: true });
   const c: Record<string, any> = {
     format: "raft-headless-case",
     version: 1,
@@ -111,7 +112,8 @@ function series(root: string, runId: string, name: string): { t: number[]; value
 const close = (a: number, b: number, tol: { abs?: number; rel?: number }) => Math.abs(a - b) <= (tol.abs ?? 1e-12) + (tol.rel ?? 1e-9) * Math.abs(b);
 const TOL_KEY: Record<string, string> = { power: "power", energy: "power", fuelTemp: "temperature", coolantTemp: "temperature" };
 
-const VECTORS = haveRaft ? readdirSync(vectorsDir).filter((f) => f.endsWith(".json")).map((f) => f.replace(".json", "")) : [];
+// RAFT runs the vectors that override library fields in code (heat-law-*) in its own engine tests; a case folder holds an unmodified library, so they are not cases.
+const VECTORS = haveRaft ? readdirSync(vectorsDir).filter((f) => f.endsWith(".json")).map((f) => f.replace(".json", "")).filter((n) => !vector(n).libraryOverrides) : [];
 
 describe.skipIf(!haveRaft)("RAFT adapter against the real headless runner", () => {
   it("describe: valid reply with the runner's engine version and no oracle claims yet", async () => {
