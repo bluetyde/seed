@@ -21,7 +21,7 @@ The solver (OpenFOAM Foundation 9 + OFFBEAT, in the WSL distro `feed-solver`) is
 - `run`: the snapshot must be exactly one file (a FEED case is self-contained). A request `seed` is refused (`E_UNSUPPORTED`): FEED is deterministic. The run folder is reserved exclusively, a detached `job.cjs` wrapper runs `headless run`, keeps a heartbeat and writes `native/status.json`. The budget's wall seconds become the runner's time limit (10 to 86400 s).
 - `status`: from `status.json`, heartbeat and the job token; a live process with the token is running even if its heartbeat is late.
 - `cancel`: first the runner's own `cancel --out` (stops the solver **inside the WSL distro**, which a Node process-tree kill would not reach), then the wrapper tree, only after the process command line proves it is this job's wrapper. If the runner cannot confirm the solver stopped, nothing is killed and `cancelled: false` is returned: the wrapper still holds the time limit.
-- `collect`: re-hashes the snapshot, verifies the runner's manifest (exactly `case.json, derived.json, feed-manifest.json, results.json, run.json`, every hash, the case hash), then refuses a result that is out of domain (`E_OUT_OF_DOMAIN`: a conductivity law used outside its stated range), has a failing check, or has a non-finite value (`E_OUTPUT_INCOMPLETE`). Otherwise it writes per-quantity data files and the `seed.results-index/0.1`.
+- `collect`: re-hashes the snapshot, verifies the runner's manifest (exactly `case.json, derived.json, feed-manifest.json, results.json, run.json`, every hash, the case hash), then refuses a result that is out of domain (`E_OUT_OF_DOMAIN`: a conductivity law used outside its stated range), has a failing check other than a temperature limit check, or has a non-finite value (`E_OUTPUT_INCOMPLETE`). Otherwise it writes per-quantity data files and the `seed.results-index/0.1`.
 
 ## Quantities
 
@@ -76,3 +76,12 @@ Two auditors (security-boundary-verifier, silent-failure-hunter) reviewed the ad
 | A reservation without a process id was returned as a running job | `E_REQUEST_CONFLICT`, retry |
 
 Re-checked afterwards: the gap suspected here (runner dies after starting a solver but before the run is recorded) cannot occur, because the record is written before anything is launched; see Known gaps.
+
+## Temperature limits (2026-10-07)
+
+A case may state limits (FEED `docs/temperature-limits.md`); FEED then reports one check per rule, `temperatureLimit1`, `temperatureLimit2`, ..., whose value is the smallest margin in kelvin (limit minus the hottest cell; negative when exceeded) and has no value when the rule's cladding condition never held. The adapter:
+
+- **A failed limit check is a failed check on a COMPLETED run.** It does not make `collect` refuse; the run stays `completed`, the result index carries the margin, and `extensions.feed.checks` shows the verdict `fail`. (Decision taken with FEED's request; any other failed check still stops the collection.) A limit check that contradicts itself (a `fail` with a margin of zero or more, a `pass` with a negative margin, a fail with no margin, a margin that is not a number) is refused as `E_OUTPUT_INCOMPLETE`.
+- **Quantity `temperature_limit_margin`** (K): the smallest margin over the rules that applied. Present only when at least one rule applied; a case without limits, or with none in force, has no such quantity. Each rule's own margin is in `extensions.feed.limits` (`id`, `verdict`, `marginK`, null when not in force) so an oracle entry can also pin a single rule from the check list.
+- A margin is not an integrity assessment: FEED computes no stress, and the note on the data file says so.
+- Values FEED would pin first: K-State hot element 639.4 K to the 1150 C rule; UT $4.40 pulse 325.7 K.
