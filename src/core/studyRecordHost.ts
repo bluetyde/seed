@@ -48,35 +48,64 @@ export type RecordArgs = {
   now?: () => Date;
 };
 
+export type DraftArgs = {
+  evidenceSha: string;
+  actor: Actor;
+  requestId: string;
+  caseId: string;
+  decision: Decision | undefined;
+  outcome: { ok: true; runId: string; state: string } | { ok: false };
+  context?: LiveContext;
+  /** When the decision was made, and (for a backfill) when the outcome was; both default to `time`. */
+  time: string;
+  outcomeTime?: string;
+  /** Put before every reason (a backfill says so). */
+  prefix?: string;
+};
+
+/**
+ * The steps one request produced, from its gate decision and outcome. One function for the live append and for the backfill from the audit log
+ * (docs/study-record.md), so a step has the same key, and so is written once, whichever way it arrives.
+ */
+export function stepDrafts(a: DraftArgs): StepDraft[] {
+  const { actor, time } = a;
+  const outcomeTime = a.outcomeTime ?? time;
+  const pre = a.prefix ?? "";
+  const drafts: StepDraft[] = [];
+  const via = a.decision && a.decision.allow ? a.decision.via + (a.decision.grantId ? ` (grant ${a.decision.grantId})` : "") : "";
+  const sweep = a.context?.sweep
+    ? ` Sweep ${a.context.sweep.sweepId}, case ${a.context.sweep.index} of ${a.context.sweep.count} (${a.context.sweep.values.map((v) => `${v.id}=${v.value}`).join(", ")}).`
+    : "";
+  if (a.decision && !a.decision.allow) {
+    const s = gateStopStep(a.decision, actor, 1, time) as { reason: string; gateStop: { request: string; rule: string } };
+    drafts.push({ action: "gate-stop", actor, time, reason: `${pre}Request refused at the gate for case ${a.caseId}: ${s.reason}.${sweep}`, runs: [], gateStop: s.gateStop, key: `request:${a.requestId}:gate` });
+  } else if (a.decision && a.decision.allow && a.outcome.ok) {
+    drafts.push({
+      action: "oracle", actor, time, runs: [],
+      reason: `${pre}Pinned admission oracle set: ${a.evidenceSha}. Quantities retain their adapter verification labels.`,
+      oracle: { set: a.evidenceSha, verdict: "pass" },
+      key: `oracle:${a.evidenceSha}`,
+    });
+    drafts.push({ action: "run", actor, time, runs: [a.outcome.runId], reason: `${pre}Registered case ${a.caseId}; policy admission via ${via}.${sweep}`, key: `request:${a.requestId}:run` });
+    drafts.push({
+      action: a.outcome.state === "cancelled" ? "cancel" : "note", actor, time: outcomeTime, runs: [a.outcome.runId],
+      reason: `${pre}Audited terminal outcome: ${a.outcome.state}. No scientific conclusion has been accepted.`,
+      key: `request:${a.requestId}:outcome`,
+    });
+  }
+  return drafts;
+}
+
 /** Appends the steps one request produced. Never throws: a failure is written to the host diagnostics and returned. */
 export function recordRequestInStudy(a: RecordArgs): { ok: boolean; appended?: number; reason?: string } {
   try {
     const header = loadLiveHeader(a.c, a.projectRoot, a.projectId);
     if (header === null) return { ok: true, appended: 0 };
     const time = (a.now ?? (() => new Date()))().toISOString();
-    const actor = a.c.actor;
-    const drafts: StepDraft[] = [];
-    const via = a.decision && a.decision.allow ? a.decision.via + (a.decision.grantId ? ` (grant ${a.decision.grantId})` : "") : "";
-    const sweep = a.context?.sweep
-      ? ` Sweep ${a.context.sweep.sweepId}, case ${a.context.sweep.index} of ${a.context.sweep.count} (${a.context.sweep.values.map((v) => `${v.id}=${v.value}`).join(", ")}).`
-      : "";
-    if (a.decision && !a.decision.allow) {
-      const s = gateStopStep(a.decision, actor, 1, time) as { reason: string; gateStop: { request: string; rule: string } };
-      drafts.push({ action: "gate-stop", actor, time, reason: `Request refused at the gate for case ${a.caseId}: ${s.reason}.${sweep}`, runs: [], gateStop: s.gateStop, key: `request:${a.requestId}:gate` });
-    } else if (a.decision && a.decision.allow && a.outcome.ok) {
-      drafts.push({
-        action: "oracle", actor, time, runs: [],
-        reason: `Pinned admission oracle set: ${a.c.oracles.evidenceSha256}. Quantities retain their adapter verification labels.`,
-        oracle: { set: a.c.oracles.evidenceSha256, verdict: "pass" },
-        key: `oracle:${a.c.oracles.evidenceSha256}`,
-      });
-      drafts.push({ action: "run", actor, time, runs: [a.outcome.runId], reason: `Registered case ${a.caseId}; policy admission via ${via}.${sweep}`, key: `request:${a.requestId}:run` });
-      drafts.push({
-        action: a.outcome.state === "cancelled" ? "cancel" : "note", actor, time, runs: [a.outcome.runId],
-        reason: `Audited terminal outcome: ${a.outcome.state}. No scientific conclusion has been accepted.`,
-        key: `request:${a.requestId}:outcome`,
-      });
-    }
+    const drafts = stepDrafts({
+      evidenceSha: a.c.oracles.evidenceSha256, actor: a.c.actor, requestId: a.requestId, caseId: a.caseId, decision: a.decision, outcome: a.outcome, time,
+      ...(a.context ? { context: a.context } : {}),
+    });
     if (drafts.length === 0) return { ok: true, appended: 0 };
     const file = studyRecordFile(a.projectRoot, a.studiesFolder, a.c.study.studyId, true);
     const r = appendStudySteps(file, header, drafts, a.projectRoot);
