@@ -1439,7 +1439,9 @@ describe("Project Store: a holder that keeps working, and a writer that lost its
     expect((late as { errors: { message: string }[] }).errors[0]!.message).toContain("nothing was saved");
     const after = openProject(dir);
     expect(after.ok && after.value.manifest.name).toBe("Beat");
-    expect(held.ok).toBe(true); // releasing a lock that is no longer ours is quiet and leaves the new owner's alone
+    // the holder is told that its lock was taken over (it did not save anything, but it may have done other work under the lock)
+    expect(held.ok).toBe(false);
+    expect((held as { errors: { code: string }[] }).errors[0]!.code).toBe("E_PROJECT_LOCKED");
   });
 
   it("saveProjectHeld refuses a caller that does not hold the lock", () => {
