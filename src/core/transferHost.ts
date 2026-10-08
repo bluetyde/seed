@@ -16,8 +16,8 @@ import { resolveInside } from "./paths";
 import type { Actor, GateContext, PolicyStudy } from "./policy";
 import { openProject, saveProjectHeld, withProjectLockAsync } from "./projectStore";
 import {
-  applyTransfer, checkPipeline, evaluateTransfer, listApprovals, readRecipes, recipeDigest, recipeRevisions, recordApproval, spawnTransferCommand, writeRecipe,
-  type AppliedRecord, type Recipe, type TransferView
+  applyTransfer, checkPipeline, evaluateTransfer, isRecordRecipe, listApprovals, readRecipes, recipeDigest, recipeRevisions, recordApproval, spawnTransferCommand, validateRecipe, writeRecipe,
+  type AnyRecipe, type AppliedRecord, type TransferView
 } from "./transfer";
 import type { TypedError } from "./validate";
 import { validate } from "./validate";
@@ -156,8 +156,8 @@ function sourceRun(x: Ctx, runId: string): { indexText: string | null; state: st
   return { indexText, state };
 }
 
-function viewOf(x: Ctx, recipe: Recipe, approvals = listApprovals(x.state, x.projectId, x.project).approvals): TransferView {
-  const run = sourceRun(x, recipe.source.runId);
+function viewOf(x: Ctx, recipe: AnyRecipe, approvals = listApprovals(x.state, x.projectId, x.project).approvals): TransferView {
+  const run = isRecordRecipe(recipe) ? { indexText: null, state: null } : sourceRun(x, recipe.source.runId);
   return {
     projectId: x.projectId, projectRoot: x.project, now: new Date(), sourceIndex: run.indexText, sourceRunState: run.state,
     readData: (rel) => {
@@ -172,9 +172,10 @@ function viewOf(x: Ctx, recipe: Recipe, approvals = listApprovals(x.state, x.pro
 }
 
 /** The gate flags for the apps a recipe touches: the source run's adapter and the target. Throws when an app is not configured or its evidence fails. */
-function gateFor(x: Ctx, recipe: Recipe, view: TransferView): GateContext {
+function gateFor(x: Ctx, recipe: AnyRecipe, view: TransferView): GateContext {
   const ids = new Set<string>([recipe.target.app]);
-  try { ids.add(String(JSON.parse(view.sourceIndex ?? "null")?.adapter?.id)); } catch { /* no index: evaluateTransfer says so */ }
+  // A record has no run and no adapter behind it: only the target app's oracle evidence applies.
+  if (!isRecordRecipe(recipe)) { try { ids.add(String(JSON.parse(view.sourceIndex ?? "null")?.adapter?.id)); } catch { /* no index: evaluateTransfer says so */ } }
   let pinsChanged = false, oracleBlocked = false;
   for (const id of ids) {
     const app = x.c.apps[id];
@@ -207,16 +208,16 @@ const recipeIdOf = (request: unknown): string | null => {
   const r = request as Record<string, unknown> | null;
   return r && typeof r === "object" && Object.keys(r).length === 1 && typeof r.recipeId === "string" && ID.test(r.recipeId) ? r.recipeId : null;
 };
-const loadRecipe = (x: Ctx, id: string): Recipe | undefined => readRecipes(x.project, x.folder).recipes.find((r) => r.recipeId === id);
+const loadRecipe = (x: Ctx, id: string): AnyRecipe | undefined => readRecipes(x.project, x.folder).recipes.find((r) => r.recipeId === id);
 
 /** Agent: write a recipe proposal. Refused unless it is well formed, checks out against the source run and the target, and closes no cycle. */
 export function proposeTransfer(file: string, request: unknown): Promise<HostOutcome> {
   return guarded(file, "propose", (x) => {
     const r = request as Record<string, unknown> | null;
     if (!r || typeof r !== "object" || Object.keys(r).length !== 1 || !r.recipe || typeof r.recipe !== "object") return fail("E_SCHEMA_INVALID", "the request is {recipe}");
-    const v = validate("transfer-recipe", r.recipe);
+    const v = validateRecipe(r.recipe);
     if (!v.ok) return { ok: false, errors: v.errors };
-    const recipe = r.recipe as Recipe;
+    const recipe = r.recipe as AnyRecipe;
     const view = viewOf(x, recipe);
     const ev = evaluateTransfer(recipe, view);
     audit(x, "propose-request", { recipeId: recipe.recipeId, digest: ev.digest, state: ev.state });

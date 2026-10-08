@@ -5,10 +5,12 @@
  * generic data shapes, invalidation and provenance. The physical mapping and its physical checks (coverage,
  * conservation, boundary form) belong to the target app and run behind the app's own `transfer` command.
  */
+import Ajv2020 from "ajv/dist/2020";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalJson, sha256Hex } from "./canonical";
+import { burnupAt, parseDepletion, RECORD_CONVERSIONS } from "./depletionRecord";
 import { inside, readHostJson, safeChild, writeHostJson } from "./hostFiles";
 import { evaluateGate, issueGrant, type Actor, type GateContext, type Grant, type Revision } from "./policy";
 import { readQuantityData, type IndexEntryView, type QuantityData } from "./quantityData";
@@ -34,6 +36,35 @@ export type Recipe = {
   applicability?: { range?: Record<string, unknown>; note?: string };
 };
 
+/**
+ * A recipe whose source is a project record, not a run's result quantity (docs/transfer-recipe.md section 8): a depletion record, a region of it
+ * and a time. `units` states the one conversion SEED knows for the record's field; the source pin is the record's artifact at the file's sha256.
+ */
+export type RecordRecipe = {
+  schema: "seed.transfer-recipe/0.3";
+  recipeId: string;
+  proposedBy: Actor;
+  proposedAt: string;
+  source: { kind: "record"; record: "depletion-record/1"; artifact: string; recordSha256: string; recordId: string; region: string; time: number; revisionPins: Revision[] };
+  target: { app: string; artifact: string; revision: string; field: string };
+  units: { field: "burnup_mwd_per_tu"; from: "MWd/tU"; to: "MWd/kgHM"; factor: number; basis: "heavy-metal" };
+};
+export type AnyRecipe = Recipe | RecordRecipe;
+export const isRecordRecipe = (r: unknown): r is RecordRecipe => !!r && typeof r === "object" && (r as { schema?: unknown }).schema === "seed.transfer-recipe/0.3";
+
+const recordAjv = new Ajv2020({ allErrors: true, strict: true });
+recordAjv.addSchema(JSON.parse(readFileSync(join(__dirname, "../../schema/common.schema.json"), "utf8")));
+const checkRecord = recordAjv.compile(JSON.parse(readFileSync(join(__dirname, "../../schema/transfer-recipe-record.schema.json"), "utf8")));
+
+/** A recipe file of either version: 0.2 (a run's quantity) or 0.3 (a record). Any other version is E_SCHEMA_VERSION. */
+export function validateRecipe(doc: unknown): { ok: true } | { ok: false; errors: TypedError[] } {
+  if (isRecordRecipe(doc)) {
+    if (checkRecord(doc)) return { ok: true };
+    return { ok: false, errors: (checkRecord.errors ?? []).slice(0, 20).map((e) => err("E_SCHEMA_INVALID", e.instancePath || "", e.message ?? "invalid")) };
+  }
+  return validate("transfer-recipe", doc);
+}
+
 export type Approval = {
   schema: "seed.transfer-approval/0.2";
   approvalId: string; projectId: string; projectRoot: string; studyId: string; recipeId: string; recipeDigest: string;
@@ -55,7 +86,7 @@ export function recipeDigest(recipe: unknown): string {
 }
 
 /** What an approval and a grant must name: the source pins and the target's revision, exactly. */
-export function recipeRevisions(recipe: Recipe): Revision[] {
+export function recipeRevisions(recipe: AnyRecipe): Revision[] {
   return [...recipe.source.revisionPins, { artifact: recipe.target.artifact, revision: recipe.target.revision }];
 }
 
@@ -169,9 +200,46 @@ function checkQuantity(
   return qd;
 }
 
+/** A record source: the file is pinned by its sha256, its id must match its content, the region and time must exist in it. */
+function evaluateRecordTransfer(r: RecordRecipe, view: TransferView): Eval {
+  const digest = recipeDigest(r);
+  const invalid: TypedError[] = [], stale: TypedError[] = [];
+  const pin = r.source.revisionPins[0]!;
+  if (pin.artifact !== r.source.artifact || pin.revision !== r.source.recordSha256) invalid.push(err("E_SCHEMA_INVALID", "/source/revisionPins", "the pin is the record's artifact at the record's sha256"));
+  const conv = RECORD_CONVERSIONS.find((c) => c.record === r.source.record && c.field === r.units.field);
+  if (!conv || conv.from !== r.units.from || conv.to !== r.units.to || conv.factor !== r.units.factor || conv.basis !== r.units.basis) {
+    invalid.push(err("E_UNITS", "/units", `the recipe's unit conversion is not the one SEED knows for ${r.units.field} (${conv ? `${conv.from} to ${conv.to}, factor ${conv.factor}, ${conv.basis}` : "none"})`));
+  }
+  const path = view.artifactPaths[r.source.artifact];
+  if (path === undefined) invalid.push(err("E_NOT_FOUND", "/source/artifact", `the project has no artifact ${JSON.stringify(r.source.artifact)}`));
+  else {
+    const text = view.readData(path);
+    if (text === null) invalid.push(err("E_OUTPUT_INCOMPLETE", "/source/artifact", "the record file is missing or cannot be read"));
+    else if (sha256Hex(text) !== r.source.recordSha256) stale.push(err("E_STALE_REVISION", "/source/recordSha256", "the record file differs from the one the recipe pinned"));
+    else {
+      const parsed = parseDepletion(text);
+      if (!parsed.ok) invalid.push(...parsed.errors);
+      else if (parsed.record.recordId !== r.source.recordId) stale.push(err("E_STALE_REVISION", "/source/recordId", "the record's id is not the one the recipe pinned"));
+      else {
+        const b = burnupAt(parsed.record, r.source.region, r.source.time);
+        if (!b.ok) invalid.push(...b.errors);
+      }
+    }
+  }
+  if (view.targetTransfers) {
+    const t = view.targetTransfers.find((x) => x.field === r.target.field);
+    if (!t) invalid.push(err("E_UNSUPPORTED", "/target/field", `the target app declares no transfer ${JSON.stringify(r.target.field)}`));
+    else if (!t.accepts.some((a) => a.dimension === "burnup" && (a.normalization === undefined || a.normalization === "none") && !(a.additional ?? []).length)) {
+      invalid.push(err("E_UNITS", "/target/field", `the target does not accept a burnup source for ${r.target.field}`));
+    }
+  }
+  return finishEvaluation(r, view, digest, invalid, stale);
+}
+
 export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
-  const v = validate("transfer-recipe", recipeIn);
+  const v = validateRecipe(recipeIn);
   if (!v.ok) return { state: "invalid", errors: v.errors, digest: "" };
+  if (isRecordRecipe(recipeIn)) return evaluateRecordTransfer(recipeIn, view);
   const r = recipeIn as Recipe;
   const digest = recipeDigest(r);
   const invalid: TypedError[] = [];
@@ -226,6 +294,11 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
     }
   }
 
+  return finishEvaluation(r, view, digest, invalid, stale);
+}
+
+/** What both kinds of recipe share after their source is checked: pinned revisions, applied, approval. */
+function finishEvaluation(r: AnyRecipe, view: TransferView, digest: string, invalid: TypedError[], stale: TypedError[]): Eval {
   // Revisions: any change since the recipe was written makes it stale.
   r.source.revisionPins.forEach((p, i) => {
     if (view.currentRevisions[p.artifact] !== p.revision) stale.push(err("E_STALE_REVISION", `/source/revisionPins/${i}`, `${p.artifact} is not at the pinned revision`));
@@ -257,12 +330,12 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
 
 // ---- pipeline graph ----
 
-function edges(recipes: readonly Recipe[]): { from: string; to: string; id: string }[] {
+function edges(recipes: readonly AnyRecipe[]): { from: string; to: string; id: string }[] {
   return recipes.flatMap((r) => r.source.revisionPins.map((p) => ({ from: p.artifact, to: r.target.artifact, id: r.recipeId })));
 }
 
 /** A cycle among the artifacts the recipes connect is refused at definition. */
-export function checkPipeline(recipes: readonly Recipe[]): TypedError[] {
+export function checkPipeline(recipes: readonly AnyRecipe[]): TypedError[] {
   const es = edges(recipes);
   const next = new Map<string, string[]>();
   for (const e of es) next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
@@ -281,7 +354,7 @@ export function checkPipeline(recipes: readonly Recipe[]): TypedError[] {
 }
 
 /** Everything downstream of changed artifacts: the recipes that read them and, through targets, the artifacts after those. */
-export function downstreamOf(recipes: readonly Recipe[], changed: readonly string[]): { recipeIds: string[]; artifacts: string[] } {
+export function downstreamOf(recipes: readonly AnyRecipe[], changed: readonly string[]): { recipeIds: string[]; artifacts: string[] } {
   const hit = new Set<string>(changed), ids = new Set<string>();
   for (let grew = true; grew;) {
     grew = false;
@@ -312,8 +385,8 @@ function transfersFolder(projectRoot: string, folder: string): string {
 }
 
 /** An agent (or human) writes a recipe proposal. Needs the propose_transfer gate; the proposer must be the actor. */
-export function writeRecipe(opts: { projectRoot: string; folder?: string; recipe: Recipe; actor: Actor; gate: GateContext; studyId: string }): { ok: true; path: string; digest: string } | { ok: false; errors: TypedError[] } {
-  const v = validate("transfer-recipe", opts.recipe);
+export function writeRecipe(opts: { projectRoot: string; folder?: string; recipe: AnyRecipe; actor: Actor; gate: GateContext; studyId: string }): { ok: true; path: string; digest: string } | { ok: false; errors: TypedError[] } {
+  const v = validateRecipe(opts.recipe);
   if (!v.ok) return { ok: false, errors: v.errors };
   if (opts.recipe.proposedBy.kind !== opts.actor.kind || opts.recipe.proposedBy.name !== opts.actor.name) {
     return { ok: false, errors: [err("E_NOT_PERMITTED", "/proposedBy", "a recipe is written by the actor it names as its proposer")] };
@@ -326,18 +399,18 @@ export function writeRecipe(opts: { projectRoot: string; folder?: string; recipe
   return { ok: true, path: file, digest: recipeDigest(opts.recipe) };
 }
 
-export function readRecipes(projectRoot: string, folder = "transfers"): { recipes: Recipe[]; problems: TypedError[] } {
+export function readRecipes(projectRoot: string, folder = "transfers"): { recipes: AnyRecipe[]; problems: TypedError[] } {
   const root = realpathSync(projectRoot), dir = join(root, folder);
-  const recipes: Recipe[] = [], problems: TypedError[] = [];
+  const recipes: AnyRecipe[] = [], problems: TypedError[] = [];
   if (!existsSync(dir)) return { recipes, problems };
   const real = transfersFolder(projectRoot, folder);
   for (const name of readdirSync(real).filter((n) => n.endsWith(".json")).slice(0, 1000)) {
     try {
       const doc = readHostJson(safeChild(real, name));
-      const v = validate("transfer-recipe", doc);
+      const v = validateRecipe(doc);
       if (!v.ok) problems.push(err("E_SCHEMA_INVALID", `/${name}`, v.errors[0]!.message));
       else if (doc.recipeId + ".json" !== name) problems.push(err("E_SCHEMA_INVALID", `/${name}`, "the file name is not the recipe id"));
-      else recipes.push(doc as Recipe);
+      else recipes.push(doc as AnyRecipe);
     } catch (e) { problems.push(err("E_SCHEMA_INVALID", `/${name}`, e instanceof Error ? e.message : "unreadable")); }
   }
   return { recipes, problems };
@@ -356,10 +429,10 @@ function approvalsFolder(stateRoot: string, projectId: string, projectRoot: stri
 
 /** Only a human writes this. It binds the approval to the recipe's content and to the exact source and target revisions. */
 export function recordApproval(opts: {
-  stateRoot: string; projectRoot: string; projectId: string; studyId: string; recipe: Recipe; approver: Actor; grantedTo: Actor;
+  stateRoot: string; projectRoot: string; projectId: string; studyId: string; recipe: AnyRecipe; approver: Actor; grantedTo: Actor;
   approvalId: string; now: Date; expires: Date;
 }): { ok: true; approval: Approval } | { ok: false; errors: TypedError[] } {
-  const v = validate("transfer-recipe", opts.recipe);
+  const v = validateRecipe(opts.recipe);
   if (!v.ok) return { ok: false, errors: v.errors };
   if (inside(realpathSync(opts.projectRoot), realpathSync(opts.stateRoot))) return { ok: false, errors: [err("E_PATH_INVALID", "/stateRoot", "approval records live outside the project")] };
   const revisions = recipeRevisions(opts.recipe);
@@ -400,7 +473,7 @@ export function listApprovals(stateRoot: string, projectId: string, projectRoot:
 }
 
 /** The approvals as grants the policy gate can read: only ones that cover this exact recipe content. */
-export function grantsFromApprovals(approvals: readonly Approval[], recipe: Recipe): Grant[] {
+export function grantsFromApprovals(approvals: readonly Approval[], recipe: AnyRecipe): Grant[] {
   const digest = recipeDigest(recipe);
   return approvals.filter((a) => a.recipeId === recipe.recipeId && a.recipeDigest === digest).map((a) => ({
     grantId: a.grantId, studyId: a.studyId, actor: { kind: a.grantedTo.kind, name: a.grantedTo.name }, operation: "enable_transfer" as const,
@@ -410,7 +483,23 @@ export function grantsFromApprovals(approvals: readonly Approval[], recipe: Reci
 
 // ---- applying ----
 
-export type TransferRequest = {
+/** The request for a record recipe: SEED has resolved the record; the target gets the value, converted and on its stated basis, and keeps its own physical checks. */
+export type RecordTransferRequest = {
+  schema: "seed.transfer-request/0.3";
+  recipe: RecordRecipe;
+  recipeDigest: string;
+  source: {
+    kind: "record"; record: "depletion-record/1"; recordId: string; recordSha256: string; region: string; time: number;
+    /** The value in the recipe's target unit and basis (MWd/kgHM, heavy metal), and as the record states it. */
+    quantity: { name: "burnup"; dimension: "burnup"; unit: "MWd/kgHM"; basis: "heavy-metal"; value: number };
+    original: { unit: "MWd/tU"; value: number };
+    interpolated: boolean;
+  };
+  target: { artifact: string; revision: string; content: string };
+};
+
+export type TransferRequest = RunTransferRequest | RecordTransferRequest;
+export type RunTransferRequest = {
   schema: "seed.transfer-request/0.2";
   recipe: Recipe;
   recipeDigest: string;
@@ -427,7 +516,7 @@ export type AppliedTransfer = {
   ok: true;
   content: string;
   contentSha256: string;
-  provenance: { recipeId: string; recipeDigest: string; approvalId: string; sourceRunId: string; sourceResultsSha256: string; targetRevisionBefore: string; targetRevisionAfter: string; selected?: { quantity: string; x: number; value: number; interpolated: boolean }[] };
+  provenance: { recipeId: string; recipeDigest: string; approvalId: string; sourceRunId?: string; sourceResultsSha256?: string; sourceRecordId?: string; sourceRecordSha256?: string; targetRevisionBefore: string; targetRevisionAfter: string; selected?: { quantity: string; x: number; value: number; interpolated: boolean }[] };
   checks?: Record<string, unknown>;
 };
 
@@ -451,12 +540,55 @@ export function spawnTransferCommand(command: string, args: string[], request: T
   });
 }
 
+/** Applying a record recipe: SEED resolves the record (id, region, time, unit conversion) and hands the target the value; the target's own refusals stay its own. */
+async function applyRecordTransfer(
+  opts: { recipe: RecordRecipe; view: TransferView; targetContent: string; run: (request: TransferRequest) => Promise<TransferReply> },
+  ev: { digest: string; approval: Approval },
+): Promise<AppliedTransfer | { ok: false; errors: TypedError[] }> {
+  const { recipe, view } = opts;
+  const path = view.artifactPaths[recipe.source.artifact];
+  const text = path === undefined ? null : view.readData(path);
+  if (text === null) return { ok: false, errors: [err("E_OUTPUT_INCOMPLETE", "/source/artifact", "the record file is missing or cannot be read")] };
+  const parsed = parseDepletion(text);
+  if (!parsed.ok) return { ok: false, errors: parsed.errors };
+  const b = burnupAt(parsed.record, recipe.source.region, recipe.source.time);
+  if (!b.ok) return { ok: false, errors: b.errors };
+  const reply = await opts.run({
+    schema: "seed.transfer-request/0.3", recipe, recipeDigest: ev.digest,
+    source: {
+      kind: "record", record: recipe.source.record, recordId: parsed.record.recordId, recordSha256: recipe.source.recordSha256, region: recipe.source.region, time: recipe.source.time,
+      quantity: { name: "burnup", dimension: "burnup", unit: "MWd/kgHM", basis: "heavy-metal", value: b.value * recipe.units.factor },
+      original: { unit: "MWd/tU", value: b.value }, interpolated: b.interpolated,
+    },
+    target: { artifact: recipe.target.artifact, revision: recipe.target.revision, content: opts.targetContent },
+  });
+  if (!reply || typeof reply !== "object" || typeof (reply as { ok?: unknown }).ok !== "boolean") return { ok: false, errors: [err("E_APP_FAILED", "/reply", "the transfer command answered with something else than a reply", "app-content")] };
+  if (!reply.ok) {
+    const errs = Array.isArray(reply.errors) ? reply.errors : [];
+    return { ok: false, errors: (errs.length ? errs : [{ code: "E_APP_FAILED", message: "the transfer command refused without a reason" }]).slice(0, 20).map((e) => ({
+      code: /^[EW]_[A-Z0-9_]{2,40}$/.test(String(e?.code)) ? String(e.code) : "E_APP_FAILED", field: typeof e?.field === "string" ? e.field : "", message: String(e?.message ?? "").slice(0, 500), source: "app-content" as const }))};
+  }
+  if (!reply.output || typeof reply.output.content !== "string" || reply.output.content.length === 0 || reply.output.content.length > MAX_FILE) {
+    return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer command returned no usable target content", "app-content")] };
+  }
+  if (reply.output.content === opts.targetContent) return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer left the target unchanged", "app-content")] };
+  const after = sha256Hex(reply.output.content);
+  return {
+    ok: true, content: reply.output.content, contentSha256: after, ...(reply.checks ? { checks: reply.checks } : {}),
+    provenance: {
+      recipeId: recipe.recipeId, recipeDigest: ev.digest, approvalId: ev.approval.approvalId, sourceRecordId: parsed.record.recordId, sourceRecordSha256: recipe.source.recordSha256,
+      targetRevisionBefore: recipe.target.revision, targetRevisionAfter: after,
+      selected: [{ quantity: "burnup (MWd/tU)", x: recipe.source.time, value: b.value, interpolated: b.interpolated }],
+    },
+  };
+}
+
 /**
  * Applies an approved recipe: the gate (enable_transfer, through the approvals as grants), the SEED-side checks, then the
  * target's own command. Returns the new target content and the provenance; the host registers it as the target's new revision.
  */
 export async function applyTransfer(opts: {
-  recipe: Recipe; view: TransferView; actor: Actor; gate: GateContext; studyId: string; targetContent: string;
+  recipe: AnyRecipe; view: TransferView; actor: Actor; gate: GateContext; studyId: string; targetContent: string;
   run: (request: TransferRequest) => Promise<TransferReply>;
 }): Promise<AppliedTransfer | { ok: false; errors: TypedError[] }> {
   const { recipe, view } = opts;
@@ -468,6 +600,8 @@ export async function applyTransfer(opts: {
   const ev = evaluateTransfer(recipe, view);
   if (ev.state === "applied") return { ok: false, errors: [err("E_EXISTS", "/recipeId", "this recipe was already applied")] };
   if (ev.state !== "approved" || !ev.approval) return { ok: false, errors: ev.errors.length ? ev.errors : [err("E_NOT_PERMITTED", "/approval", `the recipe is ${ev.state}`)] };
+
+  if (isRecordRecipe(recipe)) return applyRecordTransfer(opts as typeof opts & { recipe: RecordRecipe }, ev as { digest: string; approval: Approval });
 
   const index = JSON.parse(view.sourceIndex!);
   const loaded: { role?: string; entry: any; data: QuantityData; selected?: Selected }[] = [];

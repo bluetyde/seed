@@ -39,6 +39,7 @@ const {
   appFailed,
   sha256,
   argvOf,
+  hasArg,
   typed,
   jobState,
 } = require("../shared/util.cjs");
@@ -457,7 +458,8 @@ function ownsRunner(cfg, j, pid) {
     return false;
   }
   const same = (a, b) => (win ? a.toLowerCase() === b.toLowerCase() : a === b);
-  return args.includes("openmc_studio.headless") && args.includes("run") && args.some((a) => same(a, out));
+  const has = (v) => (win ? args.some((a) => same(a, v)) : hasArg(cl, v));
+  return has("openmc_studio.headless") && has("run") && has(out);
 }
 
 /** Ask the runner to cancel this job's native run. {confirmed, stoppedOne, notOwned}: confirmed when nothing of this run is left running in
