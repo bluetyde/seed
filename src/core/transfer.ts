@@ -549,8 +549,12 @@ async function applyRecordTransfer(
   const path = view.artifactPaths[recipe.source.artifact];
   const text = path === undefined ? null : view.readData(path);
   if (text === null) return { ok: false, errors: [err("E_OUTPUT_INCOMPLETE", "/source/artifact", "the record file is missing or cannot be read")] };
+  // This is a second read, after the approval was checked: what the target receives must come from the record that was approved, not from
+  // whatever the file holds now.
+  if (sha256Hex(text) !== recipe.source.recordSha256) return { ok: false, errors: [err("E_STALE_REVISION", "/source/recordSha256", "the record file differs from the one the recipe pinned")] };
   const parsed = parseDepletion(text);
   if (!parsed.ok) return { ok: false, errors: parsed.errors };
+  if (parsed.record.recordId !== recipe.source.recordId) return { ok: false, errors: [err("E_STALE_REVISION", "/source/recordId", "the record's id is not the one the recipe pinned")] };
   const b = burnupAt(parsed.record, recipe.source.region, recipe.source.time);
   if (!b.ok) return { ok: false, errors: b.errors };
   const reply = await opts.run({

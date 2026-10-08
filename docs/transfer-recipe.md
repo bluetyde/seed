@@ -161,9 +161,12 @@ A transfer's source has been a **quantity of an adapter run** (recipe `seed.tran
 | The unit conversion is the one SEED knows for the field (MWd/tU to MWd/kgHM, 1e-3, heavy metal) | `E_UNITS` |
 | The record file exists, is the pinned file (hash) and has the pinned id | `E_OUTPUT_INCOMPLETE` / `E_STALE_REVISION` |
 | The record is a `studio.depletion/0.1` with an id, whose id equals the SHA-256 of its canonical text (Studio's rule: sorted keys, no spaces, the top-level `id` left out, number and string tokens as written, so `190.0` is not `190`) | `E_RECORD_INVALID` / `E_RECORD_ID` |
+| The record is valid UTF-8 text, declares `provenance.units` for the times ("days") and the burnup ("MWd per tonne of initial heavy metal") as Studio writes them, its step times add up to a finite number, and each region's cumulative burnup never decreases | `E_RECORD_INVALID` |
 | The region exists in the record | `E_REGION_UNKNOWN` |
 | The time lies inside the record: cumulative burnup at the **end** of each step, linear inside a step from the previous end, 0 at t = 0; never extrapolated | `E_TIME_MAPPING` |
 | The target declares the field and accepts a `burnup` source (`describe.transfers`) | `E_UNSUPPORTED` / `E_UNITS` |
+
+**Applying** reads the record a second time, so the apply step checks the file hash and the record id again against the recipe before it computes the value: what the target receives is always the approved record (`E_STALE_REVISION` otherwise).
 
 **The request to the target** (`seed.transfer-request/0.3`, its own `transfer` command, same transport): `recipe`, `recipeDigest`, `source: {kind: "record", record, recordId, recordSha256, region, time, quantity: {name: "burnup", dimension: "burnup", unit: "MWd/kgHM", basis: "heavy-metal", value}, original: {unit: "MWd/tU", value}, interpolated}` and `target: {artifact, revision, content}`. The target maps it into its case (FEED: `burnup.value`, `basis`, and a `source` text containing the record id) and replies as for any transfer. Its physical refusals stay its own (FEED: fuel conductivity `uo2-nfi`, steady only, 0 to 62 MWd/kgHM). **The applied record** names the record (`sourceRecordId`, `sourceRecordSha256`) instead of a run. Only the target app's oracle evidence is checked for a record source (there is no run and no source adapter).
 
