@@ -237,14 +237,23 @@ async function query(request, root, reply, fail) {
   const art = insideRoot(root, request.artifact && request.artifact.path);
   if (art.escaped) return fail(typed("E_PATH_TRAVERSAL", "/artifact/path", "the model path leaves the project"));
   if (art.missing) return fail(typed("E_NOT_FOUND", "/artifact/path", "the model file does not exist"));
-  const bytes = fs.readFileSync(art.abs);
+  let bytes;
+  try {
+    bytes = fs.readFileSync(art.abs);
+  } catch {
+    return fail(typed("E_NOT_FOUND", "/artifact/path", "the model file cannot be read"));
+  }
   const modelSha256 = sha256(bytes);
   if (modelSha256 !== request.artifact.revision.hash) return fail(typed("E_STALE_REVISION", "/artifact/revision/hash", "the model file does not match the revision named in the request"));
   const tmp = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "seed-nodal-query-"));
   try {
+    // The runner reads a private copy of exactly the bytes that were hashed: it never reopens the project's file, so a file replaced after the
+    // hash cannot be answered under the hash of the one that was checked.
+    const modelCopy = path.join(tmp, "model.json");
+    fs.writeFileSync(modelCopy, bytes);
     const queryFile = path.join(tmp, "query.json");
     fs.writeFileSync(queryFile, JSON.stringify(request.query));
-    const res = await runPython(cfg, [art.abs, "--query", queryFile]);
+    const res = await runPython(cfg, [modelCopy, "--query", queryFile]);
     const out = parseJson(res.stdout);
     if (res.code === 0 && out && out.ok === true) {
       const { ok: _ok, ...answer } = out;
@@ -254,10 +263,13 @@ async function query(request, root, reply, fail) {
       return fail(...out.errors.slice(0, 20).map((e) => {
         const code = String((e && e.code) || "");
         const mapped = QUERY_CODE[code] || (code.startsWith("E_QUERY_") ? "E_QUERY_INVALID" : "E_APP_FAILED");
-        return typed(mapped, String((e && e.field) || ""), (code ? code + ": " : "") + String((e && e.message) || "the runner refused the query").slice(0, 400), "app-content");
+        // the runner may quote the private copy's path: the client gets "the model", never a path of this machine
+        const text = String((e && e.message) || "the runner refused the query").split(tmp).join("the model").slice(0, 400);
+        return typed(mapped, String((e && e.field) || ""), (code ? code + ": " : "") + text, "app-content");
       }));
     }
-    return fail(appFailed("the NODAL runner could not answer the query", res));
+    // No stderr tail: a traceback names paths of this machine. The detail stays with the runner's own diagnostics.
+    return fail(typed("E_APP_FAILED", "", "the NODAL runner could not answer the query" + (res.timedOut ? " (timed out)" : " (exit " + res.code + ")")));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

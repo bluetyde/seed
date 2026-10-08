@@ -171,6 +171,44 @@ describe("query_model with a stub adapter: what the host checks", () => {
     expect(errs(await f.ask({}))).toEqual(["E_STALE_REVISION"]);
   });
 
+  it("a model that cannot be read after the query ran is refused like a changed one, and the query is still recorded", async () => {
+    process.env.QUERY_STUB_MODE = "remove";
+    const f = stubHost();
+    const o: any = await f.ask({ op: "summary" });
+    expect(o.ok).toBe(false);
+    expect(o.errors[0]).toMatchObject({ code: "E_STALE_REVISION", message: "the model file could not be read after the query ran" });
+    expect(f.logRows()).toHaveLength(1);
+    expect((f.logRows()[0]!.event as any).event).toMatchObject({ ok: false, codes: ["E_STALE_REVISION"] });
+  });
+
+  it("a model file that is gone before the query is E_NOT_FOUND without a path of this machine in the message", async () => {
+    const f = stubHost();
+    rmSync(f.model);
+    const o: any = await f.ask({});
+    expect(o.ok).toBe(false);
+    expect(o.errors[0].code).toBe("E_NOT_FOUND");
+    expect(JSON.stringify(o)).not.toContain(f.project);
+    expect(f.logRows()).toEqual([]);
+  });
+
+  it("a host state folder that cannot be used is refused without naming a path of this machine", async () => {
+    const f = stubHost();
+    writeFileSync(join(f.state, "queries"), "a file where the query log folder must be");
+    const o: any = await f.ask({});
+    expect(o.ok).toBe(false);
+    expect(o.errors[0].code).toBe("E_INTERNAL");
+    expect(JSON.stringify(o)).not.toContain(f.state);
+  });
+
+  it("an operating-system error (here ENOENT, the state folder is gone) is a fixed sentence, not a message that names a path", async () => {
+    const f = stubHost();
+    rmSync(f.state, { recursive: true, force: true });
+    const o: any = await f.ask({});
+    expect(o.ok).toBe(false);
+    expect(o.errors[0]).toMatchObject({ code: "E_INTERNAL", message: "the query could not be completed" });
+    expect(JSON.stringify(o)).not.toContain(f.state);
+  });
+
   it("an answer over a megabyte is refused", async () => {
     process.env.QUERY_STUB_MODE = "big";
     const f = stubHost();
@@ -271,6 +309,75 @@ function drainModel(repo: string): string {
   );
   return JSON.stringify(m, null, 2) + "\n";
 }
+
+// The adapter's own handling of the model file, with a stand-in runner module (a Python package named nodal_studio in a temporary folder, so it needs
+// only a Python): what path the runner is given, and what happens when the project's file is replaced while the runner works.
+describe.skipIf(!py)("the NODAL adapter's query reads a private copy of the bytes it hashed", () => {
+  const fakeRepo = () => {
+    const repo = tmp();
+    mkdirSync(join(repo, "nodal_studio"), { recursive: true });
+    writeFileSync(join(repo, "nodal_studio", "__init__.py"), "");
+    writeFileSync(join(repo, "nodal_studio", "run.py"), [
+      "import json, os, sys, time",
+      "model = sys.argv[1]",
+      "time.sleep(float(os.environ.get('STUB_DELAY', '0')))",
+      "if os.environ.get('STUB_MODE') == 'crash':",
+      "    raise RuntimeError('boom at ' + model + ' in ' + os.getcwd())",
+      "print(json.dumps({'ok': True, 'modelPath': model, 'content': open(model, encoding='utf-8').read()}))",
+      "",
+    ].join(String.fromCharCode(10)));
+    return repo;
+  };
+  const ask = (project: string, repo: string, hash: string, env: Record<string, string>) =>
+    new Promise<any>((done) => {
+      const child = require("node:child_process").spawn(process.execPath, [resolve(__dirname, "../adapters/nodal/cli.cjs"), "query"], {
+        env: { ...process.env, SEED_PROJECT_ROOT: project, SEED_NODAL_PYTHON: py!, SEED_NODAL_REPO: repo, ...env },
+      });
+      let out = "";
+      child.stdout.on("data", (d: Buffer) => (out += d));
+      child.on("close", () => done(JSON.parse(out.trim().split(String.fromCharCode(10)).pop()!)));
+      child.stdin.end(JSON.stringify({ schema: "seed.adapter-request/0.1", verb: "query", requestId: "snap", actor: agent, artifact: { path: "models/m/model.json", revision: { hash, counter: 1 } }, query: { op: "summary" } }));
+    });
+  const project = (text: string) => {
+    const root = tmp();
+    mkdirSync(join(root, "models", "m"), { recursive: true });
+    writeFileSync(join(root, "models", "m", "model.json"), text);
+    return root;
+  };
+
+  it("hands the runner a copy outside the project, with the bytes that were hashed", async () => {
+    const text = '{"format":"x"}';
+    const root = project(text);
+    const r = await ask(root, fakeRepo(), sha256Hex(text), {});
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.result.answer.content).toBe(text);
+    expect(r.result.modelSha256).toBe(sha256Hex(text));
+    expect(resolve(r.result.answer.modelPath).startsWith(resolve(root))).toBe(false);
+  }, 60000);
+
+  it("a file replaced while the runner works is not what the answer is about", async () => {
+    const original = '{"format":"original"}', replacement = '{"format":"replacement"}';
+    const root = project(original);
+    const pending = ask(root, fakeRepo(), sha256Hex(original), { STUB_DELAY: "1.5" });
+    await new Promise((r) => setTimeout(r, 600));
+    writeFileSync(join(root, "models", "m", "model.json"), replacement);
+    const r = await pending;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.result.answer.content).toBe(original);
+    expect(r.result.modelSha256).toBe(sha256Hex(original));
+  }, 60000);
+
+  it("a runner that crashes gives a fixed sentence: no traceback, no path of this machine", async () => {
+    const text = '{"format":"x"}';
+    const root = project(text), repo = fakeRepo();
+    const r = await ask(root, repo, sha256Hex(text), { STUB_MODE: "crash" });
+    expect(r.ok).toBe(false);
+    expect(r.errors[0].code).toBe("E_APP_FAILED");
+    expect(r.errors[0].message).toMatch(/^the NODAL runner could not answer the query \(exit \d+\)$/);
+    expect(JSON.stringify(r)).not.toContain(repo);
+    expect(JSON.stringify(r)).not.toContain(root);
+  }, 60000);
+});
 
 describe.skipIf(!haveNodal)("query_model against the real NODAL runner: the four plan questions", () => {
   const nodal = () => {
