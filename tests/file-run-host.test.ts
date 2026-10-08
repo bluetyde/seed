@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable, PassThrough } from "node:stream";
@@ -22,7 +22,7 @@ it("unrelated flat report receipts cannot exhaust this project's history", async
 });
 it("surfaces interrupted intent reservation and only a human can release a dead owner", async () => {
   const f = await fixture(), p = openProject(f.project); if (!p.ok) throw Error("fixture missing");
-  const folder = join(f.state, "desktop-intents", sha256Hex(p.value.manifest.projectId + "\n" + f.project)), reservation = join(folder, "reservation");
+  const folder = join(f.state, "desktop-intents", sha256Hex(p.value.manifest.projectId + "\n" + realpathSync(f.project))), reservation = join(folder, "reservation");
   mkdirSync(reservation, { recursive: true }); writeHostJson(join(reservation, "owner.json"), { pid: 99999999, token: "dead-fixture" });
   expect(lessonHistory(f.file, 0)).toMatchObject({ blocked: true });
   expect(releaseLessonReservation(f.file, {}).ok).toBe(false);
@@ -37,7 +37,7 @@ it("reserves intent capacity before launch and preserves existing entries", asyn
   const f = await fixture(), id = "desktop-11111111-1111-4111-8111-111111111111";
   saveLessonIntent(f.file, id, "approved");
   const projectId = openProject(f.project); if (!projectId.ok) throw Error("fixture missing");
-  const folder = join(f.state, "desktop-intents", sha256Hex(projectId.value.manifest.projectId + "\n" + f.project));
+  const folder = join(f.state, "desktop-intents", sha256Hex(projectId.value.manifest.projectId + "\n" + realpathSync(f.project)));
   for (let n = 1; n < 1000; n++) writeHostJson(join(folder, `desktop-${n.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000.json`), {});
   expect(() => saveLessonIntent(f.file, "desktop-22222222-2222-4222-8222-222222222222", "approved")).toThrow(/capacity/);
   expect(readdirSync(folder)).toHaveLength(1000);
@@ -208,7 +208,7 @@ it("a transient unconfirmed stop allows a fresh cancellation attempt", async () 
   const actual = f.config.runtime.path;
   writeFileSync(wrapper, `const fs=require('node:fs'),{spawnSync}=require('node:child_process');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>{const r=JSON.parse(text),verb=process.argv[2];if(verb==='cancel'&&!fs.existsSync(${JSON.stringify(flag)})){fs.writeFileSync(${JSON.stringify(flag)},'once');process.stdout.write(JSON.stringify({schema:'seed.adapter-reply/0.1',verb,requestId:r.requestId,ok:true,errors:[],warnings:[],result:{jobId:r.jobId,lifecycle:'running',cancelled:false}})+'\\n');}else{const p=spawnSync(process.execPath,[${JSON.stringify(actual)},verb],{input:text,encoding:'utf8',env:process.env});process.stdout.write(p.stdout);process.stderr.write(p.stderr);process.exitCode=p.status;}});`);
   f.config.adapter.args = [wrapper]; f.config.runtime = { path: wrapper, sha256: sha256Hex(readFileSync(wrapper)) }; saveHostConfiguration(f.file, f.config);
-  f.engineRoot = join(f.state, "engines", sha256Hex(wrapper));
+  f.engineRoot = join(f.state, "engines", sha256Hex(realpathSync(wrapper)));
   const m = await connectSeedMcp(f.file);
   try {
     const pending = m.client.callTool({ name: "seed_run_case", arguments: f.request });
@@ -434,7 +434,7 @@ it("journal tampering is detected rather than replaced", () => {
 // Review hardening 2026-10-05: reservation maintenance is a separate human admin entry, not a verb of the agent CLI.
 it("the agent CLI has no release verb; the admin CLI needs its own human configuration", async () => {
   const f = await fixture(), p = openProject(f.project); if (!p.ok) throw Error("fixture missing");
-  const folder = join(f.state, "desktop-intents", sha256Hex(p.value.manifest.projectId + "\n" + f.project)), reservation = join(folder, "reservation");
+  const folder = join(f.state, "desktop-intents", sha256Hex(p.value.manifest.projectId + "\n" + realpathSync(f.project))), reservation = join(folder, "reservation");
   mkdirSync(reservation, { recursive: true }); writeHostJson(join(reservation, "owner.json"), { pid: 99999999, token: "dead-fixture" });
   const { Readable } = await import("node:stream");
   const { runCli } = await import("../src/cli/seed");

@@ -29,6 +29,7 @@ const {
   appFailed,
   sha256,
   argvOf,
+  hasArg,
   normPath,
   typed,
   jobState,
@@ -317,8 +318,7 @@ function status(request, root, reply, fail) {
 function ownsRunner(cfg, j, pid) {
   const cl = commandLine(pid);
   if (cl === null) return false;
-  const args = argvOf(cl).map(normPath);
-  return args.includes(normPath(cfg.runner)) && args.includes("run") && args.includes(normPath(path.join(j.absRunDir, "native", "out")));
+  return hasArg(cl, cfg.runner) && hasArg(cl, "run") && hasArg(cl, path.join(j.absRunDir, "native", "out"));
 }
 
 /** Ask the runner to cancel this job's native run: it kills the processes carrying the run's owner tag (SCRAM in WSL) and checks none is left.

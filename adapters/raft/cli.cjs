@@ -30,6 +30,7 @@ const {
   appFailed,
   sha256,
   argvOf,
+  hasArg,
   normPath,
   typed,
   jobState,
@@ -197,7 +198,8 @@ async function validate(request, root, reply, fail) {
   }
   const parsed = parseJson(bytes.toString("utf8"));
   if (parsed && typeof parsed.library === "string" && portableRel(parsed.library)) {
-    const lib = insideRoot(root, path.relative(root, path.resolve(path.dirname(art.abs), parsed.library)).split(path.sep).join("/"));
+    // art.abs is a real path (insideRoot resolves links), so the root it is measured against must be real too: a project folder reached through a link (macOS /var to /private/var) is still inside itself.
+    const lib = insideRoot(root, path.relative(fs.realpathSync(root), path.resolve(path.dirname(art.abs), parsed.library)).split(path.sep).join("/"));
     if (lib.escaped) problems.push(typed("E_PATH_TRAVERSAL", "/library", "the library folder leaves the project"));
   }
   if (problems.every((p) => p.code === "E_STALE_REVISION")) {
@@ -264,8 +266,7 @@ function ownsRunner(j, pid) {
   const bundle = bundlePath();
   const cl = commandLine(pid);
   if (!bundle || cl === null) return false;
-  const args = argvOf(cl).map(normPath);
-  return args.includes(normPath(bundle)) && args.includes("run") && args.includes(normPath(path.join(j.absRunDir, "native", "out")));
+  return hasArg(cl, bundle) && hasArg(cl, "run") && hasArg(cl, path.join(j.absRunDir, "native", "out"));
 }
 
 async function cancel(request, root, reply, fail) {
