@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "../src/cli/seed";
 import { canonicalJson, sha256Hex } from "../src/core/canonical";
 import { saveHostConfiguration, type HostConfiguration } from "../src/core/fileRunHost";
@@ -16,9 +16,17 @@ import { queryFromHostFile, MAX_QUERY_BYTES } from "../src/core/queryHost";
 // and every way an adapter can misbehave); the four plan questions are tested against the real NODAL runner when it is there, through the host
 // function, the CLI and the MCP tool, with answers known by inspection of a hand-built model.
 
+// The real gate unless a test sets `denyQuery`: the gate has no configuration that refuses an A0 operation, so its refusal is tested by making it refuse.
+const gateSwitch = vi.hoisted(() => ({ deny: false }));
+vi.mock("../src/core/policy", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/core/policy")>();
+  return { ...real, evaluateGate: (req: any, ctx: any) => (gateSwitch.deny ? { allow: false, errors: [{ code: "E_NOT_PERMITTED", field: "/operation", message: "refused by the gate", source: "seed" }] } : real.evaluateGate(req, ctx)) };
+});
+
 const dirs: string[] = [];
 const saved = { mode: process.env.QUERY_STUB_MODE, py: process.env.SEED_NODAL_PYTHON, repo: process.env.SEED_NODAL_REPO };
 afterEach(() => {
+  gateSwitch.deny = false;
   for (const [k, v] of [["QUERY_STUB_MODE", saved.mode], ["SEED_NODAL_PYTHON", saved.py], ["SEED_NODAL_REPO", saved.repo]] as const) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -61,7 +69,7 @@ function host(opts: { adapter: { id: string; command: string; args: string[] }; 
     const sub = readdirSync(logDir())[0];
     return sub ? readAdmissions(join(logDir(), sub)) : [];
   };
-  return { root, project, state, hostFile, hash, inputs, config, logRows, model: join(project, opts.modelPath), ask: (q: unknown, extra: Record<string, unknown> = {}) => queryFromHostFile(hostFile, { requestId: "q1", caseId: "approved", query: q, ...extra }) };
+  return { root, project, state, hostFile, hash, inputs, config, logRows, model: join(project, opts.modelPath), modelText: opts.modelText, ask: (q: unknown, extra: Record<string, unknown> = {}) => queryFromHostFile(hostFile, { requestId: "q1", caseId: "approved", query: q, ...extra }) };
 }
 
 const stubAdapter = { id: "stub", command: process.execPath, args: [resolve(__dirname, "fixtures/query-adapter/cli.cjs")] };
@@ -164,7 +172,17 @@ describe("query_model with a stub adapter: what the host checks", () => {
     expect(o.errors[0]).toMatchObject({ code: "E_APP_FAILED" });
   });
 
-  it("no answer without a record: a query log that cannot be written is not answered", async () => {
+  it("the gate's refusal is returned as it is: the adapter is not asked, nothing is logged, nothing is answered", async () => {
+    process.env.QUERY_STUB_MODE = "mutate"; // would change the model if it were asked at all
+    const f = stubHost();
+    gateSwitch.deny = true;
+    const o: any = await f.ask({ op: "summary" });
+    expect(o).toMatchObject({ ok: false, errors: [{ code: "E_NOT_PERMITTED", field: "/operation", message: "refused by the gate" }] });
+    expect(f.logRows()).toEqual([]);
+    expect(readFileSync(f.model, "utf8")).toBe(f.modelText);
+  });
+
+  it("no answer without a record: a query log that is damaged is refused, and nothing is answered", async () => {
     const f = stubHost();
     mkdirSync(join(f.state, "queries"), { recursive: true });
     const sub = join(f.state, "queries", sha256Hex(realpathSync(f.project)).slice(0, 32));
@@ -172,6 +190,20 @@ describe("query_model with a stub adapter: what the host checks", () => {
     writeFileSync(join(sub, "admissions.jsonl"), "not json, no newline");
     const o: any = await f.ask({});
     expect(o.ok).toBe(false);
+    expect(o.answer).toBeUndefined();
+    expect(o.errors[0].code).toBe("E_INTERNAL");
+  });
+
+  it("no answer without a record: a query log that cannot be locked is refused with its own reason, and nothing is answered", async () => {
+    const f = stubHost();
+    const sub = join(f.state, "queries", sha256Hex(realpathSync(f.project)).slice(0, 32));
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, ".seed"), "a file where the lock folder's parent must be");
+    const o: any = await f.ask({});
+    expect(o.ok).toBe(false);
+    expect(o.answer).toBeUndefined();
+    expect(o.errors[0].code).toBe("E_INTERNAL");
+    expect(o.errors[0].message).toMatch(/could not be recorded/);
   });
 });
 
