@@ -100,13 +100,13 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  // Two sets are known while FEED merges its `claude/burnup-oracles` branch (2026-10-08): main's 53 entries and the branch's 72 (the 53 are byte-identical in
-  // both). Anything else is a silent addition or removal. Drop the 53 once FEED main has the 72.
+  // Two sets are known while FEED merges its `claude/limit-margin-oracles` branch (2026-10-08): main's 72 entries and the branch's 74 (the 72 are byte-identical in
+  // both; the two new ones pin `temperature_limit_margin`). Anything else is a silent addition or removal. Drop the 72 once FEED main has the 74.
   const KNOWN_SETS = [
-    { total: 53, good: 34, badInput: 17, knownLimit: 2 },
     { total: 72, good: 46, badInput: 24, knownLimit: 2 },
+    { total: 74, good: 48, badInput: 24, knownLimit: 2 },
   ];
-  it("loads a known set of entries (53, or FEED's 72 after its burnup oracles), all pinned and valid", () => {
+  it("loads a known set of entries (72, or FEED's 74 after its limit-margin oracles), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
     const count = (tag: string) => r.entries.filter((i) => i.entry.tag === tag).length;
@@ -118,7 +118,10 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
     if (!o.ok) throw new Error(JSON.stringify(o.errors));
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
     expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).feed);
-    expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(["energy_balance_residual", "energy_deposited", "heat_flux_outer", "temperature_peak", "temperature_peak_max", "temperature_surface"]);
+    // The 74-entry set adds the two limit-margin entries: the quantity `temperature_limit_margin` is then covered by an oracle (the 72 do not cover it).
+    const withLimitMargin = loadOracleEntries(join(base, "entries")).entries.length === 74;
+    const expected = ["energy_balance_residual", "energy_deposited", "heat_flux_outer", "temperature_peak", "temperature_peak_max", "temperature_surface", ...(withLimitMargin ? ["temperature_limit_margin"] : [])].sort();
+    expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(expected);
   });
 
   it("the adapter passes every entry: set passes, inputs verified, not blocked", async () => {
