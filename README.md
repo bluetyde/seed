@@ -31,6 +31,12 @@ It is for students and instructors who want reproducible, inspectable studies wi
 
 ![A guarded run: a request names a registered case and a budget; the gate checks it; the decision is logged before anything runs; the adapter runs the app; the outcome and a study-record step are written; a report later re-verifies the run.](docs/img/guarded-run.svg)
 
+### What a report looks like
+
+![The top of an example SEED study report: an education-only notice, the question and hypothesis, the study's parameters, budget and tier, the oracle verdict, a warning that two quantities are unverified, and the first run with its UNVERIFIED label.](docs/img/example-report.png)
+
+This is the top of a report made from SEED's own test fixture, which uses a fake engine, so it shows the layout and not a real calculation. A report is a folder: a self-contained HTML page, a Markdown copy, and the evidence and files it rests on. It states what the study asked, what the human set, which oracle evidence was pinned, and it labels every quantity VERIFIED, UNVERIFIED or STALE. It lists the steps and who took them, and it re-checks every run it cites against the audit log and the saved files before it is written.
+
 ## Limits
 
 - Experimental software. The interfaces are versioned (contracts v0.1 are final; a change means a new version and a migration), but expect rough edges.
