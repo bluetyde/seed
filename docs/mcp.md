@@ -18,6 +18,14 @@ Install the updated locked dependencies with `npm ci --include=dev`, then `npm r
 }
 ```
 
+**Claude Code** (a local stdio server, added from the command line; replace the paths):
+
+```
+claude mcp add seed -e SEED_HOST_CONFIG=C:/absolute/external/host.json -- node C:/absolute/path/to/experiment-studio/dist/mcp/seed.js
+```
+
+Claude Desktop and other clients take the same three values (command, arguments, environment). A long calculation needs the client's tool timeout raised to the study's wall budget plus margin (see your client's documentation). Connecting a real Claude client has not been tried yet (TODO.md, "Connect a real MCP client"); `tests/mcp-client-config.test.ts` starts the server exactly as the block above says and checks that the tools are discovered.
+
 Replace all paths with actual installed locations. The `mcpServers` envelope is client-specific; the command, arguments and environment are the required values. Use direct Node to keep stdout exclusively JSON-RPC. For manual launch, `npm run --silent seed:mcp` also suppresses npm banners. The trusted host file and evidence must be provisioned first; see [host-cli.md](host-cli.md). SEED does not automatically configure your AI client.
 
 ## Tool contract

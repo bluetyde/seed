@@ -170,7 +170,20 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 - [ ] Choose a distribution model; check licenses and redistribution terms before bundling any engine.
 - [ ] Pre-release checklist; adapter authoring guide; make the repo public only when the user says so.
 
+## Connect a real MCP client (2026-10-09)
+
+Claude Code now connects to local MCP servers, and Claude's settings can import local MCP servers (changelog the user quoted, 2026-10-09). SEED's server is a local stdio server, so it should work, but only the official SDK client has been tried. Not the cloud goal below (this one is the person's own computer).
+
+- [x] The documented client block (`docs/mcp.md`) starts the server and lists its tools; the Claude Code command (`claude mcp add seed -e SEED_HOST_CONFIG=... -- node .../dist/mcp/seed.js`) is in the document: `tests/mcp-client-config.test.ts` (3 tests; fails when the document drifts).
+- [ ] **By hand, once:** add SEED to Claude Code with that command against a real host file (a fixture project with the fake adapter is enough), call `seed_run_case`, `seed_query_model`, `seed_add_study_note` and `seed_export_study_report`, confirm the call timeout for a longer calculation, and confirm that no approval, clearance or accept tool is offered. Record what the client showed in `docs/mcp.md`.
+- [ ] Same for Claude Desktop (Settings, Import and the manual add), and whether the Import finds SEED at all: it reads other tools' saved MCP configs, and SEED registers itself nowhere.
+- [ ] Optional: a "Copy MCP config" button in the shell (Guide pane idea below) that writes the block with this machine's real paths, so nobody edits paths by hand.
+- [ ] Optional (plan 1 follow-up): a client other than the SDK and Claude (for example another agent runtime) calls the same tools.
+
 ## Remote and cloud agent sessions (idea, 2026-10-05)
+
+A separate goal from the item above, and a bigger one. What a Claude Code cloud environment offers (from the user's screenshot of the "Add environment" dialog, 2026-10-09; the dialog may change): a **network access level** ("Trusted" in the screenshot), **network secrets** (the session calls APIs without seeing the values), a **setup script** (bash, runs when a new session starts, before Claude Code launches; default `npm install`) and **environment variables** (`.env` format, **visible to anyone using the environment, so no secrets**). What that means for SEED: the setup script would fetch SEED, run `npm ci --include=dev` with the Electron download skipped (the CLI, MCP server and core need no Electron) and `npm run build`, and write the host configuration, the oracle evidence and the study header to a folder outside the project; the environment variables carry only paths (`SEED_HOST_CONFIG`, `SEED_STUDY_HEADER`); private app repositories need GitHub access through a network secret. Everything runs on Linux there. The trust boundary item below is unchanged and is the real blocker: a session with a shell can edit the host file, so the human-only gates do not hold unless the host runs outside the sandbox.
+
 
 Question from the user: could a Claude cloud session be started with SEED and use this workflow to develop something novel or test things? Yes in principle (everything runs headless: files, a CLI and an MCP server over one core, each app reached through its own runner process, the runtimes are Linux); what stands in the way, in the order I would do it. What a cloud environment provides has not been checked.
 
