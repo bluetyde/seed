@@ -430,6 +430,24 @@ describe.skipIf(!haveNodal)("query_model against the real NODAL runner: the four
     expect(readFileSync(f.model, "utf8")).toBe(drainModel(nodalRepo!)); // never changes the model
   }, 120000);
 
+  // NODAL main 1640ffd fixed an uncaught TypeError for a `unit` that is a list or an object (found by the Codex review of query_model, 2026-10-08).
+  // A unit that is not a word is a typed refusal from the runner itself, and SEED passes it on as the same typed refusal, never a crash.
+  it.each([["a list", ["mm"]], ["an object", {}], ["a number", 5], ["null", null], ["a boolean", true]])("a diameter unit that is %s is E_QUERY_BAD_UNIT from NODAL and a typed refusal from SEED, with no crash text", async (_name, unit) => {
+    const f = nodal();
+    const query = { op: "list", diameter: { min: 1, unit } };
+    const o: any = await f.ask(query);
+    expect(o.ok).toBe(false);
+    expect(o.errors[0].code).toBe("E_QUERY_INVALID");
+    expect(o.errors[0].message).toContain("E_QUERY_BAD_UNIT");
+    expect(JSON.stringify(o)).not.toMatch(/TypeError|Traceback|unhashable|nodal_studio[\/]/);
+    // the runner itself answers with its typed code and exit 2
+    const qf = join(f.root, "bad-unit.json");
+    writeFileSync(qf, JSON.stringify(query));
+    const direct = spawnSync(py!, ["-m", "nodal_studio.run", f.model, "--query", qf], { cwd: nodalRepo!, env: { ...process.env, PYTHONPATH: nodalRepo!, PYTHONUTF8: "1", PYTHONDONTWRITEBYTECODE: "1" }, encoding: "utf8" });
+    expect(direct.status).toBe(2);
+    expect(JSON.parse(direct.stdout)).toMatchObject({ ok: false, errors: [{ code: "E_QUERY_BAD_UNIT" }] });
+  }, 120000);
+
   it("the NODAL adapter checks the model itself, whoever calls it: a stale revision, a path that leaves the project and a missing file", async () => {
     const f = nodal();
     const ask = (artifact: Record<string, unknown>) => {
