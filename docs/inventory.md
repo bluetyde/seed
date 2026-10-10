@@ -1,6 +1,6 @@
 # App inventory (E0 task 1)
 
-2026-10-03, read-only inspection of the local checkouts by grep and file reads; no app was run and no app file changed. Evidence is the named file; "not verified" means I did not execute it. Revisions: NODAL Studio `1f7dd54`, RAFT `702ae12`, OpenMC Studio (the `C:\OpenMC` install, revision not recorded here). PRA and Fuel Performance Studio: `not built` (plans only).
+2026-10-03, read-only inspection of the local checkouts by grep and file reads; no app was run and no app file changed. Evidence is the named file; "not verified" means I did not execute it. Revisions: NODAL Studio `1f7dd54`, RAFT `702ae12`, OpenMC Studio (the installed copy, revision not recorded here). PRA and Fuel Performance Studio: `not built` (plans only).
 
 ## Per verb
 

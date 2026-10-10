@@ -1,6 +1,6 @@
 # OpenMC Studio adapter (design, 2026-10-05; not built yet)
 
-Status: design plus a proven first piece. Plan of record: `plans/experiment-studio/openmc-seed-adapter.md` (workspace).
+Status: design plus a proven first piece. Plan of record: the OpenMC adapter plan (kept outside this repository).
 
 ## Decision: the script is regenerated, never trusted (option 2)
 
