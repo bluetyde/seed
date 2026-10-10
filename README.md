@@ -84,6 +84,6 @@ To run the tests: `npm test`. Some tests need the suite apps or a WSL distributi
 
 SEED is released under the [MIT licence](LICENSE).
 
-It depends on open source packages that keep their own licences, listed with exact versions in `package.json` and `package-lock.json`: Electron, the Model Context Protocol SDK, Ajv, Zod, and (for development and tests) TypeScript, Vitest and Playwright. SEED does not bundle the suite apps or any calculation engine; each is installed separately and carries its own licence and terms.
+It depends on open source packages that keep their own licences: Electron, the Model Context Protocol SDK, Ajv, Zod, and (for development and tests) TypeScript, Vitest and Playwright. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists every package with its version, licence and licence text; it is generated from `package-lock.json`, and a test fails when the two disagree. SEED does not bundle the suite apps or any calculation engine; each is installed separately and carries its own licence and terms.
 
 SEED is not affiliated with or endorsed by the developers of the programs it can work with, such as OpenMC and OFFBEAT.

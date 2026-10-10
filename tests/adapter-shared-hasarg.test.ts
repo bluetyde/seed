@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // A process is proven to be a job's own by its command line (adapters/shared/util.cjs `hasArg`). Windows quotes an argument that has a space; a POSIX
-// `ps` does not quote anything, so a project under "/Users/me/Claude Code Test" must still match. The helper reads process.platform once when it loads,
+// `ps` does not quote anything, so a project under "/Users/me/My Projects" must still match. The helper reads process.platform once when it loads,
 // so each case runs in a child process with the platform set first: both branches are tested on every operating system.
 const util = resolve(__dirname, "../adapters/shared/util.cjs");
 
@@ -14,8 +14,8 @@ function ask(platform: "linux" | "win32", cl: string, value: string): boolean {
   return r.stdout === "true";
 }
 
-const SCRIPT = "/Users/me/Claude Code Test/seed/adapters/shared/job.cjs";
-const RUN = "/Users/me/Claude Code Test/project/runs/r-1";
+const SCRIPT = "/Users/me/My Projects/seed/adapters/shared/job.cjs";
+const RUN = "/Users/me/My Projects/project/runs/r-1";
 const TOKEN = "0123456789abcdef";
 const POSIX_LINE = `/usr/local/bin/node ${SCRIPT} ${RUN} ${TOKEN} {"command":"x"}`;
 
@@ -25,11 +25,11 @@ describe("hasArg on a POSIX command line (no quotes; paths may contain spaces)",
   });
 
   it.each([
-    ["a part of a longer path", "/Users/me/Claude Code Test/project/runs/r"],
+    ["a part of a longer path", "/Users/me/My Projects/project/runs/r"],
     ["a longer path than the one in the line", RUN + "-2"],
-    ["a sibling folder whose name starts the same", "/Users/me/Claude Code Test2/project/runs/r-1"],
+    ["a sibling folder whose name starts the same", "/Users/me/My Projects2/project/runs/r-1"],
     ["a part of the token", TOKEN.slice(1)],
-    ["the folder alone", "/Users/me/Claude Code Test"],
+    ["the folder alone", "/Users/me/My Projects"],
     ["an empty value", ""],
   ])("does not find %s", (_n, v) => {
     expect(ask("linux", POSIX_LINE, v)).toBe(false);

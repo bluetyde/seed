@@ -240,7 +240,7 @@ const normPath = (x) => (win ? x.split(BACKSLASH).join("/").toLowerCase() : x);
  * True when `value` is one whole argument of the command line `cl`. On Linux `cl` is the exact argument list (from /proc) and nothing is
  * ambiguous. Windows quotes an argument that has a space, so the line is split with its
  * quotes. A POSIX `ps` prints the arguments joined by spaces with no quotes at all, so an argument with a space in it (a project under
- * "/Users/me/Claude Code Test") cannot be told from two: there the line is searched for the value between spaces. That stays a proof of
+ * "/Users/me/My Projects") cannot be told from two: there the line is searched for the value between spaces. That stays a proof of
  * ownership because what is asked for is a job token, an absolute path (it starts with a slash or a drive letter, so it cannot begin in the middle
  * of another path) or a fixed word, never a loose fragment; a caller must not pass a relative fragment.
  */

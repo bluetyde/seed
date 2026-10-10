@@ -63,7 +63,7 @@ Follow the checklist in [plan 10](plans/10-release-and-packaging.md).
 
 ## 8. Multi-agent rules for this project
 
-Follows [`messages/INSTRUCTIONS.md`](../../messages/INSTRUCTIONS.md). Specific to this project:
+Follows the workspace's `messages/INSTRUCTIONS.md` (kept outside this repository). Specific to this project:
 
 - **Log:** `messages/experiment-studio.md`. Read it at the start of every session and append at the end.
 - **Claims** by area, matching the plans: `CLAIM: shell`, `CLAIM: project`, `CLAIM: adapters`, `CLAIM: runs`, `CLAIM: harness`, `CLAIM: oracles`, `CLAIM: studies`, `CLAIM: transfers`, `CLAIM: release`.
@@ -73,3 +73,7 @@ Follows [`messages/INSTRUCTIONS.md`](../../messages/INSTRUCTIONS.md). Specific t
 - **Ports and resources:** the shell and tests use random free ports; SEED claims none. Long engine runs: say in the log when one starts and its thread count. Do not start a second heavy run on top of someone else's. Do not touch other agents' runs, ports or the shared nuclear data.
 - **Other repos:** SEED only clones or reads them in its own tests. Changes to an app belong in that app's repo under its own claim.
 - **Keep TODO.md current:** check off finished items with the date and the evidence; add discovered work under the right milestone.
+
+## Changing dependencies
+
+After any change to `package-lock.json`, run `node scripts/gen-notices.cjs` and commit `THIRD_PARTY_NOTICES.md` with it; `tests/notices.test.ts` fails when the file was made from another lockfile.

@@ -8,7 +8,7 @@ Nothing merges to `main` until Claude has re-run the checks itself and the user 
 
 Decide with **step 0 ("Is it worth delegating?") of the antigravity-task skill**, `~/.claude/skills/antigravity-task/SKILL.md`. It is the single source for the rule; this board only applies it to this project's tasks. Run step 0 again before dispatching. How to brief, preflight, run and verify is in the same file.
 
-Reminders from the sibling project (Virtual Reactor, [its board](../../virtual-reactor/docs/AGENT-TASKS.md)): the clear wins are large, mechanical tasks whose contract is already fixed and whose oracle is strong (schemas with fixtures, golden vectors, screening scripts). Tasks that need judgment, nuclear or safety reasoning, or a feasibility prototype are net losses to delegate.
+Reminders from the sibling project (Virtual Reactor, its own task board, in that project's repository): the clear wins are large, mechanical tasks whose contract is already fixed and whose oracle is strong (schemas with fixtures, golden vectors, screening scripts). Tasks that need judgment, nuclear or safety reasoning, or a feasibility prototype are net losses to delegate.
 
 Note: SEED is Node/TypeScript, so the sandbox's Python version caveat (py_compile with the `--env` Python) does not apply to most of it; run `npx tsc --noEmit` and `npm test` with Node 24 instead, and check the sandbox has Node 24.
 

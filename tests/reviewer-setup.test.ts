@@ -29,8 +29,8 @@ describe("reviewer setup binding (review hardening 2026-10-05)", () => {
     expect(reviewerSetupProblem({ osUser: "alice" }, file, { username: "alice", platform: "linux" })).toMatch(/not owned/);
   });
   it("on Windows the account name is compared without case and file modes are not judged", () => {
-    const win = { username: "JWNCR", platform: "win32" };
-    expect(reviewerSetupProblem({ osUser: "jwncr" }, { uid: 0, mode: 0o100666 }, win)).toBeNull();
+    const win = { username: "ALICE", platform: "win32" };
+    expect(reviewerSetupProblem({ osUser: "alice" }, { uid: 0, mode: 0o100666 }, win)).toBeNull();
     expect(reviewerSetupProblem({ osUser: "other" }, { uid: 0, mode: 0o100666 }, win)).toMatch(/another operating-system account/);
   });
 });
