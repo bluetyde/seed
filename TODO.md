@@ -180,6 +180,21 @@ Claude Code now connects to local MCP servers, and Claude's settings can import 
 - [ ] Optional: a "Copy MCP config" button in the shell (Guide pane idea below) that writes the block with this machine's real paths, so nobody edits paths by hand.
 - [ ] Optional (plan 1 follow-up): a client other than the SDK and Claude (for example another agent runtime) calls the same tools.
 
+## Repeated runs: OpenMC Studio's boron search (2026-10-10, looked into at the user's request)
+
+The user remembered a Studio TODO item about running something several times and said that is more a SEED thing. **Confirmed**, and it is the **boron search**, not the pin-power view (they sit side by side in Studio's list): Studio's progress notes say "boron search (needs the boron ppm stored on the material and a repeat-run loop, maybe SEED's sweeps)" and its TODO says "`boron_search` (needs a repeated-run critical boron search)". Studio's `boron_search.py` (merged, 16 tests) has only the arithmetic: k to reactivity in pcm with its uncertainty, boron worth in pcm/ppm from two or more runs, and `find_critical`, an Illinois regula falsi that stops when k is within noise of the target instead of chasing Monte Carlo scatter. What is missing is the loop that runs OpenMC at the proposed boron values.
+
+Why it belongs with SEED: every iteration is a calculation that should pass the gate (tier, budget, a boron range a human declared), count against `maxCases`, be audited and become a step of the study record. A loop inside Studio's window has none of that: fine for a person at the screen, wrong for an agent.
+
+What SEED has and lacks: **sweeps** (built) run a fixed list of values chosen up front, which is enough for **boron worth** (register three ppm values, hand the three k results to `boron_worth`). A **critical search** is adaptive: the next ppm depends on the last k, and a sweep cannot do that.
+
+Two prerequisites on the Studio side, whatever SEED does: (1) the OpenMC adapter **refuses eigenvalue runs today** (`docs/adapter-openmc.md`: "eigenvalue, sweeps, CAD and MCNP refused"), and k needs an eigenvalue run; (2) the boron ppm must be a stored, bounded study parameter (Studio's "ppm stored on the material").
+
+Options: **A. sweep, then fit** (no new SEED code once the prerequisites exist): a bracketing sweep, then a second, finer sweep around the crossing, with Studio's functions doing the fit; every run is guarded. **B. an adaptive search in SEED's core**: a registered search (base case, one bounded parameter, objective quantity and target, stop rule, iteration limit counted against `maxCases`), each iteration a gated case, the next value from a pure root-finder; Studio's `find_critical` would then be the cross-check. **C. leave the loop in Studio's window** (unguarded; for a person only). **My recommendation: A for boron worth when the prerequisites exist; decide B after replay** (replay and cache define how repeated runs are counted and recorded) **and only if a second app wants a search** (NODAL, RAFT). Not decided by the user.
+
+- [ ] User decision: A, B or C (and whether to tell Studio's session).
+- [ ] Studio: eigenvalue support in the OpenMC adapter, and the boron ppm as a bounded parameter, before any of the options helps.
+
 ## Release hygiene (2026-10-10)
 
 From the survey session's audit of this repository: the user name in 2 current files and 7 commits, local paths in 14 files, 4 links that leave the repository, no notices file. History is not rewritten (the user: "we can't change the previous commits but we can change the next"); a scrub stays the user's call.
