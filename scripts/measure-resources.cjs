@@ -21,19 +21,19 @@ const { loadOracleEntries } = require(path.join(root, "dist", "core", "oracle.js
 
 const cfg = {
   raft: () => {
-    const repo = process.env.SEED_RAFT_REPO || path.join(home, "virtual-reactor");
+    const repo = process.env.SEED_RAFT_REPO || path.join(home, "raft");
     process.env.SEED_RAFT_HEADLESS = path.join(repo, "web", "dist-headless", "raft-headless.mjs");
     return { repo, settings: (e) => ({ case: e.inputs[0].path }), artifact: (e) => e.inputs[0], wsl: null };
   },
   feed: () => {
-    const repo = first(process.env.SEED_FEED_REPO, path.join(home, "fuel-performance-studio"), path.join(os.homedir(), "Claude Code Test", "fuel-performance-studio"));
+    const repo = first(process.env.SEED_FEED_REPO, path.join(home, "feed"));
     process.env.SEED_FEED_HEADLESS = path.join(repo, "dist", "cli", "headless.js");
     return { repo, settings: (e) => ({ case: e.inputs[0].path }), artifact: (e) => e.inputs[0], wsl: process.env.SEED_FEED_WSL_DISTRO || "feed-solver" };
   },
   nodal: () => {
-    const repo = first(process.env.SEED_NODAL_REPO, path.join(home, "nodal-seed"), path.join(home, "pipe-studio"));
+    const repo = first(process.env.SEED_NODAL_REPO, path.join(home, "nodal-studio"));
     process.env.SEED_NODAL_REPO = repo;
-    process.env.SEED_NODAL_PYTHON = first(process.env.SEED_NODAL_PYTHON, path.join(repo, ".venv", "Scripts", "python.exe"), path.join(home, "pipe-studio", ".venv", "Scripts", "python.exe"));
+    process.env.SEED_NODAL_PYTHON = first(process.env.SEED_NODAL_PYTHON, path.join(repo, ".venv", "Scripts", "python.exe"), path.join(home, "nodal-studio", ".venv", "Scripts", "python.exe"));
     return {
       repo,
       settings: (e) => {
@@ -45,12 +45,12 @@ const cfg = {
     };
   },
   pra: () => {
-    const repo = first(process.env.SEED_PRA_REPO, path.join(home, "pra-studio"), path.join(home, "sneed"), path.join(os.homedir(), "Claude Code Test", "pra-studio"));
+    const repo = first(process.env.SEED_PRA_REPO, path.join(home, "sneed"));
     process.env.SEED_PRA_REPO = repo;
     return { repo, settings: (e) => ({ model: e.inputs[0].path }), artifact: (e) => e.inputs[0], wsl: null };
   },
   openmc: () => {
-    const repo = first(process.env.SEED_OPENMC_REPO, path.join(home, "openmc-seed"));
+    const repo = first(process.env.SEED_OPENMC_REPO, path.join(home, "openmc-studio"));
     const distro = process.env.SEED_OPENMC_WSL_DISTRO || "Ubuntu";
     Object.assign(process.env, {
       SEED_OPENMC_REPO: repo,

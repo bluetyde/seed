@@ -10,10 +10,10 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { checkResultsAgainstRecord, checkResultsIndex } from "../src/core/semantic";
 import { validate } from "../src/core/validate";
 
-// The real tests need the SNEED checkout built with `npm run build:cli` (SEED_PRA_REPO, default a sibling folder pra-studio or sneed) and its
+// The real tests need the SNEED checkout built with `npm run build:cli` (SEED_PRA_REPO, default a sibling folder sneed) and its
 // installed SCRAM runtime in WSL (the runner starts it). They only read the checkout; every run writes to temp folders.
 // Without them the real-runner tests are skipped with a warning.
-const candidates = [process.env.SEED_PRA_REPO, join(__dirname, "..", "..", "pra-studio"), join(__dirname, "..", "..", "sneed"), join(homedir(), "Claude Code Test", "pra-studio")];
+const candidates = [process.env.SEED_PRA_REPO, join(__dirname, "..", "..", "sneed")];
 const repo = candidates.find(p => p && existsSync(join(p, "dist", "node", "cli", "headless.js"))) ?? "";
 const runner = join(repo, "dist", "node", "cli", "headless.js");
 const modelsDir = join(repo, "oracles", "seed", "models");

@@ -13,8 +13,8 @@ import { applyTransfer, evaluateTransfer, recordApproval, spawnTransferCommand, 
 // recipe names the first as the primary quantity and the second as the additional quantity with the role heat-transfer-coefficient, with the last
 // sample (or one at a time between samples) selected for a steady boundary. The fake boundary target (tests/fixtures/fake-transfer/boundary.cjs)
 // writes what it received; the expected values come from the committed golden vector of the model, not from the run.
-const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-seed"), join(__dirname, "..", "..", "pipe-studio")].find((p) => existsSync(join(p, "nodal_studio", "run.py"))) ?? "";
-const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "pipe-studio", ".venv", "Scripts", "python.exe")].find((p) => p && existsSync(p)) ?? "";
+const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-studio")].find((p) => existsSync(join(p, "nodal_studio", "run.py"))) ?? "";
+const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "nodal-studio", ".venv", "Scripts", "python.exe")].find((p) => p && existsSync(p)) ?? "";
 const have = python !== "" && repo !== "" && existsSync(join(repo, "schema", "vectors", "golden", "heated-pipe.json")) &&
   spawnSync(python, ["-m", "nodal_studio.run", "--describe"], { cwd: repo, env: { ...process.env, PYTHONPATH: repo }, encoding: "utf8" }).status === 0;
 
