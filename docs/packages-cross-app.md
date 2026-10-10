@@ -78,3 +78,5 @@ Mutations of the new code: 36 (`scripts/mutate-packages.cjs`), all caught; two f
 - **Conflicts count from both sides**, for what is selected and what stays installed.
 - **A platform that does not say how it runs (native or WSL) does not satisfy a component that names a mode.**
 - **Removal** touches only what the target brought in (what it depends on and what makes the records it consumes, transitively), never an unrelated component. It is refused while a component of any app (when `manifests` is given) consumes a record the target makes and no other installed component makes it.
+
+**Decided 2026-10-10 (D9):** NODAL's `pid/` P&ID generator is an optional add-on of NODAL; `elkjs` stays inside it and becomes a shared library component only if a second app needs it.
