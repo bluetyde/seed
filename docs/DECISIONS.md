@@ -54,3 +54,22 @@ Design decisions with their reasons, newest last. A decision changes only by a n
 - **Why not a mode of `validate`:** `validate` answers valid or invalid; a query answers with data, which needs its own reply shape and its own size limit.
 - **Not decided:** a query as a step of the study record; other apps' query vocabularies. Details: [query-model.md](query-model.md).
 
+## D8 (2026-10-10): Repeated-run searches start as sweep, then fit
+
+- **Decision (user, option A):** Studio's boron search, and any search like it, is built from registered **sweeps** and a fit: a bracketing sweep, then a finer sweep around the crossing, with the app's own functions (Studio's `boron_worth` and `find_critical`) doing the arithmetic. Every run is a guarded case. No adaptive search is added to SEED's core now.
+- **Why:** a sweep needs no new core code, and each run keeps the gate, the budget and the study record. An adaptive search (the next value depends on the last result) is a larger change to settle after replay, which defines how repeated runs are counted and recorded.
+- **Revisit:** after replay, and only if a second app (NODAL, RAFT) wants a search.
+- **Prerequisites, on Studio's side (not decided here):** the OpenMC adapter refuses eigenvalue runs today, and the boron ppm must become a stored, bounded study parameter. Details in `TODO.md`, "Repeated runs: OpenMC Studio's boron search".
+
+## D9 (2026-10-10): `pid/` is an optional add-on; `elkjs` becomes a library only when a second app wants it
+
+- **Decision (user):** NODAL's P&ID generator (`pid/`: schematic, ELK layout, DEXPI export) is offered as an **optional add-on** component of NODAL under the packages design ([packages-cross-app.md](packages-cross-app.md)). `elkjs`, the layout library it uses, stays inside that add-on and becomes a shared **library** component only if a second app needs it.
+- **Why:** a library component pays off when more than one component depends on it; with one user it only adds a catalog entry to keep in step.
+- **Not decided:** when the add-on is built (the NODAL session's schedule).
+
+## D10 (2026-10-10): Tests find the apps by `SEED_*_REPO`, then generic sibling folder names
+
+- **Decision (user):** a test or script that needs a real app checkout looks at the `SEED_*_REPO` variable first and then at a sibling folder with the app's repository name (`../openmc-studio`, `../nodal-studio`, `../raft`, `../feed`, `../sneed`). No workspace folder name and no local clone name is kept as a default.
+- **Why:** a release should not carry one machine's folder names. The variables stay the reliable route; the generic names keep the convenience for anyone who clones the apps next to SEED.
+- **Consequence:** a developer whose checkouts have other names sets the variables, or links the folders.
+

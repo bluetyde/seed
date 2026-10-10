@@ -192,7 +192,7 @@ Two prerequisites on the Studio side, whatever SEED does: (1) the OpenMC adapter
 
 Options: **A. sweep, then fit** (no new SEED code once the prerequisites exist): a bracketing sweep, then a second, finer sweep around the crossing, with Studio's functions doing the fit; every run is guarded. **B. an adaptive search in SEED's core**: a registered search (base case, one bounded parameter, objective quantity and target, stop rule, iteration limit counted against `maxCases`), each iteration a gated case, the next value from a pure root-finder; Studio's `find_critical` would then be the cross-check. **C. leave the loop in Studio's window** (unguarded; for a person only). **My recommendation: A for boron worth when the prerequisites exist; decide B after replay** (replay and cache define how repeated runs are counted and recorded) **and only if a second app wants a search** (NODAL, RAFT). Not decided by the user.
 
-- [ ] User decision: A, B or C (and whether to tell Studio's session).
+- [x] **Decided by the user, 2026-10-10: A** (decision D8: sweep, then fit; revisit B after replay and only if a second app wants a search). Open: whether to tell Studio's session.
 - [ ] Studio: eigenvalue support in the OpenMC adapter, and the boron ppm as a bounded parameter, before any of the options helps.
 
 ## Release hygiene (2026-10-10)
