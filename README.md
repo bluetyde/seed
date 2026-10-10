@@ -80,6 +80,10 @@ To run the tests: `npm test`. Some tests need the suite apps or a WSL distributi
 - [TODO.md](TODO.md): the working list.
 - [docs/](docs/README.md): design notes, decisions with their reasons, contracts, and a guide for each adapter.
 
+## How it was made
+
+SEED was made with the assistance of AI coding agents.
+
 ## Licence and third-party software
 
 SEED is released under the [MIT licence](LICENSE).
