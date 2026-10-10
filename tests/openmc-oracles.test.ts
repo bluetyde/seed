@@ -16,7 +16,7 @@ import { oracleRequestId } from "./helpers/oracleRequest";
 // tolerances of 4 sigma of the predicted statistical error, fixed before any case was run; plus bad-input refusals. They run through the adapter
 // and the run manager against real OpenMC in WSL. Needs the same pieces as tests/openmc-adapter.test.ts.
 const win = process.platform === "win32";
-const candidates = [process.env.SEED_OPENMC_REPO, join(__dirname, "..", "..", "openmc-seed"), join(homedir(), "Claude Code Test", "openmc-studio")];
+const candidates = [process.env.SEED_OPENMC_REPO, join(__dirname, "..", "..", "openmc-studio")];
 const repo = candidates.find(p => p && existsSync(join(p, "oracles", "seed", "entries")) && existsSync(join(p, "studio", "tools", "regen_script.cjs"))) ?? "";
 const electron = process.env.SEED_ELECTRON ?? join(__dirname, "..", "node_modules", "electron", "dist", win ? "electron.exe" : "electron");
 const distro = process.env.SEED_OPENMC_WSL_DISTRO ?? "Ubuntu";

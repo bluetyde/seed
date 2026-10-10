@@ -13,19 +13,18 @@ import { applyInstall, parseRegistry, type AppEntry } from "../src/main/apps";
 // machine is skipped by name, so a skipped count is a count of apps not checked.
 const registry = parseRegistry(readFileSync(join(__dirname, "..", process.platform === "win32" ? "apps.windows.json" : "apps.default.json"), "utf-8"));
 const homeRoot = join(__dirname, "..", "..");
-const sharedRoot = join(process.env.USERPROFILE ?? process.env.HOME ?? "", "Claude Code Test");
 const first = (...c: (string | undefined)[]) => c.find((p) => p && existsSync(p));
-// where an install of each app may be (env override first; the clones of this machine; the shared folder)
+// where an install of each app may be (the SEED_*_REPO variable first, then a sibling folder named as the catalog names it)
 const installs: Record<string, { dir: string | undefined; needs: string[] }> = {
-  "openmc-studio": { dir: first(process.env.SEED_OPENMC_REPO, join(homeRoot, "openmc-seed")), needs: ["studio/start.sh"] },
-  // nodal-seed is the SEED agent's read-only clone and has no installed web dependencies; pipe-studio is the NODAL session's, which does
+  "openmc-studio": { dir: first(process.env.SEED_OPENMC_REPO, join(homeRoot, "openmc-studio")), needs: ["studio/start.sh"] },
+  // the NODAL checkout needs its web dependencies installed
   "nodal-studio": {
-    dir: [process.env.SEED_NODAL_REPO, join(homeRoot, "nodal-seed"), join(homeRoot, "pipe-studio")].find((p) => p && existsSync(join(p, "web", "node_modules", "vite", "bin", "vite.js"))),
+    dir: [process.env.SEED_NODAL_REPO, join(homeRoot, "nodal-studio")].find((p) => p && existsSync(join(p, "web", "node_modules", "vite", "bin", "vite.js"))),
     needs: ["web/node_modules/vite/bin/vite.js"],
   },
-  "virtual-reactor": { dir: first(process.env.SEED_RAFT_REPO, join(homeRoot, "virtual-reactor")), needs: ["web/node_modules/vite/bin/vite.js"] },
-  feed: { dir: first(process.env.SEED_FEED_REPO, join(sharedRoot, "fuel-performance-studio")), needs: ["dist/server/server.js"] },
-  sneed: { dir: first(process.env.SEED_PRA_REPO, join(homeRoot, "pra-studio"), join(sharedRoot, "pra-studio")), needs: ["node_modules/tsx/dist/cli.mjs", "dist/web/index.html"] },
+  "virtual-reactor": { dir: first(process.env.SEED_RAFT_REPO, join(homeRoot, "raft")), needs: ["web/node_modules/vite/bin/vite.js"] },
+  feed: { dir: first(process.env.SEED_FEED_REPO, join(homeRoot, "feed")), needs: ["dist/server/server.js"] },
+  sneed: { dir: first(process.env.SEED_PRA_REPO, join(homeRoot, "sneed")), needs: ["node_modules/tsx/dist/cli.mjs", "dist/web/index.html"] },
 };
 // SNEED keeps its models and runs under the user's home by default: point both at a throw-away folder for the check
 const scratch = mkdtempSync(join(tmpdir(), "seed-launch-"));

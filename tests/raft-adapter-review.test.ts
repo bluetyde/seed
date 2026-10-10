@@ -10,7 +10,7 @@ import { RunManager, type Budget } from "../src/core/runManager";
 
 // Regression tests for the Codex review of the RAFT adapter (2026-10-03). Same requirements as raft-adapter.test.ts:
 // the RAFT repo (SEED_RAFT_REPO, default a sibling folder virtual-reactor) with its headless runner built.
-const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "virtual-reactor");
+const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "raft");
 const realBundle = join(repo, "web", "dist-headless", "raft-headless.mjs");
 const haveRaft = existsSync(realBundle);
 const stubBundle = join(__dirname, "fixtures", "raft-stub", "raft-headless.mjs");

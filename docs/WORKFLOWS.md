@@ -77,3 +77,8 @@ Follows the workspace's `messages/INSTRUCTIONS.md` (kept outside this repository
 ## Changing dependencies
 
 After any change to `package-lock.json`, run `node scripts/gen-notices.cjs` and commit `THIRD_PARTY_NOTICES.md` with it; `tests/notices.test.ts` fails when the file was made from another lockfile.
+
+## How the real-app tests find the apps
+
+A test or script that needs a real app looks at the `SEED_*_REPO` variable first (`SEED_OPENMC_REPO`, `SEED_NODAL_REPO`, `SEED_RAFT_REPO`, `SEED_FEED_REPO`, `SEED_PRA_REPO` for SNEED), then at a sibling folder of this repository named as the catalog names it: `openmc-studio`, `nodal-studio`, `raft`, `feed`, `sneed` (decision D10). If neither is there, the test is skipped by name, so a skipped count is a count of apps not checked. A checkout under another name needs the variable (or a link with the catalog name).
+

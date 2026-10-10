@@ -8,7 +8,7 @@ import { sha256Hex } from "../src/core/canonical";
 import { loadOracleEntries } from "../src/core/oracle";
 import { RunManager } from "../src/core/runManager";
 
-const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "virtual-reactor");
+const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "raft");
 const bundle = join(repo, "web", "dist-headless", "raft-headless.mjs");
 const base = join(repo, "oracles", "seed");
 const available = existsSync(bundle) && existsSync(join(base, "entries"));

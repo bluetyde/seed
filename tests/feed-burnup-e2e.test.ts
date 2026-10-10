@@ -15,7 +15,7 @@ import { applyTransferFromHost, approveTransfer, proposeTransfer, saveTransferHo
 // command line of FEED's headless runner and the `describe.transfers` the real runner reports, on FEED's own example case and Studio's real record.
 // Needs a FEED checkout with `npm run build` and the burnup transfer (FEED main 5e4952a or later): SEED_FEED_REPO, else a sibling folder.
 // It does not run FEED's solver: a transfer only rewrites the case. Skipped, loudly, when FEED is not there.
-const candidates = [process.env.SEED_FEED_REPO, resolve(__dirname, "../../feed-seed"), resolve(__dirname, "../../fuel-performance-studio"), join(homedir(), "Claude Code Test", "fuel-performance-studio")];
+const candidates = [process.env.SEED_FEED_REPO, resolve(__dirname, "../../feed")];
 const repo = candidates.find((p) => p && existsSync(join(p, "dist", "cli", "headless.js")) && existsSync(join(p, "examples", "lwr-uo2-burnup.json")));
 const bundle = repo ? join(repo, "dist", "cli", "headless.js") : "";
 const describeOut = repo ? spawnSync(process.execPath, [bundle, "describe"], { encoding: "utf8" }) : undefined;

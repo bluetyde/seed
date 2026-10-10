@@ -10,12 +10,12 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { checkResultsAgainstRecord, checkResultsIndex } from "../src/core/semantic";
 import { validate } from "../src/core/validate";
 
-// The real tests need the OpenMC Studio checkout with the SEED integration (SEED_OPENMC_REPO, default a sibling folder openmc-seed), SEED's
+// The real tests need the OpenMC Studio checkout with the SEED integration (SEED_OPENMC_REPO, default a sibling folder openmc-studio), SEED's
 // Electron (SEED_ELECTRON, default this repository's node_modules) and OpenMC with nuclear data in the runtime: on Windows a WSL distro
 // (SEED_OPENMC_WSL_DISTRO, default Ubuntu; SEED_OPENMC_PYTHON and SEED_OPENMC_DATA as WSL paths), elsewhere native paths.
 // Without them the real-runner tests are skipped with a warning.
 const win = process.platform === "win32";
-const repo = process.env.SEED_OPENMC_REPO ?? join(__dirname, "..", "..", "openmc-seed");
+const repo = process.env.SEED_OPENMC_REPO ?? join(__dirname, "..", "..", "openmc-studio");
 const electron = process.env.SEED_ELECTRON ?? join(__dirname, "..", "node_modules", "electron", "dist", win ? "electron.exe" : "electron");
 const distro = process.env.SEED_OPENMC_WSL_DISTRO ?? "Ubuntu";
 const py = process.env.SEED_OPENMC_PYTHON ?? "/root/miniconda3/envs/openmc-mcnp/bin/python";

@@ -10,9 +10,9 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { validate } from "../src/core/validate";
 
 // Regression tests for the Codex review of the NODAL adapter (2026-10-05). Same requirements as nodal-adapter.test.ts: the NODAL repo
-// (SEED_NODAL_REPO, default a sibling folder pipe-studio) on a branch with the runner's JSON modes, and its Python (SEED_NODAL_PYTHON).
-const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-seed"), join(__dirname, "..", "..", "pipe-studio")].find(p => existsSync(join(p, "nodal_studio", "run.py"))) ?? join(__dirname, "..", "..", "pipe-studio");
-const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "pipe-studio", ".venv", "Scripts", "python.exe"), join(__dirname, "..", "..", "pipe-studio", ".venv", "bin", "python")].find(p => p && existsSync(p)) ?? "";
+// (SEED_NODAL_REPO, default a sibling folder nodal-studio) on a branch with the runner's JSON modes, and its Python (SEED_NODAL_PYTHON).
+const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-studio")].find(p => existsSync(join(p, "nodal_studio", "run.py"))) ?? join(__dirname, "..", "..", "nodal-studio");
+const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "nodal-studio", ".venv", "Scripts", "python.exe"), join(__dirname, "..", "..", "nodal-studio", ".venv", "bin", "python")].find(p => p && existsSync(p)) ?? "";
 const haveNodal =
   python !== "" &&
   existsSync(join(repo, "nodal_studio", "run.py")) &&

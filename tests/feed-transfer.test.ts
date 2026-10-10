@@ -12,7 +12,7 @@ import { applyTransfer, evaluateTransfer, recordApproval, spawnTransferCommand, 
 // source run is mapped onto the axial slices of a pin and sets one slice's linear heat rate in a real FEED case. Expected values
 // are computed here from the bins, independently of FEED's code. Needs the FEED checkout built (`npm run build`), no solver.
 // Set SEED_FEED_REPO to the FEED checkout. Skipped, loudly, when the build has no `transfer` command.
-const repoCandidates = [process.env.SEED_FEED_REPO, join(__dirname, "..", "..", "fuel-performance-studio"), join(homedir(), "Claude Code Test", "fuel-performance-studio")];
+const repoCandidates = [process.env.SEED_FEED_REPO, join(__dirname, "..", "..", "feed")];
 const repo = repoCandidates.find((p) => p && existsSync(join(p, "dist", "cli", "headless.js"))) ?? "";
 const bundle = join(repo, "dist", "cli", "headless.js");
 const casePath = join(repo, "oracles", "seed", "models", "synthetic-const.case.json");

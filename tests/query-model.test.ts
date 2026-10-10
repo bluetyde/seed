@@ -294,8 +294,8 @@ describe("query_model through MCP", () => {
 });
 
 // ---- the real NODAL runner ----------------------------------------------------------------------------------------------------------
-const nodalRepo = process.env.SEED_NODAL_REPO ?? [resolve(__dirname, "../../nodal-seed"), resolve(__dirname, "../../pipe-studio")].find((p) => existsSync(join(p, "nodal_studio", "query.py")));
-const py = [process.env.SEED_NODAL_PYTHON, nodalRepo && join(nodalRepo, ".venv", "Scripts", "python.exe"), nodalRepo && join(nodalRepo, ".venv", "bin", "python"), resolve(__dirname, "../../pipe-studio/.venv/Scripts/python.exe"), resolve(__dirname, "../../pipe-studio/.venv/bin/python")].find((p) => p && existsSync(p));
+const nodalRepo = process.env.SEED_NODAL_REPO ?? [resolve(__dirname, "../../nodal-studio")].find((p) => existsSync(join(p, "nodal_studio", "query.py")));
+const py = [process.env.SEED_NODAL_PYTHON, nodalRepo && join(nodalRepo, ".venv", "Scripts", "python.exe"), nodalRepo && join(nodalRepo, ".venv", "bin", "python"), resolve(__dirname, "../../nodal-studio/.venv/Scripts/python.exe"), resolve(__dirname, "../../nodal-studio/.venv/bin/python")].find((p) => p && existsSync(p));
 const haveNodal = !!nodalRepo && !!py;
 
 function drainModel(repo: string): string {
