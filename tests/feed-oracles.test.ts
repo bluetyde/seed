@@ -100,14 +100,10 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  // Two sets are known while FEED merges its `claude/ga-oracles` branch (2026-10-10): main's 74 entries (since 6165412) and the branch's 78 (the 74 are
-  // byte-identical in both; the four new ones are the first `published` oracles, from General Atomic report GA-7882: two pulse cases, each pinning
-  // `energy_deposited` and `temperature_peak_max`). Anything else is a silent addition or removal. Drop the 74 once FEED main has the 78.
-  const KNOWN_SETS = [
-    { total: 74, good: 48, badInput: 24, knownLimit: 2 },
-    { total: 78, good: 52, badInput: 24, knownLimit: 2 },
-  ];
-  it("loads a known set of entries (FEED's 74, or its 78 with the General Atomic pulse cases), all pinned and valid", () => {
+  // FEED main has 78 entries since 2026-10-10 (972ddbf): the 74 before it plus the first `published` oracles, from General Atomic report GA-7882 (two pulse
+  // cases, each pinning `energy_deposited` and `temperature_peak_max`). Anything else is a silent addition or removal.
+  const KNOWN_SETS = [{ total: 78, good: 52, badInput: 24, knownLimit: 2 }];
+  it("loads FEED's 78 entries (52 good, 24 bad-input, 2 known-limit), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
     const count = (tag: string) => r.entries.filter((i) => i.entry.tag === tag).length;
