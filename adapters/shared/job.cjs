@@ -94,12 +94,21 @@ function stopRunner() {
 function abort(reason) {
   if (timer) clearInterval(timer);
   const native = child ? cancelNative() : "no native run started";
-  const stopped = stopRunner();
-  try {
-    atomicWrite(path.join(absRunDir, "native", "job-error.txt"), String(reason).slice(0, 1700) + " (" + native + "; " + stopped + ")" + String.fromCharCode(10));
-  } catch {
-    // nowhere left to write: the exit status is the only report
+  const note = (stopped) => {
+    try {
+      atomicWrite(path.join(absRunDir, "native", "job-error.txt"), String(reason).slice(0, 1700) + " (" + native + "; " + stopped + ")" + String.fromCharCode(10));
+    } catch {
+      // nowhere left to write: the exit status is the only report
+    }
+  };
+  if (process.platform !== "win32" && child && child.exitCode === null) {
+    // On Linux and macOS the runner shares this wrapper's process group and is stopped by killing the group, and that ends this wrapper too:
+    // nothing after the kill runs. So the reason is written first, and says that the runner goes with the wrapper.
+    note("the runner is stopped together with this wrapper, as one process group");
   }
+  const stopped = stopRunner();
+  // reached on Windows, with no runner, or when the group kill did not take effect: the whole account can be written
+  note(stopped);
   process.exit(1);
 }
 
