@@ -813,6 +813,29 @@ describe("3. Job scenarios", () => {
     }
   });
 
+  it("a job that is slow to start is running when status is asked right after run (run answers once the job has its first heartbeat)", async () => {
+    const proj = makeProject();
+    const runDir = "runs/run-slow-start";
+    proj.createFile(join(runDir, "inputs/data.txt"), "slow-start");
+    const runOutcome = await callAdapter(
+      spec,
+      { schema: "seed.adapter-request/0.1", verb: "run", requestId: "req-slow-start", actor, snapshot: { inputs: [{ path: "data.txt", sha256: sha256Hex("slow-start") }] }, runDir, budget, settings: { scenario: "slow-start" } },
+      { projectRoot: proj.root, timeoutMs: 5000 }
+    );
+    expect(runOutcome.ok).toBe(true);
+    const jobId = (runOutcome as any).reply.result.jobId;
+    const jobData = JSON.parse(readFileSync(join(proj.root, runDir, "native/job.json"), "utf8"));
+    proj.registerPid(jobData.pid);
+    const statusOutcome = await callAdapter(
+      spec,
+      { schema: "seed.adapter-request/0.1", verb: "status", requestId: "req-slow-start-stat", actor, jobId },
+      { projectRoot: proj.root, timeoutMs: 3000 }
+    );
+    expect(statusOutcome.ok).toBe(true);
+    expect((statusOutcome as any).reply.result.lifecycle).toBe("running");
+    await callAdapter(spec, { schema: "seed.adapter-request/0.1", verb: "cancel", requestId: "req-slow-start-cancel", actor, jobId }, { projectRoot: proj.root, timeoutMs: 5000 });
+  });
+
   it("hang stays running, then cancel -> cancelled true and job pid is dead", async () => {
     const proj = makeProject();
     const runDir = "runs/run-hang";

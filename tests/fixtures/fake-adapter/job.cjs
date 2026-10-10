@@ -25,6 +25,9 @@ function atomicWrite(targetPath, content) {
 
 fs.mkdirSync(nativeDir, { recursive: true });
 
+// "slow-start": the wrapper takes 1.5 s to write its first status and heartbeat, then hangs like "hang"
+if (scenario === "slow-start") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+
 const startedAt = new Date().toISOString();
 atomicWrite(statusPath, JSON.stringify({ status: "running", startedAt }, null, 2) + "\n");
 atomicWrite(heartbeatPath, JSON.stringify({ token, time: startedAt }, null, 2) + "\n");
@@ -53,7 +56,7 @@ if (scenario === "crash") {
   process.exit(3);
 }
 
-if (scenario === "hang") {
+if (scenario === "hang" || scenario === "slow-start") {
   // Heartbeat forever; never finish
 } else if (scenario === "success" || scenario === "slow") {
   setTimeout(() => {
