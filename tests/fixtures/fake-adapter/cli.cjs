@@ -498,6 +498,13 @@ process.stdin.on("end", async () => {
     const jobIdx = path.join(root, ".seed-jobs", `${jobId}.json`);
     atomicWrite(jobIdx, JSON.stringify({ runDir: request.runDir }) + "\n");
 
+    // A real adapter's `run` answers once its job has started (the shared wrapper confirms over IPC). This fixture has no such channel, so it waits for
+    // the job's first heartbeat: without it a `status` asked right after `run` could find no heartbeat yet and call a starting job failed.
+    const firstBeat = path.join(nativeDir, "heartbeat.json");
+    for (let waited = 0; waited < 3000 && !fs.existsSync(firstBeat) && isAlive(pid); waited += 10) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
     sendReply({
       ok: true,
       errors: [],
