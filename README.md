@@ -79,6 +79,7 @@ To run the tests: `npm test`. Some tests need the suite apps or a WSL distributi
 - [PLAN.md](PLAN.md): what is built and what is planned.
 - [TODO.md](TODO.md): the working list.
 - [docs/](docs/README.md): design notes, decisions with their reasons, contracts, and a guide for each adapter.
+- [What is not independently verified](docs/independence.md): the limits of the evidence, point by point.
 
 ## How it was made
 
