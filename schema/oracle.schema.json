@@ -288,6 +288,24 @@
                     "pattern": "^[EW]_[A-Z0-9_]{2,40}$"
                   }
                 }
+              },
+              {
+                "type": "object",
+                "required": ["quantity", "value", "unit"],
+                "additionalProperties": false,
+                "properties": {
+                  "quantity": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/unit"
+                  }
+                }
               }
             ]
           }

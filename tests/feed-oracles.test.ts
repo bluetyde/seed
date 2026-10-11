@@ -133,7 +133,8 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
     // In the 92-entry set one known-limit entry expects a number it is known to miss (FEED's penalty contact is 2.7 to 3.1 % low for a fuel a quarter as
     // stiff as its cladding, the entry's tolerance is 2 %): it fails by design, the set still passes, and its quantity is unverified.
     const mech = entries.length === 92;
-    expect(set.results.filter((r) => r.verdict !== "pass").map((r) => r.oracleId)).toEqual(mech ? ["feed-mechanics-gap-closure-soft-fuel-contact-pressure"] : []);
+    const notPassing = set.results.filter((r) => r.verdict !== "pass");
+    expect(notPassing.map((r) => r.oracleId), JSON.stringify(notPassing.map((r) => [r.oracleId, r.verdict, r.reason]))).toEqual(mech ? ["feed-mechanics-gap-closure-soft-fuel-contact-pressure"] : []);
     expect(set.verdict).toBe("pass");
     expect(set.inputsVerified).toBe(true);
     expect(set.blocked).toBe(false);
