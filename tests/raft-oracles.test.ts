@@ -1,3 +1,4 @@
+// @covers R-ADAPT-04, R-ORA-01
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";

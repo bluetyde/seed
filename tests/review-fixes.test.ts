@@ -1,3 +1,4 @@
+// @covers R-CORE-02, R-REV-01, R-REV-04, R-REV-05
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";

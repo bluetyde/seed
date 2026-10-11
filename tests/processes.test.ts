@@ -1,3 +1,4 @@
+// @covers R-SHELL-07
 import * as http from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";

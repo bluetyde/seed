@@ -1,3 +1,4 @@
+// @covers R-CORE-03, R-CORE-11
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";

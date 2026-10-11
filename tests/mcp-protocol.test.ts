@@ -1,3 +1,4 @@
+// @covers R-MCP-01
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { expect, it } from "vitest";

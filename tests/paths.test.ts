@@ -1,3 +1,4 @@
+// @covers R-CORE-05, R-CORE-13, R-SHELL-05
 import { describe, expect, it } from "vitest";
 import {
   classifyPath,

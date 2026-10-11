@@ -1,3 +1,4 @@
+// @covers R-ORA-04
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +19,7 @@ const actor = { kind: "human" as const, name: "tester" };
 const budget: Budget = { maxWallSeconds: 300, maxCores: 1, maxMemoryMB: 1024, maxDiskMB: 1024 };
 const CASE = "models/feed/case.json";
 const QUANTITIES = ["temperature_radial", "temperature_peak", "temperature_fuel_surface", "temperature_clad_inner", "temperature_surface", "heat_flux_outer", "energy_balance_residual"];
+const MECHANICS = ["displacement_radial_fuel_last_cell", "displacement_radial_clad_last_cell", "stress_axial_fuel_min", "stress_hoop_clad_first_cell", "contact_pressure", "gas_pressure"];
 
 const dirs: string[] = [];
 const pids: number[] = [];
@@ -93,8 +95,9 @@ describe("FEED adapter: configuration", () => {
     expect(r.result.app.id).toBe("feed");
     expect(r.result.engine).toEqual({ name: "feed-headless", version: "9.9.9" });
     expect(r.result.formats).toEqual([{ id: "feed.case", version: "0.1" }]);
-    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap", "temperature_limit_margin"]);
+    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap", "temperature_limit_margin", ...MECHANICS, "stress_limit_margin"]);
     expect(r.result.capabilities).toContain("thermal-only");
+    expect(r.result.capabilities).toContain("thermo-elastic");
     expect(r.result.oracleCoverage).toEqual([]);
     expect(r.warnings).toEqual([]);
   });
@@ -331,6 +334,102 @@ describe("FEED adapter: run and collect through the SEED run manager (stub runne
       const e = (await collectError(p.root, out as any)).errors[0];
       expect(e?.code).toBe("E_OUTPUT_INCOMPLETE");
       expect(e?.message).toContain("temperatureLimit1");
+    });
+  });
+
+  describe("thermo-elastic results (mechanics)", () => {
+    const collectIndex = async (mode: string) => {
+      useStub(mode);
+      const p = feedProject();
+      const out = await runStart(p.root, p, "req-" + mode);
+      if (!out.ok) throw new Error(JSON.stringify(out.errors));
+      return { p, out };
+    };
+    const indexOf = (p: ReturnType<typeof feedProject>, runId: string) => JSON.parse(readFileSync(join(p.root, "runs", runId, "results.json"), "utf8"));
+    const value = (p: ReturnType<typeof feedProject>, runId: string, name: string) => JSON.parse(readFileSync(join(p.root, "runs", runId, "native", "series", name + ".json"), "utf8")).values[0];
+    const names = (index: { quantities: { name: string }[] }) => index.quantities.map((q) => q.name);
+
+    it("a mechanics result adds the seven quantities, each read from its place in the record, and says it is thermo-elastic", async () => {
+      const { p, out } = await collectIndex("mechanics");
+      expect(out.state).toBe("completed");
+      const index = indexOf(p, out.runId);
+      expect(validate("results-index", index)).toEqual({ ok: true });
+      expect(checkResultsIndex(index)).toEqual([]);
+      expect(names(index)).toEqual([...QUANTITIES, ...MECHANICS, "stress_limit_margin"]);
+      // the fuel has 2 cells and the cladding 2 in this stub: points 0 and 1 are fuel, 2 and 3 cladding
+      expect(value(p, out.runId, "displacement_radial_fuel_last_cell")).toBe(4.6e-5);
+      expect(value(p, out.runId, "displacement_radial_clad_last_cell")).toBe(5.1e-5);
+      expect(value(p, out.runId, "stress_axial_fuel_min")).toBe(-6.0e8);
+      expect(value(p, out.runId, "stress_hoop_clad_first_cell")).toBe(4.75e8);
+      expect(value(p, out.runId, "contact_pressure")).toBe(7.795e7);
+      expect(value(p, out.runId, "gas_pressure")).toBe(2.5e6);
+      expect(value(p, out.runId, "stress_limit_margin")).toBe(2.5e8); // the smallest of 4.0e8 and 2.5e8
+      expect(index.quantities.find((q: { name: string }) => q.name === "contact_pressure").unit).toBe("Pa");
+      expect(index.quantities.find((q: { name: string }) => q.name === "displacement_radial_fuel_last_cell").unit).toBe("m");
+      expect(index.extensions.feed.thermoElastic).toBe(true);
+      expect(index.extensions.feed.thermalOnly).toMatch(/^Thermo-elastic result:/);
+      expect(index.extensions.feed.stressLimits).toEqual([{ id: "stressLimit:fuel-flat-1GPa", verdict: "pass", marginPa: 4.0e8 }, { id: "stressLimit:clad-304", verdict: "pass", marginPa: 2.5e8 }]);
+    });
+
+    it("a thermal-only result is unchanged: the thermal statement, none of the mechanics quantities", async () => {
+      const { p, out } = await collectIndex("ok");
+      const index = indexOf(p, out.runId);
+      expect(names(index)).toEqual(QUANTITIES);
+      expect(index.extensions.feed.thermalOnly).toMatch(/^Thermal calculation only/);
+      expect(index.extensions.feed.thermoElastic).toBeUndefined();
+      expect(index.extensions.feed.stressLimits).toBeUndefined();
+    });
+
+    it("an exceeded stress limit is a completed run with a negative margin and a failed check, not a failed run", async () => {
+      const { p, out } = await collectIndex("mechanics-stress-exceeded");
+      expect(out.state).toBe("completed");
+      const index = indexOf(p, out.runId);
+      expect(value(p, out.runId, "stress_limit_margin")).toBe(-1.5e6);
+      expect(index.extensions.feed.stressLimits[0]).toEqual({ id: "stressLimit:fuel-flat-1GPa", verdict: "fail", marginPa: -1.5e6 });
+      expect(index.extensions.feed.checks.find((c: { id: string }) => c.id === "stressLimit:fuel-flat-1GPa").verdict).toBe("fail");
+    });
+
+    it("a stress limit that failed because cells are outside the strength table is a completed run: with no margin there is no margin quantity", async () => {
+      const { p, out } = await collectIndex("mechanics-stress-outside");
+      expect(out.state).toBe("completed");
+      const index = indexOf(p, out.runId);
+      expect(names(index)).toEqual([...QUANTITIES, ...MECHANICS]);
+      expect(index.extensions.feed.stressLimits).toEqual([{ id: "stressLimit:fuel-flat-1GPa", verdict: "fail", marginPa: null }]);
+    });
+
+    it("a failed limit with a positive margin (the cells that could be judged are fine, others are outside the table) is accepted and its margin reported", async () => {
+      const { p, out } = await collectIndex("mechanics-stress-outside-margin");
+      expect(out.state).toBe("completed");
+      expect(value(p, out.runId, "stress_limit_margin")).toBe(3.0e8);
+      expect(indexOf(p, out.runId).extensions.feed.stressLimits[0].verdict).toBe("fail");
+    });
+
+    it.each([
+      ["mechanics-stress-incoherent", "a pass with a negative margin", "stressLimit:fuel-flat-1GPa"],
+      ["mechanics-stress-badvalue", "a margin that is not a number", "stressLimit:fuel-flat-1GPa"],
+      ["mechanics-badpoints", "points that are not the cells the case has", "mechanics record"],
+      ["mechanics-nostatement", "no thermo-elastic statement", "thermo-elastic statement"],
+      ["mechanics-transient", "mechanics in a transient result", "transient"],
+      ["stress-without-mechanics", "a stress limit with no mechanics result", "stress limit"],
+    ])("%s (%s) is refused as incomplete", async (mode, _what, mention) => {
+      useStub(mode);
+      const p = feedProject();
+      const out = await runStart(p.root, p, "req-" + mode);
+      expect(out.ok && out.state).toBe("failed");
+      const e = (await collectError(p.root, out as any)).errors[0];
+      expect(e?.code).toBe("E_OUTPUT_INCOMPLETE");
+      expect(e?.message).toContain(mention);
+      expect(existsSync(join(p.root, "runs", (out as { runId: string }).runId, "results.json"))).toBe(false);
+    });
+
+    it("any other failed mechanics check still stops the collection, naming the check", async () => {
+      useStub("mechanics-checkfail");
+      const p = feedProject();
+      const out = await runStart(p.root, p, "req-mech-checkfail");
+      expect(out.ok && out.state).toBe("failed");
+      const e = (await collectError(p.root, out as any)).errors[0];
+      expect(e?.code).toBe("E_OUTPUT_INCOMPLETE");
+      expect(e?.message).toContain("mechanicsStress");
     });
   });
 
