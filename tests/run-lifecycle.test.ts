@@ -83,7 +83,7 @@ describe("RunManager lifecycle", () => {
     let launched = false;
     const mgr = new RunManager({ projectRoot: proj.root, runsFolder: "runs", adapter: { ...adapterSpec, args: [wrapper] }, pollMs: 50, callTimeoutMs: 3000, // the second cancel starts two Node processes: 1000 ms was too tight under load (a full-suite flake)
       onLaunch: identity => { if (identity.jobId) launched = true; } });
-    const pending = mgr.start({ requestId: "timeout-cancel", actor, inputs, artifact, budget, settings: { scenario: "success", delayMs: 10000 } });
+    const pending = mgr.start({ requestId: "timeout-cancel", actor, inputs, artifact, budget, settings: { scenario: "success", delayMs: 300000 } }); // long on purpose: the cancels end it; a run that can finish before the second cancel (10 s was enough under load) makes the test see "completed"
     const deadline = Date.now() + 30000;
     while (!launched && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
     expect(launched).toBe(true);
