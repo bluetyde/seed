@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { callAdapter } from "../src/core/adapterClient";
 import { appendLine, writeFileAtomic } from "../src/core/atomicFile";
 import { sha256Hex } from "../src/core/canonical";
@@ -18,6 +18,10 @@ import { validate } from "../src/core/validate";
 import { createTempProject, type TempProject, isProcessAlive } from "./helpers/project";
 
 const cliPath = join(__dirname, "fixtures", "fake-adapter", "cli.cjs");
+
+// Every test here starts real adapter processes, several in a row for some. Under load (a full suite, or a game on the same machine) the 30 s default was too tight:
+// "3. Failures end failed" and the cancel-timeout test timed out in 3 of the last 4 full runs and passed alone. The limit is wider for this file only.
+vi.setConfig({ testTimeout: 120_000 });
 const adapterSpec = {
   command: process.execPath,
   args: [cliPath],
@@ -80,10 +84,10 @@ describe("RunManager lifecycle", () => {
     const mgr = new RunManager({ projectRoot: proj.root, runsFolder: "runs", adapter: { ...adapterSpec, args: [wrapper] }, pollMs: 50, callTimeoutMs: 3000, // the second cancel starts two Node processes: 1000 ms was too tight under load (a full-suite flake)
       onLaunch: identity => { if (identity.jobId) launched = true; } });
     const pending = mgr.start({ requestId: "timeout-cancel", actor, inputs, artifact, budget, settings: { scenario: "success", delayMs: 10000 } });
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + 30000;
     while (!launched && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
     expect(launched).toBe(true);
-    const first = await Promise.race([mgr.cancelRequest("timeout-cancel"), new Promise<never>((_, reject) => { const t = setTimeout(() => reject(Error("cancel waited for entire run")), 5000); t.unref(); })]);
+    const first = await Promise.race([mgr.cancelRequest("timeout-cancel"), new Promise<never>((_, reject) => { const t = setTimeout(() => reject(Error("cancel waited for entire run")), 20000); t.unref(); })]);
     expect(first?.ok).toBe(false);
     if (first && !first.ok) expect(first.errors[0]!.code).toBe("E_TIMEOUT");
     expect(mgr.hasActiveRequest("timeout-cancel")).toBe(true);
