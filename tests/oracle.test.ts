@@ -423,3 +423,50 @@ describe("review fixes (Codex, 2026-10-03)", () => {
     expect(r.errors.map((e) => [e.code, e.field])).toEqual([["E_NOT_FOUND", "dangling.json"]]);
   });
 });
+
+// Contract v0.1.2 (docs/contracts.md section 12 item 9): a known-limit entry may expect a number, with a tolerance.
+describe("a known-limit entry that expects a number", () => {
+  const softLimit = (over: Record<string, unknown> = {}) =>
+    entry({ oracleId: "pra-soft-limit", tag: "known-limit", expected: { quantity: "p_top", value: 0.5, unit: "1" }, tolerance: { abs: 0, rel: 0.02 }, coverage: { quantities: ["p_top"], domain: "a regime where the app is known to be off" }, ...over });
+  const load = (e: OracleEntry) => {
+    const dir = tmp();
+    writeFileSync(join(dir, "e.json"), JSON.stringify(e));
+    return loadOracleEntries(dir);
+  };
+
+  it("is valid with its tolerance, and the two older forms of a known-limit entry still are", () => {
+    expect(load(softLimit()).errors).toEqual([]);
+    expect(load(limit).errors).toEqual([]);
+    expect(load(entry({ oracleId: "pra-refuses", tag: "known-limit", expected: { refusalCode: "E_OUT_OF_DOMAIN" }, tolerance: undefined, coverage: { quantities: ["x"], domain: "d" } })).errors.length).toBeLessThanOrEqual(1);
+  });
+
+  it.each([
+    ["no tolerance", () => { const e = softLimit(); delete (e as Record<string, unknown>).tolerance; return e; }],
+    ["a refusal code beside the number", () => softLimit({ expected: { quantity: "p_top", value: 0.5, unit: "1", refusalCode: "E_X_Y" } })],
+    ["a number without its quantity", () => softLimit({ expected: { value: 0.5, unit: "1" } })],
+    ["a value that is not a number", () => softLimit({ expected: { quantity: "p_top", value: "0.5", unit: "1" } })],
+  ])("is refused with %s", (_n, make) => {
+    const e = make();
+    // the tolerance hash is recomputed so that only the shape is wrong
+    (e as Record<string, unknown>).toleranceHash = sha256Hex(canonicalJson({ expected: e.expected, tolerance: (e as { tolerance?: unknown }).tolerance ?? null }));
+    expect(load(e).errors.length).toBeGreaterThan(0);
+  });
+
+  it("a miss fails the entry, not the set: the set passes, is not blocked, and the quantity is unverified although a good entry covers it", async () => {
+    const entries = [indexed(entry()), indexed(softLimit())];
+    const r = await runOracleSet({ entries, adapter: { id: "pra", version: "1.0.0" }, appCommit: "abc1234", baseDir: inputsDir(), run: async () => GOOD });
+    expect(r.results.map((x) => [x.oracleId, x.verdict])).toEqual([["pra-and", "pass"], ["pra-soft-limit", "fail"]]);
+    expect(r.verdict).toBe("pass");
+    expect(r.blocked).toBe(false);
+    expect(r.blockedQuantities).toEqual(["p_top"]);
+    expect(unverifiedQuantities(["p_top"], r, entries)).toEqual(["p_top"]);
+  });
+
+  it("when the number is within tolerance the limit does not show: nothing is blocked and the quantity stays verified", async () => {
+    const entries = [indexed(entry()), indexed(softLimit({ expected: { quantity: "p_top", value: 0.02, unit: "1" } }))];
+    const r = await runOracleSet({ entries, adapter: { id: "pra", version: "1.0.0" }, appCommit: "abc1234", baseDir: inputsDir(), run: async () => GOOD });
+    expect(r.results.map((x) => x.verdict)).toEqual(["pass", "pass"]);
+    expect(r.blockedQuantities).toEqual([]);
+    expect(unverifiedQuantities(["p_top"], r, entries)).toEqual([]);
+  });
+});
