@@ -59,7 +59,7 @@ npm ci --include=dev
 npm start
 ```
 
-Adopt app clones you already have from the Welcome page, or install from the catalog. Apps with their own requirements (a conda environment, WSL, a solver) list them as checks that you can see before launch.
+Adopt app clones you already have from the Welcome page, or install from the catalog. Apps installed from the catalog go into the `apps` folder inside the SEED folder (git ignores it). Apps with their own requirements (a conda environment, WSL, a solver) list them as checks that you can see before launch.
 
 To use the harness without the window:
 

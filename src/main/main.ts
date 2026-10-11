@@ -422,11 +422,11 @@ app.whenReady().then(() => {
   const catalog = loadCatalog(catalogFile, !!process.env.SEED_CATALOG);
   if (!process.env.SEED_CATALOG) {
     for (const repo of catalog.repos) {
-      repo.candidates = [path.join(os.homedir(), repo.folder), path.resolve(DIST, "..", "..", repo.folder)];
+      repo.candidates = [path.join(os.homedir(), repo.folder), path.resolve(DIST, "..", "..", repo.folder), path.join(os.homedir(), "SEED", "apps", repo.folder)];
       if (process.platform !== "win32") repo.prerequisites = repo.prerequisites.filter((p) => p.id !== "wsl" && p.id !== "conda-env");
     }
   }
-  store = new InstallStore(path.join(app.getPath("userData"), "installs.json"), process.env.SEED_INSTALL_ROOT ?? path.join(os.homedir(), "SEED", "apps"));
+  store = new InstallStore(path.join(app.getPath("userData"), "installs.json"), process.env.SEED_INSTALL_ROOT ?? path.join(DIST, "..", "apps"));
   installer = new Installer({
     repos: catalog.repos, store, git: new Git(), runCmd: defaultRunCmd, checkCmd: defaultCheckCmd,
     isRunning: (id) => tabs.tabs.some((t) => t.id === `app:${id}`),

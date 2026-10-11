@@ -12,12 +12,13 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 import { oracleRequestId } from "./helpers/oracleRequest";
+import { appDir } from "./helpers/appDir";
 
 // FEED's own oracle entries (oracles/seed in the FEED repo, closed-form expected values) run through the adapter and the run
 // manager against the real headless runner and the real OFFBEAT solver. Needs the FEED repo with `npm run build`, its entries,
 // and the feed-solver WSL distro; skipped otherwise, loudly. Set SEED_FEED_REPO to the FEED checkout.
-const repoCandidates = [process.env.SEED_FEED_REPO, join(__dirname, "..", "..", "feed")];
-const repo = repoCandidates.find(p => p && existsSync(join(p, "dist", "cli", "headless.js"))) ?? join(__dirname, "..", "..", "feed");
+const repoCandidates = [process.env.SEED_FEED_REPO, join(appDir("feed"))];
+const repo = repoCandidates.find(p => p && existsSync(join(p, "dist", "cli", "headless.js"))) ?? join(appDir("feed"));
 const bundle = join(repo, "dist", "cli", "headless.js");
 const base = join(repo, "oracles", "seed");
 const solverUp = (() => {

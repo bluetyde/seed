@@ -11,11 +11,12 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 import { oracleRequestId } from "./helpers/oracleRequest";
+import { appDir } from "./helpers/appDir";
 
 // SNEED's own oracle entries (oracles/seed in the SNEED repository): hand-derived exact top-event probabilities (checked there against an
 // exhaustive enumeration) and bad-input refusals. They run through the adapter and the run manager. Needs the SNEED checkout built with
 // `npm run build:cli` (SEED_PRA_REPO, default a sibling folder sneed) and its installed SCRAM runtime. Only read, never written.
-const candidates = [process.env.SEED_PRA_REPO, join(__dirname, "..", "..", "sneed")];
+const candidates = [process.env.SEED_PRA_REPO, join(appDir("sneed"))];
 const repo = candidates.find(p => p && existsSync(join(p, "dist", "node", "cli", "headless.js"))) ?? "";
 const base = join(repo, "oracles", "seed");
 const describeOut = repo ? spawnSync(process.execPath, [join(repo, "dist", "node", "cli", "headless.js"), "describe"], { encoding: "utf8" }) : null;

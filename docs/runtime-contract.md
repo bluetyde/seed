@@ -103,7 +103,7 @@ A package of one app can need a record that a package of another app makes, and 
 
 ## Decisions of the user (2026-10-07)
 
-1. **Install root.** Add-ons go in the same install root as the apps (today the user's `SEED/apps` folder), as `<root>/<app>/<component>/<version>/`. One folder to back up or delete; removing an app removes its managed add-ons.
+1. **Install root.** Add-ons go in the same install root as the apps (today the `apps` folder inside the SEED folder, git-ignored; before 2026-10-11 it was `~/SEED/apps`, which is still searched for existing clones), as `<root>/<app>/<component>/<version>/`. One folder to back up or delete; removing an app removes its managed add-ons.
 2. **Agents may request an install; they never install on their own.** A first-time setup, including one run by an agent in a cloud session, has to be able to ask for an add-on, so "human only" is dropped. What stays:
    - **What can be installed is fixed by the catalog**, not by the agent: only components in a manifest whose hash SEED's shipped catalog pins. An agent supplies a component id, never a url, a command or a manifest.
    - **A human grant is still needed**, as for `accept_material_set` and `enable_transfer`: a new gate operation `install_component` with rule `grant`. The grant names the app and the components, an expiry and a ceiling (download and disk bytes). A person can issue one standing grant ahead of an unattended or cloud setup ("fakeapp core and cad, 8 GB, 24 hours"). Without a grant the request is refused and says what to grant.

@@ -7,14 +7,15 @@ import { sha256Hex } from "../src/core/canonical";
 import type { Actor, GateContext } from "../src/core/policy";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { applyTransfer, evaluateTransfer, recordApproval, spawnTransferCommand, type Recipe, type TransferView } from "../src/core/transfer";
+import { appDir } from "./helpers/appDir";
 
 // A real NODAL run as the source of a coolant boundary (E4, NODAL to FEED): the heated-pipe golden model records the coolant temperature at the
 // pipe outlet (`t_out`, K) and the heat transfer coefficient at the wall surface (`h_surf`, W/m2/K). Through the adapter and the run manager, a
 // recipe names the first as the primary quantity and the second as the additional quantity with the role heat-transfer-coefficient, with the last
 // sample (or one at a time between samples) selected for a steady boundary. The fake boundary target (tests/fixtures/fake-transfer/boundary.cjs)
 // writes what it received; the expected values come from the committed golden vector of the model, not from the run.
-const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-studio")].find((p) => existsSync(join(p, "nodal_studio", "run.py"))) ?? "";
-const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "nodal-studio", ".venv", "Scripts", "python.exe")].find((p) => p && existsSync(p)) ?? "";
+const repo = process.env.SEED_NODAL_REPO ?? [join(appDir("nodal-studio"))].find((p) => existsSync(join(p, "nodal_studio", "run.py"))) ?? "";
+const python = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(appDir("nodal-studio"), ".venv", "Scripts", "python.exe")].find((p) => p && existsSync(p)) ?? "";
 const have = python !== "" && repo !== "" && existsSync(join(repo, "schema", "vectors", "golden", "heated-pipe.json")) &&
   spawnSync(python, ["-m", "nodal_studio.run", "--describe"], { cwd: repo, env: { ...process.env, PYTHONPATH: repo }, encoding: "utf8" }).status === 0;
 

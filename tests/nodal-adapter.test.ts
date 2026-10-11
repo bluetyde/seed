@@ -9,12 +9,13 @@ import { isAlive } from "../src/core/procTree";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { checkResultsAgainstRecord, checkResultsIndex } from "../src/core/semantic";
 import { validate } from "../src/core/validate";
+import { appDir } from "./helpers/appDir";
 
 // The real tests need NODAL: SEED_NODAL_REPO (default: a sibling folder nodal-studio) on a branch that has the runner's
 // --describe/--validate/--json modes, and a Python with its solver requirements (SEED_NODAL_PYTHON, default the repo's .venv).
 // Without them the real-runner tests are skipped with a warning, and only the setup tests run.
-const repo = process.env.SEED_NODAL_REPO ?? [join(__dirname, "..", "..", "nodal-studio")].find(p => existsSync(join(p, "nodal_studio", "run.py"))) ?? join(__dirname, "..", "..", "nodal-studio");
-const pythonCandidates = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(__dirname, "..", "..", "nodal-studio", ".venv", "Scripts", "python.exe"), join(__dirname, "..", "..", "nodal-studio", ".venv", "bin", "python")];
+const repo = process.env.SEED_NODAL_REPO ?? [join(appDir("nodal-studio"))].find(p => existsSync(join(p, "nodal_studio", "run.py"))) ?? join(appDir("nodal-studio"));
+const pythonCandidates = [process.env.SEED_NODAL_PYTHON, join(repo, ".venv", "Scripts", "python.exe"), join(repo, ".venv", "bin", "python"), join(appDir("nodal-studio"), ".venv", "Scripts", "python.exe"), join(appDir("nodal-studio"), ".venv", "bin", "python")];
 const python = pythonCandidates.find(p => p && existsSync(p)) ?? "";
 const haveNodal =
   python !== "" &&

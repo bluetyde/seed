@@ -10,10 +10,11 @@ import { isAlive } from "../src/core/procTree";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { checkResultsAgainstRecord, checkResultsIndex } from "../src/core/semantic";
 import { validate } from "../src/core/validate";
+import { appDir } from "./helpers/appDir";
 
 // The real tests need RAFT's headless runner: SEED_RAFT_REPO (default: a sibling folder named virtual-reactor) with
 // `npm run build:headless` done in its web folder. Without it they are skipped, loudly, and only the stub tests run.
-const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "raft");
+const repo = process.env.SEED_RAFT_REPO ?? join(appDir("raft"));
 const realBundle = join(repo, "web", "dist-headless", "raft-headless.mjs");
 const haveRaft = existsSync(realBundle);
 const vectorsDir = join(repo, "schema", "engine-vectors");
