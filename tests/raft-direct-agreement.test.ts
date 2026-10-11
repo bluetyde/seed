@@ -1,3 +1,4 @@
+// @covers R-ADAPT-01, R-ADAPT-04
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

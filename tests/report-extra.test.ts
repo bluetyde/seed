@@ -1,3 +1,4 @@
+// @covers R-REP-04
 import { describe, expect, it } from "vitest";
 import { buildReport } from "../src/core/report";
 import { buildStudyLog, makeConclusion, makeHeader, makeQuantity, makeResultsIndex, makeRunRecord, makeSeries, makeStep, SAMPLE_SHA256 } from "./helpers/studyFixtures";

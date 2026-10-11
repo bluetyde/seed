@@ -1,3 +1,4 @@
+// @covers R-CORE-10
 import { describe, expect, it } from "vitest";
 import { canonicalJson, sha256Hex } from "../src/core/canonical";
 import {

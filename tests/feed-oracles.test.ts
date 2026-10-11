@@ -1,3 +1,4 @@
+// @covers R-ORA-04, R-ORA-05
 import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -1,3 +1,4 @@
+// @covers R-CORE-08, R-CORE-12
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";

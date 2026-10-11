@@ -1,3 +1,4 @@
+// @covers R-ORA-02
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";

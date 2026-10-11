@@ -1,3 +1,4 @@
+// @covers R-CORE-05, R-CORE-13
 import { describe, expect, it } from "vitest";
 import { isPortableRelative, toWindows } from "../src/core/paths";
 

@@ -9,6 +9,8 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-renderer.cjs",
     "start": "npm run build && electron .",
     "test": "npm run build && vitest run",
+    "trace": "node scripts/trace-matrix.cjs",
+    "trace:check": "node scripts/trace-matrix.cjs --check",
     "seed:cli": "node dist/cli/seed.js",
     "seed:mcp": "node dist/mcp/seed.js",
     "seed:admin": "node dist/cli/admin.js",

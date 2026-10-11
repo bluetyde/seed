@@ -1,3 +1,4 @@
+// @covers R-SHELL-01, R-SHELL-03, R-SHELL-05, R-SHELL-09
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

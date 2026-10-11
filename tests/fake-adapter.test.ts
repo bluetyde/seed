@@ -1,3 +1,4 @@
+// @covers R-ADAPT-05, R-ADAPT-06, R-CORE-01, R-CORE-03, R-CORE-11
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

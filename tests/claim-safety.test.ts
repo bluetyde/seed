@@ -1,3 +1,4 @@
+// @covers R-DISP-02
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";

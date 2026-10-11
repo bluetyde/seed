@@ -1,3 +1,4 @@
+// @covers R-CORE-07, R-CORE-09
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";

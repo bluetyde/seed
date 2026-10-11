@@ -1,3 +1,4 @@
+// @covers R-REP-03, R-REV-04
 import { describe, expect, it } from "vitest";
 import { reviewerSetupProblem } from "../src/core/conclusionReview";
 

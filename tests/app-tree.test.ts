@@ -1,3 +1,4 @@
+// @covers R-SHELL-01, R-SHELL-03
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
