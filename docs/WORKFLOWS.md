@@ -80,7 +80,7 @@ After any change to `package-lock.json`, run `node scripts/gen-notices.cjs` and 
 
 ## How the real-app tests find the apps
 
-A test or script that needs a real app looks at the `SEED_*_REPO` variable first (`SEED_OPENMC_REPO`, `SEED_NODAL_REPO`, `SEED_RAFT_REPO`, `SEED_FEED_REPO`, `SEED_PRA_REPO` for SNEED), then at a sibling folder of this repository named as the catalog names it: `openmc-studio`, `nodal-studio`, `raft`, `feed`, `sneed` (decision D10). If neither is there, the test is skipped by name, so a skipped count is a count of apps not checked. A checkout under another name needs the variable (or a link with the catalog name).
+A test or script that needs a real app looks at the `SEED_*_REPO` variable first (`SEED_OPENMC_REPO`, `SEED_NODAL_REPO`, `SEED_RAFT_REPO`, `SEED_FEED_REPO`, `SEED_PRA_REPO` for SNEED), then at the `apps` folder inside this repository (where SEED's installer puts apps by default, git-ignored), then at a sibling folder of this repository, named as the catalog names it: `openmc-studio`, `nodal-studio`, `raft`, `feed`, `sneed` (decision D10). If neither is there, the test is skipped by name, so a skipped count is a count of apps not checked. A checkout under another name needs the variable (or a link with the catalog name). The helper is `tests/helpers/appDir.ts`.
 
 The NODAL tests also need a Python with NODAL's solver requirements: `SEED_NODAL_PYTHON`, or a `.venv` inside the NODAL checkout (or inside a sibling `nodal-studio`). A NODAL clone without that environment makes the NODAL files skip (about 60 tests), so check the skipped count in the summary before calling a run green.
 

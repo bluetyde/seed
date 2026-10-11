@@ -11,6 +11,7 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { checkResultsIndex } from "../src/core/semantic";
 import { applyTransfer, recordApproval, spawnTransferCommand, type Recipe, type TransferView } from "../src/core/transfer";
 import { validate } from "../src/core/validate";
+import { appDir } from "./helpers/appDir";
 
 // Heating from real OpenMC as a transfer source (E4 step 2). The Studio oracle project b10-heating-profile (a 4 cm B-10 slab, a 0.0253 eV beam
 // along +z, a cell heating tally and a 3 x 3 x 5 mesh tally, the beam down its middle voxel column) runs through the adapter and the run manager against real OpenMC in WSL. The mesh
@@ -18,7 +19,7 @@ import { validate } from "../src/core/validate";
 // 4 sigma of its predicted statistical error plus 0.4 % (kappa, N and Sigma from the library, via oracles/seed/xs); the bins must add up to the
 // cell tally; and, when FEED's build has a transfer command, a recipe on that table must set a real FEED case's heat rate to the value computed here.
 const win = process.platform === "win32";
-const candidates = [process.env.SEED_OPENMC_REPO, join(__dirname, "..", "..", "openmc-studio")];
+const candidates = [process.env.SEED_OPENMC_REPO, join(appDir("openmc-studio"))];
 const repo = candidates.find((p) => p && existsSync(join(p, "oracles", "seed", "models", "b10-heating-profile.py")) && existsSync(join(p, "studio", "tools", "regen_script.cjs"))) ?? "";
 const electron = process.env.SEED_ELECTRON ?? join(__dirname, "..", "node_modules", "electron", "dist", win ? "electron.exe" : "electron");
 const distro = process.env.SEED_OPENMC_WSL_DISTRO ?? "Ubuntu";
@@ -28,7 +29,7 @@ const probe = (args: string[]) => (win ? spawnSync("wsl.exe", ["-d", distro, "--
 const have = repo !== "" && existsSync(electron) && probe(["/usr/bin/test", "-f", data]).status === 0 && probe(["/usr/bin/test", "-x", py]).status === 0;
 const base = join(repo, "oracles", "seed");
 
-const feedRepo = [process.env.SEED_FEED_REPO, join(__dirname, "..", "..", "feed")].find((p) => p && existsSync(join(p, "dist", "cli", "headless.js"))) ?? "";
+const feedRepo = [process.env.SEED_FEED_REPO, join(appDir("feed"))].find((p) => p && existsSync(join(p, "dist", "cli", "headless.js"))) ?? "";
 const feedBundle = join(feedRepo, "dist", "cli", "headless.js");
 const feedCase = join(feedRepo, "oracles", "seed", "models", "synthetic-const.case.json");
 const feedDescribe: any = (() => {

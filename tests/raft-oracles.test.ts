@@ -29,10 +29,11 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 import { oracleRequestId } from "./helpers/oracleRequest";
+import { appDir } from "./helpers/appDir";
 
 // RAFT's own oracle entries (oracles/seed in the RAFT repo, generated from its engine golden vectors) run through the
 // adapter and the run manager. Needs the RAFT repo with the built headless runner and the entries; skipped otherwise.
-const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "raft");
+const repo = process.env.SEED_RAFT_REPO ?? join(appDir("raft"));
 const bundle = join(repo, "web", "dist-headless", "raft-headless.mjs");
 const base = join(repo, "oracles", "seed");
 const have = existsSync(bundle) && existsSync(join(base, "entries"));

@@ -26,7 +26,7 @@ REAL_APPS=1 SHELL_SHOTS=<folder> npm run e2e   # also opens the real NODAL and V
 
 The Welcome page (File > Install and update apps) shows each app in `catalog.json` (OpenMC Studio, NODAL Studio, Virtual Reactor/RAFT) with what it can do next:
 
-- **Install**: clones the repository from GitHub into the install folder (default `~/SEED/apps`, changeable), checks the programs it needs first (Git, Node 24), then runs its install steps (`npm ci --ignore-scripts`). A failed step keeps its output on the card; running Install again repeats the steps.
+- **Install**: clones the repository from GitHub into the install folder (default: the `apps` folder inside the SEED folder, which git ignores; changeable on the Welcome page. Apps cloned earlier into `~/SEED/apps`, into your home folder or beside SEED are still found), checks the programs it needs first (Git, Node 24), then runs its install steps (`npm ci --ignore-scripts`). A failed step keeps its output on the card; running Install again repeats the steps.
 - **Use the existing copy / Choose a folder**: adopts a clone you already have. It must be a clone of the same GitHub repository; nothing in it is changed.
 - **Check for updates**: asks GitHub (fetch only). **Update**: fast-forwards the branch. It refuses, with the reason on the card, if the app is open, the copy has uncommitted changes or commits GitHub does not have, or it is on another branch. It never resets, forces or switches branches. Install steps rerun only if a watched file (the lockfile) changed.
 - **Forget this copy** only removes SEED's record of the folder.

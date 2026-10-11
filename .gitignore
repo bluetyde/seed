@@ -9,7 +9,7 @@ test-results/
 
 # Local machine settings and generated integration reports
 /apps.json
-# Installed apps, when the install root is set inside the repository (the default is ~/SEED/apps)
+# Installed apps: the installer's default install root is this folder
 /apps/
 /installs.json
 /seed-smoke-*/

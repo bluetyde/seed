@@ -16,24 +16,26 @@ const outFile = outIdx > 0 ? process.argv[outIdx + 1] : null;
 const root = path.join(__dirname, "..");
 const home = path.join(root, "..");
 const first = (...c) => c.find((p) => p && fs.existsSync(p));
+// an app is looked up in this repository's apps folder (where the installer puts it), then beside this repository (decision D10)
+const appDir = (folder) => first(path.join(root, "apps", folder), path.join(home, folder)) || path.join(home, folder);
 const { RunManager } = require(path.join(root, "dist", "core", "runManager.js"));
 const { loadOracleEntries } = require(path.join(root, "dist", "core", "oracle.js"));
 
 const cfg = {
   raft: () => {
-    const repo = process.env.SEED_RAFT_REPO || path.join(home, "raft");
+    const repo = process.env.SEED_RAFT_REPO || path.join(appDir("raft"));
     process.env.SEED_RAFT_HEADLESS = path.join(repo, "web", "dist-headless", "raft-headless.mjs");
     return { repo, settings: (e) => ({ case: e.inputs[0].path }), artifact: (e) => e.inputs[0], wsl: null };
   },
   feed: () => {
-    const repo = first(process.env.SEED_FEED_REPO, path.join(home, "feed"));
+    const repo = first(process.env.SEED_FEED_REPO, path.join(appDir("feed")));
     process.env.SEED_FEED_HEADLESS = path.join(repo, "dist", "cli", "headless.js");
     return { repo, settings: (e) => ({ case: e.inputs[0].path }), artifact: (e) => e.inputs[0], wsl: process.env.SEED_FEED_WSL_DISTRO || "feed-solver" };
   },
   nodal: () => {
-    const repo = first(process.env.SEED_NODAL_REPO, path.join(home, "nodal-studio"));
+    const repo = first(process.env.SEED_NODAL_REPO, path.join(appDir("nodal-studio")));
     process.env.SEED_NODAL_REPO = repo;
-    process.env.SEED_NODAL_PYTHON = first(process.env.SEED_NODAL_PYTHON, path.join(repo, ".venv", "Scripts", "python.exe"), path.join(home, "nodal-studio", ".venv", "Scripts", "python.exe"));
+    process.env.SEED_NODAL_PYTHON = first(process.env.SEED_NODAL_PYTHON, path.join(repo, ".venv", "Scripts", "python.exe"), path.join(appDir("nodal-studio"), ".venv", "Scripts", "python.exe"));
     return {
       repo,
       settings: (e) => {
@@ -45,12 +47,12 @@ const cfg = {
     };
   },
   pra: () => {
-    const repo = first(process.env.SEED_PRA_REPO, path.join(home, "sneed"));
+    const repo = first(process.env.SEED_PRA_REPO, path.join(appDir("sneed")));
     process.env.SEED_PRA_REPO = repo;
     return { repo, settings: (e) => ({ model: e.inputs[0].path }), artifact: (e) => e.inputs[0], wsl: null };
   },
   openmc: () => {
-    const repo = first(process.env.SEED_OPENMC_REPO, path.join(home, "openmc-studio"));
+    const repo = first(process.env.SEED_OPENMC_REPO, path.join(appDir("openmc-studio")));
     const distro = process.env.SEED_OPENMC_WSL_DISTRO || "Ubuntu";
     Object.assign(process.env, {
       SEED_OPENMC_REPO: repo,

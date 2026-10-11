@@ -8,10 +8,11 @@ import { callAdapter } from "../src/core/adapterClient";
 import { sha256Hex } from "../src/core/canonical";
 import { isAlive } from "../src/core/procTree";
 import { RunManager, type Budget } from "../src/core/runManager";
+import { appDir } from "./helpers/appDir";
 
 // Regression tests for the Codex review of the RAFT adapter (2026-10-03). Same requirements as raft-adapter.test.ts:
 // the RAFT repo (SEED_RAFT_REPO, default a sibling folder virtual-reactor) with its headless runner built.
-const repo = process.env.SEED_RAFT_REPO ?? join(__dirname, "..", "..", "raft");
+const repo = process.env.SEED_RAFT_REPO ?? join(appDir("raft"));
 const realBundle = join(repo, "web", "dist-headless", "raft-headless.mjs");
 const haveRaft = existsSync(realBundle);
 const stubBundle = join(__dirname, "fixtures", "raft-stub", "raft-headless.mjs");

@@ -11,13 +11,14 @@ import { RunManager, type Budget } from "../src/core/runManager";
 import { observedValue } from "./helpers/quantityValue";
 import { appTree, gitStatus, hasUncommittedEdits, trackedFiles, treeChanges } from "./helpers/appTree";
 import { oracleRequestId } from "./helpers/oracleRequest";
+import { appDir } from "./helpers/appDir";
 
 // OpenMC Studio's own oracle entries (oracles/seed in the OpenMC repository): analytic cases whose expected values come from formulas and from
 // cross sections read out of the nuclear data library (a void ball's track length, absorption and track length in a pure B-10 slab), with
 // tolerances of 4 sigma of the predicted statistical error, fixed before any case was run; plus bad-input refusals. They run through the adapter
 // and the run manager against real OpenMC in WSL. Needs the same pieces as tests/openmc-adapter.test.ts.
 const win = process.platform === "win32";
-const candidates = [process.env.SEED_OPENMC_REPO, join(__dirname, "..", "..", "openmc-studio")];
+const candidates = [process.env.SEED_OPENMC_REPO, join(appDir("openmc-studio"))];
 const repo = candidates.find(p => p && existsSync(join(p, "oracles", "seed", "entries")) && existsSync(join(p, "studio", "tools", "regen_script.cjs"))) ?? "";
 const electron = process.env.SEED_ELECTRON ?? join(__dirname, "..", "node_modules", "electron", "dist", win ? "electron.exe" : "electron");
 const distro = process.env.SEED_OPENMC_WSL_DISTRO ?? "Ubuntu";
