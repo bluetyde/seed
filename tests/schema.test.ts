@@ -1,3 +1,4 @@
+// @covers R-CORE-01, R-CORE-04, R-CORE-10
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";

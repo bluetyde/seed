@@ -1,3 +1,4 @@
+// @covers R-CORE-10
 import { describe, expect, it } from "vitest";
 import { parseUnit, toSI, unitMismatch, DIMENSIONS, type Dimension } from "../src/core/units";
 

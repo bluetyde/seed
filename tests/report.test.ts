@@ -1,3 +1,4 @@
+// @covers R-CORE-01, R-REP-01, R-REP-04
 import { describe, expect, it, vi } from "vitest";
 import { validate } from "../src/core/validate";
 import {

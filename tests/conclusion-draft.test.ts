@@ -1,3 +1,4 @@
+// @covers R-REP-03
 import { expect, it } from "vitest";
 import { Readable } from "node:stream";
 import { proposeConclusion } from "../src/core/conclusionDraft";

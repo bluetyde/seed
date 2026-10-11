@@ -1,3 +1,4 @@
+// @covers R-REP-02, R-SHELL-01, R-SHELL-03
 import { describe, expect, it } from "vitest";
 import { TabModel } from "../src/main/tabs";
 

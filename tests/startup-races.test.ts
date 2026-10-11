@@ -1,3 +1,4 @@
+// @covers R-SHELL-07
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { ProcessManager, type Deps } from "../src/main/processes";

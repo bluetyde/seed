@@ -1,3 +1,4 @@
+// @covers R-STUDY-03
 import { describe, expect, it } from "vitest";
 import { compareQuantity, comparisonMarkdown, type CompareOk, type CompareQuantityEntry, type CompareRun } from "../src/core/compare";
 import type { QuantityData } from "../src/core/quantityData";

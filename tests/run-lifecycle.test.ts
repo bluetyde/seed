@@ -1,3 +1,4 @@
+// @covers R-CORE-02, R-CORE-03, R-CORE-06, R-CORE-11, R-CORE-12
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
