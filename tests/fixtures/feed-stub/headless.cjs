@@ -69,7 +69,7 @@ else if (mode === "hang" && verb !== "cancel") {
       ],
       domain: { verdict: mode === "out-of-domain" ? "out-of-domain" : "in-domain" },
     };
-    if (mode === "transient" || mode === "transient-shortseries" || mode === "transient-badtimes") {
+    if (mode === "transient" || mode === "transient-shortseries" || mode === "transient-badtimes" || mode === "mechanics-transient") {
       // a transient record (feed.results/0.2): three output times, a pulse that peaks at 10 ms
       const times = mode === "transient-badtimes" ? [0, 0.01, 0.005] : [0, 0.005, 0.01];
       results.schema = "feed.results/0.2";
@@ -106,12 +106,41 @@ else if (mode === "hang" && verb !== "cancel") {
       "limit-nullfail": [{ value: null, verdict: "fail" }],
     };
     if (limitModes[mode]) limitModes[mode].forEach((c, i) => results.checks.push({ id: "temperatureLimit" + (i + 1), label: "Temperature limit", unit: "K", ...c }));
+    // thermo-elastic results (2 fuel cells and 2 cladding cells): the `mechanics` record next to the thermal one, FEED's own statement, and stress limits
+    const stressModes = {
+      "mechanics": [{ value: 4.0e8, verdict: "pass" }, { value: 2.5e8, verdict: "pass" }],
+      "mechanics-stress-exceeded": [{ value: -1.5e6, verdict: "fail" }, { value: 2.5e8, verdict: "pass" }],
+      "mechanics-stress-outside": [{ value: null, verdict: "fail" }],
+      "mechanics-stress-outside-margin": [{ value: 3.0e8, verdict: "fail" }],
+      "mechanics-stress-incoherent": [{ value: -5, verdict: "pass" }],
+      "mechanics-stress-badvalue": [{ value: "5", verdict: "pass" }],
+      "stress-without-mechanics": [{ value: 1e8, verdict: "pass" }],
+    };
+    if (mode.startsWith("mechanics")) {
+      results.thermalOnly = mode === "mechanics-nostatement" ? "Thermal calculation only." : "Thermo-elastic result: small strain, linear elastic, one radial slice (stub).";
+      results.mechanics = {
+        kind: "thermoElastic", plane: "strain", penaltyFactor: 0.5, coolantPressure: 0, internalPressure: 2.5e6,
+        points: [
+          { ur: 1.0e-6, uz: 0, sigmaR: -1e6, sigmaTheta: -1.1e8, sigmaZ: -6.0e8, sigmaEq: 5e8 },
+          { ur: 4.6e-5, uz: 0, sigmaR: -2e6, sigmaTheta: -1.2e8, sigmaZ: -5.9e8, sigmaEq: 5e8 },
+          { ur: 4.7e-5, uz: 0, sigmaR: -3e6, sigmaTheta: 4.75e8, sigmaZ: -4.6e8, sigmaEq: 8e8 },
+          { ur: 5.1e-5, uz: 0, sigmaR: -4e6, sigmaTheta: 5.43e8, sigmaZ: -4.5e8, sigmaEq: 8e8 },
+        ],
+        summary: { fuel: { maxEquivalent: 5e8, radial: [-2e6, -1e6], hoop: [-1.2e8, -1.1e8], axial: [-6.0e8, -5.9e8], outerDisplacement: 4.6e-5 }, cladding: { maxEquivalent: 8e8 }, gapWidth: 0, contactPressure: 7.795e7, contact: true },
+      };
+      if (mode === "mechanics-badpoints") results.mechanics.points.pop();
+      results.checks.push({ id: "mechanicsDisplacement", verdict: "pass", value: 1.8e-7 }, { id: "mechanicsStress", verdict: mode === "mechanics-checkfail" ? "fail" : "pass", value: 9.2e6 });
+    }
+    if (stressModes[mode]) {
+      const names = ["fuel-flat-1GPa", "clad-304"];
+      stressModes[mode].forEach((c, i) => results.checks.push({ id: "stressLimit:" + names[i], label: "Stress limit", unit: "Pa", ...c }));
+    }
     if (mode === "nodomain") delete results.domain;
     if (mode === "nan") results.summary.maxT = null;
     const files = {
       "case.json": caseBytes,
       "results.json": JSON.stringify(results, null, 2) + "\n",
-      "derived.json": JSON.stringify({ linearHeatRate: 20000, heatFluxOuter: 670000, warnings: [] }, null, 2) + "\n",
+      "derived.json": JSON.stringify({ linearHeatRate: 20000, heatFluxOuter: 670000, fuelCells: 2, claddingCells: 2, warnings: [] }, null, 2) + "\n",
       "run.json": JSON.stringify({ state: "completed", solver: "stub solver", exitCode: 139 }, null, 2) + "\n",
       "feed-manifest.json": JSON.stringify({ stub: true }) + "\n",
     };

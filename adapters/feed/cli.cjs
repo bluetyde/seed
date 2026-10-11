@@ -72,6 +72,22 @@ const TRANSIENT_QUANTITIES = [
 // quantity (the smallest margin over the rules that applied; each rule's own margin is in extensions.feed.limits). No rule in force: no quantity.
 const LIMIT_QUANTITY = { name: "temperature_limit_margin", unit: "K" };
 const LIMIT_CHECK = /^temperatureLimit[1-9][0-9]{0,1}$/;
+// A case may also state mechanics (thermo-elastic: small strain, linear elastic, one radial slice); the result then carries a `mechanics` record
+// next to the thermal one. These are values read from it, all in SI: displacements and stresses at cell centres of the solver's mesh, the contact
+// pressure at the gap (0 when open), the gas pressure the case works out. A stress limit is a check `stressLimit:<name>` with the smallest margin in Pa
+// (strength minus von Mises; negative when exceeded); like a temperature limit, a failed one is a failed check on a COMPLETED run, not a broken
+// run: it fails too when cells lie outside the strength table (nothing is extrapolated), with or without a margin.
+const MECHANICS_QUANTITIES = [
+  { name: "displacement_radial_fuel_last_cell", unit: "m" },
+  { name: "displacement_radial_clad_last_cell", unit: "m" },
+  { name: "stress_axial_fuel_min", unit: "Pa" },
+  { name: "stress_hoop_clad_first_cell", unit: "Pa" },
+  { name: "contact_pressure", unit: "Pa" },
+  { name: "gas_pressure", unit: "Pa" },
+];
+const STRESS_LIMIT_QUANTITY = { name: "stress_limit_margin", unit: "Pa" };
+const STRESS_LIMIT_CHECK = /^stressLimit:[A-Za-z0-9._-]{1,64}$/;
+const THERMO_ELASTIC_PREFIX = "Thermo-elastic result:";
 const OUTPUT_FILES = ["case.json", "derived.json", "feed-manifest.json", "results.json", "run.json"];
 const PARAMETERS = [
   { id: "power.linearHeatRate", type: "number", unit: "W/m", min: 1, max: 60000 },
@@ -225,9 +241,9 @@ async function describe(reply, fail) {
       app: { id: "feed", name: "Fuel Performance Studio (FEED)", version: d.engine.version },
       engine: { name: "feed-headless", version: d.engine.version },
       formats: [{ id: d.caseFormat.format, version: String(d.caseFormat.version) }],
-      capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "thermal-only", "transient-pulse"],
+      capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "thermal-only", "thermo-elastic", "transient-pulse"],
       parameters: PARAMETERS,
-      quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES, [LIMIT_QUANTITY]).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
+      quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES, [LIMIT_QUANTITY], MECHANICS_QUANTITIES, [STRESS_LIMIT_QUANTITY]).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
       oracleCoverage: oracleCoverage(),
       resources: resourcesFor("feed"),
       ...(cleanTransfers(d.transfers).length > 0 ? { transfers: cleanTransfers(d.transfers) } : {}),
@@ -387,7 +403,14 @@ function collect(request, root, reply, fail) {
     const coherent = m === null ? c.verdict === "pass" : typeof m === "number" && Number.isFinite(m) && c.verdict === (m >= 0 ? "pass" : "fail");
     if (!coherent) return incomplete("the limit check " + c.id + " does not state a margin that agrees with its verdict", "/quantities/temperature_limit_margin");
   }
-  const failing = results.checks.filter((c) => c.verdict === "fail" && !LIMIT_CHECK.test(c.id));
+  // A stress limit says: a margin (a number) or none; a pass needs a margin of zero or more or none; a fail may carry any margin or none.
+  const stressChecks = results.checks.filter((c) => STRESS_LIMIT_CHECK.test(c.id));
+  for (const c of stressChecks) {
+    const m = c.value;
+    const coherent = (m === null || (typeof m === "number" && Number.isFinite(m))) && (c.verdict === "fail" || m === null || m >= 0);
+    if (!coherent) return incomplete("the stress limit check " + c.id + " does not state a margin that agrees with its verdict", "/quantities/stress_limit_margin");
+  }
+  const failing = results.checks.filter((c) => c.verdict === "fail" && !LIMIT_CHECK.test(c.id) && !STRESS_LIMIT_CHECK.test(c.id));
   if (results.domain && results.domain.verdict === "out-of-domain") {
     return fail(typed("E_OUT_OF_DOMAIN", "/quantities", "a conductivity law was used outside the temperature range it is stated for; this is not a valid result"));
   }
@@ -422,6 +445,33 @@ function collect(request, root, reply, fail) {
     };
   }
   for (const [name, v] of Object.entries(scalars)) if (!finite(v)) return incomplete("the value for " + name + " is missing or not finite", "/quantities/" + name);
+  const mech = results.mechanics;
+  let mechScalars = null;
+  let mechStatement = null;
+  if (mech !== undefined) {
+    if (isTransient) return incomplete("a transient result with mechanics is not supported by this adapter");
+    const nf = derived.fuelCells, nc = derived.claddingCells;
+    const pts = mech && mech.points;
+    const sum = mech && mech.summary;
+    const sound = !!mech && Number.isInteger(nf) && nf >= 1 && Number.isInteger(nc) && nc >= 1 && Array.isArray(pts) && pts.length === nf + nc
+      && pts.every((q) => !!q && finite(q.ur) && finite(q.sigmaTheta))
+      && !!sum && !!sum.fuel && Array.isArray(sum.fuel.axial) && sum.fuel.axial.length === 2 && sum.fuel.axial.every(finite)
+      && finite(sum.contactPressure) && finite(mech.internalPressure);
+    if (!sound) return incomplete("the mechanics record of results.json is missing a value or is not of the shape the cell counts say", "/quantities/displacement_radial_fuel_last_cell");
+    // FEED's own statement of what such a result is (and is not) goes out unchanged, so the index never calls a thermo-elastic result thermal only
+    if (typeof results.thermalOnly !== "string" || !results.thermalOnly.startsWith(THERMO_ELASTIC_PREFIX)) return incomplete("a mechanics result must carry FEED's thermo-elastic statement", "/extensions/feed/thermalOnly");
+    mechStatement = results.thermalOnly.slice(0, 1500);
+    mechScalars = {
+      displacement_radial_fuel_last_cell: pts[nf - 1].ur,
+      displacement_radial_clad_last_cell: pts[pts.length - 1].ur,
+      stress_axial_fuel_min: sum.fuel.axial[0],
+      stress_hoop_clad_first_cell: pts[nf].sigmaTheta,
+      contact_pressure: sum.contactPressure,
+      gas_pressure: mech.internalPressure,
+    };
+  } else if (stressChecks.length > 0) {
+    return incomplete("a stress limit check without a mechanics result", "/quantities/stress_limit_margin");
+  }
 
   // The series folder is written below: it must be a real folder inside the run folder, not a link set up beforehand.
   const seriesDir = path.join(nativeDir, "series");
@@ -454,6 +504,20 @@ function collect(request, root, reply, fail) {
       ...(q.series ? { coordinates: { system: "time", axes: [{ name: "t", unit: "s" }] } } : {}),
     });
   }
+  if (mechScalars) {
+    for (const q of MECHANICS_QUANTITIES) {
+      const text = json({ quantity: q.name, unit: q.unit, values: [mechScalars[q.name]], note: "thermo-elastic, small strain, linear elastic; a cell-centre value of the solver's mesh (the contact and gas pressures are values of the case); see extensions.feed.thermalOnly for what the result is not" });
+      atomicWrite(path.join(nativeDir, "series", q.name + ".json"), text);
+      quantities.push({
+        name: q.name,
+        unit: q.unit,
+        normalization: "none",
+        provenance: { runId, inputRevisions },
+        data: { path: request.runDir + "/native/series/" + q.name + ".json", sha256: sha256(text) },
+        verification: "unverified",
+      });
+    }
+  }
   const margins = limitChecks.filter((c) => c.value !== null).map((c) => c.value);
   if (margins.length > 0) {
     const text = json({ quantity: LIMIT_QUANTITY.name, unit: LIMIT_QUANTITY.unit, values: [Math.min(...margins)], note: "the smallest margin over the limit rules that applied in this run (limit minus hottest cell, K); negative means exceeded; each rule's own margin is in extensions.feed.limits; not an integrity assessment" });
@@ -464,6 +528,19 @@ function collect(request, root, reply, fail) {
       normalization: "none",
       provenance: { runId, inputRevisions },
       data: { path: request.runDir + "/native/series/" + LIMIT_QUANTITY.name + ".json", sha256: sha256(text) },
+      verification: "unverified",
+    });
+  }
+  const stressMargins = stressChecks.filter((c) => c.value !== null).map((c) => c.value);
+  if (stressMargins.length > 0) {
+    const text = json({ quantity: STRESS_LIMIT_QUANTITY.name, unit: STRESS_LIMIT_QUANTITY.unit, values: [Math.min(...stressMargins)], note: "the smallest margin over the stress limits that gave one in this run (strength minus von Mises stress, Pa); negative means a limit was exceeded; each limit's own margin and verdict is in extensions.feed.stressLimits" });
+    atomicWrite(path.join(nativeDir, "series", STRESS_LIMIT_QUANTITY.name + ".json"), text);
+    quantities.push({
+      name: STRESS_LIMIT_QUANTITY.name,
+      unit: STRESS_LIMIT_QUANTITY.unit,
+      normalization: "none",
+      provenance: { runId, inputRevisions },
+      data: { path: request.runDir + "/native/series/" + STRESS_LIMIT_QUANTITY.name + ".json", sha256: sha256(text) },
       verification: "unverified",
     });
   }
@@ -478,12 +555,14 @@ function collect(request, root, reply, fail) {
     quantities,
     extensions: {
       feed: {
-        thermalOnly: THERMAL_ONLY,
+        thermalOnly: mechStatement || THERMAL_ONLY,
+        ...(mechScalars ? { thermoElastic: true } : {}),
         kind: isTransient ? "transient" : "steady",
         solver: String(record.solver || "").slice(0, 120),
         caseSha256: manifest.caseSha256,
         resultsSha256: manifest.files.find((f) => f.path === "results.json").sha256,
         checks: results.checks.map((c) => ({ id: String(c.id), verdict: String(c.verdict) })),
+        ...(stressChecks.length > 0 ? { stressLimits: stressChecks.map((c) => ({ id: String(c.id), verdict: String(c.verdict), marginPa: c.value })) } : {}),
         ...(limitChecks.length > 0 ? { limits: limitChecks.map((c) => ({ id: String(c.id), verdict: String(c.verdict), marginK: c.value })) } : {}),
         domain: results.domain.verdict,
         warnings: Array.isArray(derived.warnings) ? derived.warnings.map((w) => String(w.code)) : [],
