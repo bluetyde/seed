@@ -280,6 +280,11 @@
     "valid": true
   },
   {
+    "file": "good/oracle-known-limit-with-value.json",
+    "family": "oracle",
+    "valid": true
+  },
+  {
     "file": "bad/adapter-request-wrong-version.json",
     "family": "adapter-request",
     "valid": false,
@@ -1324,7 +1329,7 @@
     }
   },
   {
-    "file": "bad/oracle-known-limit-with-value.json",
+    "file": "bad/oracle-known-limit-value-and-refusal.json",
     "family": "oracle",
     "valid": false,
     "expect": {

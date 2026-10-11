@@ -1,3 +1,4 @@
+// @covers R-CORE-12, R-DISP-01, R-DISP-04
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";

@@ -1,3 +1,4 @@
+// @covers R-ORA-04, R-ORA-05
 import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -84,7 +85,7 @@ async function observe(entry: OracleEntry): Promise<Observed> {
   const mgr = new RunManager({ projectRoot: root, runsFolder: "runs", adapter: spec, pollMs: 200, callTimeoutMs: 60000 });
   const out = await mgr.start({ requestId: oracleRequestId(entry.oracleId), actor, artifact, inputs: entry.inputs, budget, settings: { case: casePath } });
   if (!out.ok) throw new Error("run refused: " + JSON.stringify(out.errors));
-  if (entry.tag === "known-limit") {
+  if (entry.tag === "known-limit" && typeof entry.expected.refusalCode === "string") {
     // The solver finished; the adapter must refuse to hand over the result. Read its own refusal.
     if (out.state === "completed") return { kind: "verdict", verdict: "accepted" };
     const jobId = JSON.parse(readFileSync(join(root, "runs", out.runId, "native", "job.json"), "utf8")).jobId;
@@ -100,10 +101,12 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  // FEED main has 78 entries since 2026-10-10 (972ddbf): the 74 before it plus the first `published` oracles, from General Atomic report GA-7882 (two pulse
-  // cases, each pinning `energy_deposited` and `temperature_peak_max`). Anything else is a silent addition or removal.
-  const KNOWN_SETS = [{ total: 78, good: 52, badInput: 24, knownLimit: 2 }];
-  it("loads FEED's 78 entries (52 good, 24 bad-input, 2 known-limit), all pinned and valid", () => {
+  // FEED main has 92 entries since 2026-10-10 (adb9995): the 78 before it (the 74 of 6165412 plus the first `published` oracles, from General Atomic report
+  // GA-7882) and 14 thermo-elastic ones (7 good, 6 bad-input, and 1 known-limit with a number that is expected to miss). Anything else is a silent addition or
+  // removal.
+  const KNOWN_SETS = [{ total: 92, good: 59, badInput: 30, knownLimit: 3 }];
+  const MECHANICS_QUANTITIES = ["contact_pressure", "displacement_radial_clad_last_cell", "displacement_radial_fuel_last_cell", "gas_pressure", "stress_axial_fuel_min", "stress_hoop_clad_first_cell", "stress_limit_margin"];
+  it("loads FEED's 92 entries (59 good, 30 bad-input, 3 known-limit), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
     const count = (tag: string) => r.entries.filter((i) => i.entry.tag === tag).length;
@@ -116,17 +119,23 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
     const cov = (o.reply as { result: { oracleCoverage: { quantity: string }[] } }).result.oracleCoverage;
     expect((o.reply as { result: { resources?: unknown } }).result.resources).toEqual(JSON.parse(readFileSync(join(__dirname, "..", "adapters", "shared", "resources.json"), "utf8")).feed);
     // The two limit-margin entries make `temperature_limit_margin` a quantity covered by an oracle.
-    const expected = ["energy_balance_residual", "energy_deposited", "heat_flux_outer", "temperature_limit_margin", "temperature_peak", "temperature_peak_max", "temperature_surface"];
+    const expected = ["energy_balance_residual", "energy_deposited", "heat_flux_outer", "temperature_limit_margin", "temperature_peak", "temperature_peak_max", "temperature_surface", ...MECHANICS_QUANTITIES].sort();
     expect([...new Set(cov.map((c) => c.quantity))].sort()).toEqual(expected);
   });
 
   it("the adapter passes every entry: set passes, inputs verified, not blocked", async () => {
     const { entries } = loadOracleEntries(join(base, "entries"));
     const set = await runOracleSet({ entries, adapter: { id: "feed", version: "0.1.0" }, appCommit, baseDir: base, run: (e) => observe(e) });
-    expect(set.results.filter((r) => r.verdict !== "pass")).toEqual([]);
+    // One known-limit entry expects a number it is known to miss (FEED's penalty contact is 2.7 to 3.1 % low for a fuel a quarter as stiff as its
+    // cladding, the entry's tolerance is 2 %): it fails by design, the set still passes, and its quantity is unverified.
+    const notPassing = set.results.filter((r) => r.verdict !== "pass");
+    expect(notPassing.map((r) => r.oracleId), JSON.stringify(notPassing.map((r) => [r.oracleId, r.verdict, r.reason]))).toEqual(["feed-mechanics-gap-closure-soft-fuel-contact-pressure"]);
     expect(set.verdict).toBe("pass");
     expect(set.inputsVerified).toBe(true);
     expect(set.blocked).toBe(false);
+    expect(set.blockedQuantities).toEqual(["contact_pressure"]);
+    // the good entries of the mechanics set verify their quantities, except the one the known limit marks unverified (a decision of the user, 2026-10-10)
+    expect(unverifiedQuantities(MECHANICS_QUANTITIES, set, entries)).toEqual(["contact_pressure"]);
     // what the oracles do not cover stays unverified
     expect(unverifiedQuantities(["temperature_peak", "temperature_surface", "heat_flux_outer", "energy_balance_residual", "temperature_fuel_surface", "temperature_clad_inner", "temperature_radial", "temperature_peak_max", "energy_deposited", "temperature_peak_history", "temperature_outer_wall_history", "time_of_peak", "energy_balance_gap"], set, entries)).toEqual(["temperature_fuel_surface", "temperature_clad_inner", "temperature_radial", "temperature_peak_history", "temperature_outer_wall_history", "time_of_peak", "energy_balance_gap"]);
   }, 1_800_000);

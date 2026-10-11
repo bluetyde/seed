@@ -1,3 +1,4 @@
+// @covers R-CORE-02
 import { describe, expect, it } from "vitest";
 import { readQuantityData, type IndexEntryView } from "../src/core/quantityData";
 import { checkResultsAgainstRecord } from "../src/core/semantic";

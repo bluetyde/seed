@@ -91,3 +91,25 @@ A case may state limits (FEED `docs/temperature-limits.md`); FEED then reports o
 FEED main has **78 entries (52 good, 24 bad-input, 2 known-limit)** since 2026-10-10 (`972ddbf`): the 74 of 2026-10-08 (`6165412`: the 72 before it plus two that pin `temperature_limit_margin`) plus four from General Atomic report GA-7882, Table VII, the first with source kind `published` (two pulse cases, each pinning `energy_deposited` and `temperature_peak_max`; the expected values are the report's printed numbers, with tolerances of 0.5 % fixed first). `tests/feed-oracles.test.ts` accepts exactly this set, so a silent addition or removal fails it, and the adapter's oracle coverage lists `temperature_limit_margin`. Run against a FEED checkout at main (`SEED_FEED_REPO`, `npm run build`), the whole 78-entry set passes through the adapter with the real solver.
 
 The test helper `tests/helpers/oracleRequest.ts` makes the request id of an oracle run: `req-<oracleId>`, or a hash of it when that would pass the 64-character id limit (one new FEED entry id is 62 characters). It is used by the FEED, NODAL, OpenMC, SNEED and RAFT oracle tests.
+
+## Thermo-elastic results (mechanics), 2026-10-10
+
+FEED's plan 09 (mechanics, M0 to M6) adds a `mechanics` record to `results.json` for a case with `assumptions.thermalOnly: false`: small strain, linear elastic, one radial slice, with the contact at the gap. The adapter reads it when it is there and refuses a malformed one; the request is FEED's `docs/seed-mechanics-request.md`.
+
+| Quantity | Unit | Read from |
+|---|---|---|
+| `displacement_radial_fuel_last_cell` | m | `mechanics.points[fuelCells - 1].ur` |
+| `displacement_radial_clad_last_cell` | m | `mechanics.points[last].ur` |
+| `stress_axial_fuel_min` | Pa | `mechanics.summary.fuel.axial[0]` (tension positive) |
+| `stress_hoop_clad_first_cell` | Pa | `mechanics.points[fuelCells].sigmaTheta` |
+| `contact_pressure` | Pa | `mechanics.summary.contactPressure` (0 when the gap is open) |
+| `gas_pressure` | Pa | `mechanics.internalPressure` |
+| `stress_limit_margin` | Pa | the smallest `value` of the checks `stressLimit:<name>` that gave one (strength minus von Mises; negative when exceeded) |
+
+All are cell-centre values of the case's own mesh (FEED's mechanics entries use 20 fuel and 8 cladding cells). `fuelCells` and `claddingCells` come from `derived.json`; the points must be exactly that many cells, each with finite `ur` and `sigmaTheta`.
+
+- **A failed stress limit is a failed check on a completed run**, as for the temperature limits: the run is kept, the margin goes out as `stress_limit_margin`, and every limit is listed in `extensions.feed.stressLimits` (`id`, `verdict`, `marginPa`). A limit also fails when cells lie outside the strength table (nothing is extrapolated), with the margin of the cells that could be judged or none. Incoherent limits are refused: a pass with a negative margin, a margin that is not a number. A stress limit without a mechanics result is refused.
+- **Every other failed check still refuses collection** (`mechanicsDisplacement`, `mechanicsStress`, `mechanicsEquilibrium`, `mechanicsContact`, `mechanicsFields`, and the thermal ones). A transient result with mechanics is refused (not supported).
+- **What the result is:** `extensions.feed.thermalOnly` carries FEED's own thermo-elastic statement unchanged (it must start `Thermo-elastic result:`) and `extensions.feed.thermoElastic` is `true`; a thermal-only result keeps the thermal statement. Neither says that anything fails or holds: a stress is compared with a strength only when a limit is stated.
+- **The mechanics oracle entries** (FEED main since `adb9995`, 2026-10-10: 92 entries, 59 good, 30 bad-input, 3 known-limit; `tests/feed-oracles.test.ts` accepts exactly this set) expect closed forms computed in FEED's generator with no FEED code. One of them is a **known-limit with a number**: a closing gap with a fuel a quarter as stiff as its cladding, where FEED's penalty contact is known to be 2.7 to 3.1 % low and the entry's tolerance of 2 % is below that on purpose. It is expected to miss. Under contract v0.1.2 ([contracts.md](contracts.md) section 12 item 9) this is a failed known-limit entry: the set still passes, and **`contact_pressure` is unverified in every report** (the user's decision, 2026-10-10), also for cases where the contact is right.
+

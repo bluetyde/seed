@@ -1,3 +1,4 @@
+// @covers R-STUDY-01
 import { describe, expect, it } from "vitest";
 import { evaluateGate, DEFAULT_MAX_CASES, type Actor, type PolicyStudy } from "../src/core/policy";
 import { expandSweep, sweepCaseId, type SweepDefinition } from "../src/core/sweep";

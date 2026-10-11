@@ -1,3 +1,4 @@
+// @covers R-DISP-01, R-DISP-04
 import { describe, expect, it } from "vitest";
 import {
   OPERATION_RULES,
