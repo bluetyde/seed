@@ -11,6 +11,8 @@ import { defaultCheckCmd, defaultRunCmd, Installer } from "./installer";
 import { InstallStore } from "./store";
 import * as os from "node:os";
 import { ProcessManager } from "./processes";
+import { OwnerStore } from "../core/ownerStore";
+import { recoverOwners } from "../core/ownerRecovery";
 import { TabModel } from "./tabs";
 import { Lesson } from "./lesson";
 import { createReportView } from "./reportView";
@@ -426,6 +428,12 @@ app.whenReady().then(() => {
       if (process.platform !== "win32") repo.prerequisites = repo.prerequisites.filter((p) => p.id !== "wsl" && p.id !== "conda-env");
     }
   }
+  // Servers a previous host started and left behind (it was killed): stop the ones that are provably the same process, leave everything else alone.
+  processes.owners = new OwnerStore(path.join(app.getPath("userData"), "process-owners"));
+  void recoverOwners(processes.owners).then((r) => {
+    const acted = r.results.filter((x) => x.outcome !== "host-alive" && x.outcome !== "standalone");
+    if (acted.length || r.unreadable.length) console.error("[seed] process records from an earlier run:", JSON.stringify({ results: acted, unreadable: r.unreadable }));
+  }).catch((e) => console.error("[seed] could not check the process records:", e));
   store = new InstallStore(path.join(app.getPath("userData"), "installs.json"), process.env.SEED_INSTALL_ROOT ?? path.join(DIST, "..", "apps"));
   installer = new Installer({
     repos: catalog.repos, store, git: new Git(), runCmd: defaultRunCmd, checkCmd: defaultCheckCmd,
