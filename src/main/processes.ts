@@ -4,6 +4,8 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as net from "node:net";
+import { identityOf } from "../core/processIdentity";
+import type { OwnerRecord, OwnerStore } from "../core/ownerStore";
 import type { AppEntry } from "./apps";
 
 export interface Running {
@@ -59,7 +61,43 @@ export function killTree(child: ChildProcess): Promise<void> {
 
 const defaultDeps: Deps = { spawn: nodeSpawn, freePort, fetchStatus, kill: killTree, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
 
-interface Entry { child?: ChildProcess; running: Running; output: string[]; exited: boolean; ready?: boolean; code?: number | null }
+interface Entry { child?: ChildProcess; running: Running; output: string[]; exited: boolean; ready?: boolean; code?: number | null; owner?: OwnerHandle }
+
+/**
+ * The process-owner record of one server the host started (runtime contract, "Process ownership"). It is written when the process starts, marked
+ * running when it answers, and removed when it ends, so a host that is killed leaves the record behind for the next start to find (acceptance R4).
+ * A server the host only attached to has no record: it was never the host's to stop (R5). A record that cannot be written never stops the app.
+ */
+class OwnerHandle {
+  private chain: Promise<void> = Promise.resolve();
+  private launchId = randomBytes(16).toString("hex");
+  private record: OwnerRecord | undefined;
+  constructor(private readonly store: OwnerStore, private readonly note: (text: string) => void) {}
+
+  private later(step: () => Promise<void> | void): void {
+    this.chain = this.chain.then(step).catch((e) => this.note(`(process record not kept: ${(e as Error).message})\n`));
+  }
+
+  start(app: AppEntry, child: ChildProcess, port: number): void {
+    const pid = child.pid;
+    if (pid === undefined) return;
+    this.later(async () => {
+      const [host, worker] = await Promise.all([identityOf(process.pid), identityOf(pid)]);
+      if (!host || !worker) return; // the process is already gone, or its start time cannot be read: no record is better than a record that could mislead
+      this.record = {
+        schema: "seed.process-owner/0.1", launchId: this.launchId, kind: "launch",
+        // Until components are managed (W4) an app is its own runtime: the component is the app, at no version.
+        runtime: { component: app.id, version: "0.0.0" }, supervisor: "seed", host,
+        worker: { via: "native", identity: worker }, endpoint: `http://127.0.0.1:${port}`,
+        generation: randomBytes(16).toString("hex"), state: "starting", startedAt: new Date().toISOString(),
+      };
+      this.store.write(this.record);
+    });
+  }
+
+  running(): void { this.later(() => { if (this.record) this.store.mark(this.launchId, "running"); }); }
+  end(): Promise<void> { this.later(() => { this.store.remove(this.launchId); this.record = undefined; }); return this.chain; }
+}
 
 const fill = (s: string, vars: Record<string, string>) => s.replace(/\{(port|token)\}/g, (_, k: string) => vars[k] ?? "");
 
@@ -69,7 +107,10 @@ export class ProcessManager {
   /** Called when a server the host started stops on its own (crash, closed from outside). */
   onExit: (appId: string, code: number | null) => void = () => {};
 
-  constructor(private readonly deps: Deps = defaultDeps) {}
+  /** Where the process-owner records are kept. Set once the host knows its store folder; without it nothing is recorded. */
+  owners?: OwnerStore;
+
+  constructor(private readonly deps: Deps = defaultDeps, owners?: OwnerStore) { this.owners = owners; }
 
   running(appId: string): Running | undefined {
     const e = this.entries.get(appId);
@@ -116,6 +157,7 @@ export class ProcessManager {
       e.exited = true;
       await this.deps.kill(e.child);
     }
+    await e?.owner?.end();
   }
 
   async stopAll(): Promise<void> {
@@ -157,6 +199,7 @@ export class ProcessManager {
       const entry: Entry = { child, running: { url: `http://127.0.0.1:${port}${fill(app.urlPath, vars)}`, port, owned: true }, output: [], exited: false };
       this.entries.set(app.id, entry);
       const keep = (b: Buffer) => { entry.output.push(b.toString()); if (entry.output.length > 400) entry.output.shift(); };
+      if (this.owners) { entry.owner = new OwnerHandle(this.owners, (t) => keep(Buffer.from(t))); entry.owner.start(app, child, port); }
       child.stdout?.on("data", keep);
       child.stderr?.on("data", keep);
       let spawnError: string | undefined;
@@ -165,6 +208,7 @@ export class ProcessManager {
         const wasRunning = !entry.exited && entry.ready;
         entry.exited = true;
         entry.code = code;
+        void entry.owner?.end();
         if (wasRunning) this.onExit(app.id, code);
       });
 
@@ -180,7 +224,7 @@ export class ProcessManager {
         }
         const healthy = await this.healthy(base, app);
         checkCancelled();
-        if (healthy && !entry.exited) { entry.ready = true; return entry.running; }
+        if (healthy && !entry.exited) { entry.ready = true; entry.owner?.running(); return entry.running; }
         await this.deps.sleep(250);
       }
       const out = entry.output.join("");
