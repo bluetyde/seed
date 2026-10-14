@@ -96,6 +96,61 @@ export function stepDrafts(a: DraftArgs): StepDraft[] {
   return drafts;
 }
 
+/** What a replay's step says; every field is in the replay log too (docs/replay.md), so the step can be rebuilt from it. */
+export type ReplayFacts = {
+  requestId: string;
+  originalRequestId: string;
+  originalRunId: string;
+  replayRunId: string;
+  replayState: string;
+  adapter: string;
+  policy: { mode: string; abs?: number; rel?: number; sigmas?: number };
+  verdict: string;
+  differences: { kind: string; field: string }[];
+};
+
+const policyText = (p: ReplayFacts["policy"]) => (p.mode === "tolerance" ? `tolerance, abs ${p.abs}, rel ${p.rel}` : p.mode === "statistical" ? `statistical, ${p.sigmas} sigmas` : p.mode);
+
+/**
+ * The step a replay leaves in the study record: action `compare`, citing the original run and the replay run, saying the verdict, the policy it was judged
+ * under and where the runs differ. Keyed by the replay's request id, so the same replay is written once. The replay run's own steps (oracle, run, outcome)
+ * are written by the guarded run path before this one. It says plainly that a replay tests reproduction and is no scientific conclusion.
+ */
+export function replayStepDraft(a: { actor: Actor; time: string; facts: ReplayFacts; prefix?: string }): StepDraft {
+  const f = a.facts;
+  const shown = f.differences.slice(0, 10).map((d) => `${d.kind} ${d.field}`).join("; ");
+  const diffs = f.differences.length === 0 ? "No differences." : `Differences (${f.differences.length}): ${shown}${f.differences.length > 10 ? `; and ${f.differences.length - 10} more` : ""}.`;
+  return {
+    action: "compare", actor: a.actor, time: a.time, runs: [f.originalRunId, f.replayRunId],
+    reason: `${a.prefix ?? ""}Replay of run ${f.originalRunId} (request ${f.originalRequestId}) by run ${f.replayRunId} (request ${f.requestId}, ended ${f.replayState}): ${f.verdict}. Judged under the ${f.adapter} adapter's replay policy (${policyText(f.policy)}). ${diffs} A replay tests reproduction; it is not a scientific conclusion.`,
+    key: `replay:${f.requestId}`,
+  };
+}
+
+/** Appends a replay's step. Never throws: a failure is written to the host diagnostics and returned, and the replay's answer is not changed by it. */
+export function recordReplayInStudy(a: { c: Cfg; projectRoot: string; studiesFolder: string; projectId: string; engineRoot: string; facts: ReplayFacts; now?: () => Date }): { ok: boolean; appended?: number; reason?: string } {
+  try {
+    const header = loadLiveHeader(a.c, a.projectRoot, a.projectId);
+    if (header === null) return { ok: true, appended: 0 };
+    const time = (a.now ?? (() => new Date()))().toISOString();
+    const file = studyRecordFile(a.projectRoot, a.studiesFolder, a.c.study.studyId, true);
+    const r = appendStudySteps(file, header, [replayStepDraft({ actor: a.c.actor, time, facts: a.facts })], a.projectRoot);
+    if (!r.ok) throw Error(r.errors.map((e) => e.message).join("; "));
+    return { ok: true, appended: r.appended };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "study record failed";
+    try {
+      appendFileSync(
+        safeChild(a.engineRoot, "diagnostics.jsonl"),
+        JSON.stringify({ time: new Date().toISOString(), project: a.projectId, stage: "study-record", kind: "StudyRecord", message: ("replay step: " + reason).slice(0, 1000) }) + "\n"
+      );
+    } catch {
+      // diagnostics are best effort
+    }
+    return { ok: false, reason };
+  }
+}
+
 /** Appends the steps one request produced. Never throws: a failure is written to the host diagnostics and returned. */
 export function recordRequestInStudy(a: RecordArgs): { ok: boolean; appended?: number; reason?: string } {
   try {

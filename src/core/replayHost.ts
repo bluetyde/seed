@@ -8,6 +8,7 @@ import { openProject } from "./projectStore";
 import { readQuantityData } from "./quantityData";
 import { compareReplay, type ReplayPolicy, type ReplayResult, type ReplayRun } from "./replay";
 import { loadReplayPolicy } from "./replayPolicy";
+import { recordReplayInStudy } from "./studyRecordHost";
 import type { RunOutcome } from "./runManager";
 import { RESULTS_INDEX_SCHEMAS, validate, type TypedError } from "./validate";
 
@@ -28,6 +29,8 @@ export type ReplayOutcome =
       result: Extract<ReplayResult, { ok: true }>;
       /** Set when the replay ran and was compared but its row in the replay log could not be written. */
       recordingError?: string;
+      /** The replay's step in the live study record: how many rows were appended (0 when there is no human header, or the step was already there), or why it could not be. */
+      studyRecord: { appended: number } | { failed: string };
     }
   | { ok: false; errors: TypedError[]; replay?: { requestId: string; runId?: string; state?: string } };
 
@@ -128,7 +131,7 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     // 2. the original, proven from the audit log and the saved files
     const project = openProject(projectRoot);
     if (!project.ok) return { ok: false, errors: project.errors };
-    const projectId = project.value.manifest.projectId;
+    const projectId = project.value.manifest.projectId as string;
     const folders = project.value.manifest.folders as { runs: string };
     const runsRoot = safeChild(projectRoot, folders.runs, true);
     if (!inside(projectRoot, realpathSync(runsRoot))) throw Error("runs folder leaves project");
@@ -185,15 +188,21 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     const replay = loadEvidence(projectRoot, replayRunRoot, replayRecord);
     const result = compareReplay({ original, replay, policy: policy.policy });
     if (!result.ok) return { ok: false, errors: result.errors, replay: { requestId, runId: ran.runId, state: ran.state } };
+    // the verdict becomes a step of the live study record (when the host has a human header); a failure never changes the replay's answer
+    const studied = recordReplayInStudy({
+      c, projectRoot, studiesFolder: (project.value.manifest.folders as { studies: string }).studies, projectId, engineRoot: engine,
+      facts: { requestId, originalRequestId, originalRunId, replayRunId: ran.runId, replayState: ran.state, adapter: c.adapter.id, policy: policy.policy, verdict: result.verdict, differences: result.differences.map((d) => ({ kind: d.kind, field: d.field })) },
+    });
+    const studyRecord: { appended: number } | { failed: string } = studied.ok ? { appended: studied.appended ?? 0 } : { failed: studied.reason ?? "the study record could not be written" };
     let recordingError: string | undefined;
     try {
-      note({ phase: "finished", originalRunId, replayRunId: ran.runId, replayState: ran.state, verdict: result.verdict, differences: result.differences.map((d) => ({ kind: d.kind, field: d.field })) });
+      note({ phase: "finished", originalRunId, replayRunId: ran.runId, replayState: ran.state, verdict: result.verdict, differences: result.differences.map((d) => ({ kind: d.kind, field: d.field })), studyRecord });
     } catch (e) {
       recordingError = "the replay ran and was compared, but its row in the replay log could not be written: " + (e instanceof Error ? e.message : "write failed");
     }
     return {
       ok: true, requestId, original: { requestId: originalRequestId, runId: originalRunId }, replay: { requestId, runId: ran.runId, state: ran.state },
-      adapter: c.adapter.id, policy: policy.policy, basis: policy.basis, result, ...(recordingError ? { recordingError } : {}),
+      adapter: c.adapter.id, policy: policy.policy, basis: policy.basis, result, studyRecord, ...(recordingError ? { recordingError } : {}),
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : "replay setup failed";

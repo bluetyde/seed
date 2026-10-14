@@ -10,6 +10,7 @@ import { writeHostJson } from "../src/core/hostFiles";
 import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/oracle";
 import { createProject, openProject } from "../src/core/projectStore";
 import { verifyStudyLog } from "../src/core/semantic";
+import { replayFromHostFile } from "../src/core/replayHost";
 import { exportStudyReport } from "../src/core/studyReportHost";
 import { appendStudySteps, readStudyRecord, studyRecordFile } from "../src/core/studyRecord";
 import { makeHeader } from "./helpers/studyFixtures";
@@ -145,6 +146,23 @@ describe("with a live record the report is the record's study", () => {
     const rec = readStudyRecord(f.record);
     expect(evidence.liveRecord).toEqual({ rows: 5, head: rec.ok ? rec.rows.at(-1)!.hash : "" });
     expect(evidence.otherRuns).toEqual([]);
+  });
+
+  it("a replay's step is in the report, and both runs it cites are proven and included (the shipped RAFT replay policy, exact)", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    const first = await f.run("r1");
+    const rep: any = await replayFromHostFile(f.hostFile, { requestId: "rep1", originalRequestId: "r1", budget: { maxWallSeconds: 30, maxCores: 1, maxMemoryMB: 512, maxDiskMB: 512 } });
+    expect(rep).toMatchObject({ ok: true, adapter: "raft", result: { verdict: "reproduced" }, studyRecord: { appended: 1 } });
+    const r: any = await f.exportReport("r1");
+    expect(r).toMatchObject({ ok: true, state: "report-saved", runId: first });
+    const s = saved(f.project, r);
+    expect(s.html).toContain("Replay of run " + first);
+    expect(s.html).toContain(rep.replay.runId);
+    expect(s.md).toContain("it is not a scientific conclusion");
+    expect(read(join(s.dir, "study.jsonl"))).toBe(read(f.record));
+    expect(verifyStudyLog(read(join(s.dir, "study.jsonl")).trim().split("\n"))).toEqual([]);
+    expect(JSON.parse(read(join(s.dir, "evidence.json"))).otherRuns.map((x: any) => x.runId ?? x)).toContain(rep.replay.runId);
   });
 
   it("every run the record cites is in the report, proven from the audit log, with its files under runs/<id>/", async () => {
