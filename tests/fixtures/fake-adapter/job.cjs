@@ -58,10 +58,17 @@ if (scenario === "crash") {
 
 if (scenario === "hang" || scenario === "slow-start") {
   // Heartbeat forever; never finish
-} else if (scenario === "success" || scenario === "slow") {
+} else if (scenario === "success" || scenario === "slow" || scenario === "series" || scenario === "jitter") {
   setTimeout(() => {
     try {
-      atomicWrite(outPath, JSON.stringify({ values: [1, 2, 3] }) + "\n");
+      // "series" and "jitter" write a series the shared data reader knows (a time axis and values); "jitter" makes the last value differ a little from run to run
+      // (up to 1e-6), like a nondeterministic engine. The replay tests need both.
+      if (scenario === "series" || scenario === "jitter") {
+        const last = scenario === "jitter" ? 3 + Number(process.hrtime.bigint() % 1000003n) * 1e-12 : 3;
+        atomicWrite(outPath, JSON.stringify({ quantity: "out", unit: "1", t: [0, 1, 2], values: [1, 2, last] }) + "\n");
+      } else {
+        atomicWrite(outPath, JSON.stringify({ values: [1, 2, 3] }) + "\n");
+      }
       atomicWrite(
         statusPath,
         JSON.stringify(

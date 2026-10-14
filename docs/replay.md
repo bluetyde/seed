@@ -33,7 +33,21 @@ Each quantity reports the largest absolute and relative difference; a statistica
 - The policy is the **adapter's**, not the caller's, and lives in SEED: **`adapters/<id>/replay.json`** (decided by the user, 2026-10-14, option A; no contract change). Format: `{ "schema": "seed.replay-policy/0.1", "adapter": "<id>", "policy": { ... }, "basis": "why" }`, read by `src/core/replayPolicy.ts`, which refuses a missing file (there is **no default policy**: a default would decide what "the same" means for an adapter nobody has looked at), an unknown field, another adapter's id, a bad policy or a missing reason. Shipped: RAFT, NODAL and SNEED exact; FEED a relative bound of 1e-9; OpenMC statistical at 3 sigmas. **These are SEED's judgment, not measured**: each file says so, and the first real replays should be used to check them.
 - It never runs across engine versions: if the engine or adapter now installed is not the one in the original record, the replay is refused before anything runs, with the differences listed.
 
+## The host verb: `replayFromHostFile` (`src/core/replayHost.ts`)
+
+Client input: `{ requestId, originalRequestId, budget }` and nothing else (no case, input, path, setting or policy). `requestId` is the replay's own id (not the original's; the same id again returns the same replay run). **Nothing runs unless all of this holds**, and each refusal says why:
+
+1. the adapter has a replay policy (`E_SETUP_REQUIRED`: there is no default);
+2. the original request was admitted and its run is **proven from the audit log**: the admission and an allowing decision are in the engine's log under the *current runtime*, the run record validates and its hash is the one in the audited outcome, and the request is bound to that run (`E_NOT_FOUND`, `E_REQUEST_CONFLICT`);
+3. the host configuration is **the one the original was admitted under**, except for other cases and the sweeps: the same runtime, adapter, actor, study rules, oracle evidence and the run's own case (`E_REQUEST_CONFLICT`; this is the "never across engine versions" rule, checked before anything runs);
+4. the original is completed (`E_NOT_PERMITTED` otherwise) and current (`E_STALE_REVISION` if an input changed since);
+5. its case is still registered, and every saved output still matches its hash.
+
+Then the registered case is run again through **the same guarded path as any run** (`runFromHostFile`: tier, budget, pins, oracles, engine lease, audit), so a refusal there (for example `E_BUDGET_EXCEEDED`) is returned as it is. The two runs are compared with the adapter's policy. The answer holds both run ids, the policy and its stated basis, and the comparison. A replay that ends failed or cancelled is a replay that **differs**, and its run stays on record.
+
+Each replay writes `replays.jsonl` in the host's state folder (admitted, finished with the verdict and the list of differences, or refused with the reason); the replay is also a run in the project with its own request, decision and outcome in the audit log. The verification of the original repeats the checks of the report export (`studyReportHost.ts`) in a smaller form; the two should be merged into one shared function when the report gets its replay section.
+
 ## Not done
 
-- The host verb (`replay` through the gate: prove the original from the audit log, run its registered case again with its seed, compare), CLI and MCP, the study-record step and the report section. The pure comparison (`tests/replay.test.ts`, 60 tests) and the policy files with their loader (`tests/replay-policy.test.ts`, 36) are built.
+- CLI and MCP wiring of the verb, the study-record step (the replay run is a step like any run, but the replay verdict is not yet written to the record) and the report section. Built: the pure comparison (`tests/replay.test.ts`, 60), the policy files (`tests/replay-policy.test.ts`, 37) and the host verb (`tests/replay-host.test.ts`, 20, with the real fake-adapter host path).
 - **Counting a replay as a case:** a single run (`run_case`) is not counted against a study's `maxCases` today (only a sweep's case count is), so a replay is bounded like any run, by the per-case budget, the tier and the engine lease. A study-wide count of runs would be a new rule and is not part of this.
