@@ -110,6 +110,8 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
   if (requestId === originalRequestId) return refusal("the replay needs a request id of its own, not the original's", "E_REQUEST_CONFLICT", "/requestId");
   let state: string | undefined;
   const note = (event: Record<string, unknown>) => { if (state !== undefined) appendReplayRecord(state, { requestId, originalRequestId, ...event }); };
+  /** A refusal before anything runs: logged with its reason, then returned. */
+  const deny = (message: string, code: string, field = ""): ReplayOutcome => { note({ phase: "refused", reason: message }); return refusal(message, code, field); };
   try {
     if (!isAbsolute(file)) return refusal("SEED_HOST_CONFIG must be an absolute path", "E_SETUP_REQUIRED");
     regularFile(file);
@@ -134,23 +136,22 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     const rows = readAdmissions(engine);
     const inProject = (row: any) => row.event.projectId === projectId;
     const admission = [...rows].reverse().find((row: any) => inProject(row) && row.event.phase === "request" && row.event.event.request?.requestId === originalRequestId);
-    if (!admission) { note({ phase: "refused", reason: "no guarded admission for the original request" }); return refusal("no guarded admission for the original request under this runtime", "E_NOT_FOUND", "/originalRequestId"); }
+    if (!admission) { return deny("no guarded admission for the original request under this runtime", "E_NOT_FOUND", "/originalRequestId"); }
     const admitted = (admission.event as any).event;
     const caseId = admitted.request?.caseId;
     if (typeof caseId !== "string") throw Error("the original admission names no case");
     // the configuration the original ran under may differ from today's only in other cases and in the sweeps
     const strip = (x: any) => { const { sweeps: _s, cases, ...rest } = x; return { ...rest, cases: { [caseId]: cases?.[caseId] ?? null } }; };
     if (canonicalJson(strip(admitted.configuration)) !== canonicalJson(strip(c))) {
-      note({ phase: "refused", reason: "the host configuration changed since the original run" });
-      return refusal("the host configuration is not the one the original run was admitted under (the runtime, adapter, study rules, oracle evidence or the case changed): a replay across that change would not test reproduction", "E_REQUEST_CONFLICT", "/originalRequestId");
+      return deny("the host configuration is not the one the original run was admitted under (the runtime, adapter, study rules, oracle evidence or the case changed): a replay across that change would not test reproduction", "E_REQUEST_CONFLICT", "/originalRequestId");
     }
     const nextRequest = rows.find((row: any) => row.seq > admission.seq && row.event.phase === "request");
     const attempt = rows.filter((row: any) => row.seq >= admission.seq && row.seq < (nextRequest?.seq ?? Infinity) && inProject(row) && row.event.configHash === (admission.event as any).configHash);
     const decision = attempt.find((row: any) => row.event.phase === "decision" && row.event.event.requestId === originalRequestId);
-    if (!decision || !(decision.event as any).event.decision?.allow) return refusal("the original request was not admitted", "E_NOT_FOUND", "/originalRequestId");
+    if (!decision || !(decision.event as any).event.decision?.allow) return deny("the original request was not admitted", "E_NOT_FOUND", "/originalRequestId");
     const requests = readHostJson(safeChild(runsRoot, "requests.json"));
     const originalRunId = requests[originalRequestId]?.runId;
-    if (typeof originalRunId !== "string" || !RUN_ID.test(originalRunId)) return refusal("no run is bound to the original request", "E_NOT_FOUND", "/originalRequestId");
+    if (typeof originalRunId !== "string" || !RUN_ID.test(originalRunId)) return deny("no run is bound to the original request", "E_NOT_FOUND", "/originalRequestId");
     const runRoot = safeChild(runsRoot, originalRunId, true);
     const record = readHostJson(safeChild(runRoot, "run-record.json"));
     const outcome = attempt.find((row: any) => row.seq > decision.seq && row.event.phase === "outcome" && row.event.event.runId === originalRunId);
@@ -161,11 +162,11 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
       sha256Hex(canonicalJson(record)) !== (outcome.event as any).event.recordSha256 ||
       record.state !== (outcome.event as any).event.state ||
       record.extensions?.["seed.dispatch"]?.requestId !== originalRequestId
-    ) return refusal("the saved original run differs from its audited outcome", "E_REQUEST_CONFLICT", "/originalRequestId");
-    if (record.state !== "completed") return refusal(`the original run ended ${record.state}; only a completed run can be reproduced`, "E_NOT_PERMITTED", "/originalRequestId");
+    ) return deny("the saved original run differs from its audited outcome", "E_REQUEST_CONFLICT", "/originalRequestId");
+    if (record.state !== "completed") return deny(`the original run ended ${record.state}; only a completed run can be reproduced`, "E_NOT_PERMITTED", "/originalRequestId");
     const stale = record.inputs.some((i: any) => { try { regularFile(join(projectRoot, i.path)); return sha256Hex(readFileSync(join(projectRoot, i.path))) !== i.sha256; } catch { return true; } });
-    if (stale) return refusal("the original run is stale: an input has changed since it ran", "E_STALE_REVISION", "/originalRequestId");
-    if (!Object.hasOwn(allCases(c), caseId)) return refusal(`the case ${caseId} of the original run is no longer registered`, "E_NOT_FOUND", "/originalRequestId");
+    if (stale) return deny("the original run is stale: an input has changed since it ran", "E_STALE_REVISION", "/originalRequestId");
+    if (!Object.hasOwn(allCases(c), caseId)) return deny(`the case ${caseId} of the original run is no longer registered`, "E_NOT_FOUND", "/originalRequestId");
     const original = loadEvidence(projectRoot, runRoot, record);
     note({ phase: "admitted", caseId, originalRunId, adapter: c.adapter.id, policy: policy.policy });
 
@@ -195,6 +196,8 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
       adapter: c.adapter.id, policy: policy.policy, basis: policy.basis, result, ...(recordingError ? { recordingError } : {}),
     };
   } catch (e) {
-    return refusal(e instanceof Error ? e.message : "replay setup failed", "E_SETUP_REQUIRED");
+    const message = e instanceof Error ? e.message : "replay setup failed";
+    try { note({ phase: "refused", reason: message }); } catch { /* the log cannot be written: the refusal still goes back */ }
+    return refusal(message, "E_SETUP_REQUIRED");
   }
 }
