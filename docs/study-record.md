@@ -39,7 +39,7 @@ The only agent-writable thing is a note: CLI `node dist/cli/seed.js note` or MCP
 
 - ~~The report export still rebuilds its own steps~~ **Done 2026-10-08**: see [the report reads the record](#the-report-reads-the-record) below.
 - ~~No reconciliation~~ **Done 2026-10-08**: see [Reconciliation](#reconciliation) below.
-- **Replay** (re-running a recorded run and comparing), **feeding comparisons into the report**, and **cache reuse as a step** ("reused from run X", [compare-and-cache.md](compare-and-cache.md)) are not built.
+- **Replay** is built ([replay.md](replay.md)): a finished replay leaves one `compare` step citing both runs. The step is not yet backfilled by `reconcile-study` from the replay log. Not built: **feeding comparisons into the report**, and **cache reuse as a step** ("reused from run X", [compare-and-cache.md](compare-and-cache.md)) are not built.
 - The oracle step is written once per evidence set (by key); a set that is replaced by another and later returns is not written a second time.
 - Limits: the record is one file (8 MB); a study that outgrows it needs a new study. Deleting the *last* rows cannot be told from a shorter record by the chain alone (as with the admission log); the project folder is the trust boundary.
 

@@ -44,7 +44,7 @@ This is the top of a report made from SEED's own test fixture, which uses a fake
 - Approvals (accepting a changed oracle, approving a transfer, clearing a recorded failure) are human actions on a separate command line; agents have no verb for them.
 - Several apps in the catalog are not public yet. SEED installs a catalog app only if you can reach its repository, so for now most of the suite is available to its authors only.
 - The graphical front end for experiments (comparison views, the guided report, a console pane) is not built. Studies are run through the CLI or MCP.
-- Replay of earlier runs, report comparisons and result caching are designed but not built.
+- Replay of a completed run (the CLI verb `replay` and the MCP tool `seed_replay_run`) is built, with a verdict in the study record; the report has no replay table yet. Report comparisons and result caching are designed but not built.
 - macOS and Linux launching of some apps is less tested than Windows. On Windows, OpenMC runs through WSL.
 - Calculation engines (OpenMC, nuclear data, OFFBEAT and others) are installed separately by their own instructions and are not part of SEED.
 
