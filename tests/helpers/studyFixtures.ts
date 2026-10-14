@@ -6,6 +6,12 @@ export const SAMPLE_SHA256 =
 export const SAMPLE_SHA256_2 =
   "eebf0627cf9ff85dda4644691ae49fae4b64d38fe5d864d17a9a5df11222eb81";
 
+/**
+ * The human of every fixture header and step. It is named so that it cannot be mistaken for a person: a header file is read as data and SEED cannot tell who
+ * wrote it, so a fixture default that looked like a real name once put an invented human into a study header (suite-test session, 2026-10-12).
+ */
+export const FIXTURE_HUMAN = { kind: "human", name: "FIXTURE, not a person" } as const;
+
 export function makeHeader(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     schema: "seed.study/0.1",
@@ -28,7 +34,7 @@ export function makeHeader(overrides?: Record<string, unknown>): Record<string, 
     },
     tier: "A1",
     startRevisions: [{ artifact: "art-1", revision: SAMPLE_SHA256 }],
-    setBy: { kind: "human", name: "Alice" },
+    setBy: FIXTURE_HUMAN,
     ...overrides
   };
 }
@@ -42,7 +48,7 @@ export function makeStep(
     type: "step",
     seq,
     time: "2026-10-03T12:01:00Z",
-    actor: { kind: "human", name: "Alice" },
+    actor: FIXTURE_HUMAN,
     action: "run",
     reason: `Run simulation step ${seq}`,
     inputsChanged: [],
@@ -60,7 +66,7 @@ export function makeConclusion(
     type: "conclusion",
     seq,
     time: "2026-10-03T12:15:00Z",
-    actor: { kind: "human", name: "Alice" },
+    actor: FIXTURE_HUMAN,
     claims: [
       {
         text: "Perturbation stabilized within 4.2 seconds under nominal flow.",
