@@ -4,7 +4,7 @@
 // an adapter nobody has looked at.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { validReplayPolicy, type ReplayPolicy } from "./replay";
 import type { TypedError } from "./validate";
 
@@ -16,7 +16,14 @@ export type ReplayPolicyFile = { adapter: string; policy: ReplayPolicy; basis: s
 export type ReplayPolicyResult = ({ ok: true } & ReplayPolicyFile) | { ok: false; errors: TypedError[] };
 
 const refuse = (code: string, message: string, field = ""): ReplayPolicyResult => ({ ok: false, errors: [{ code, field, message, source: "seed" }] });
-export const defaultAdaptersDir = (): string => join(__dirname, "..", "..", "adapters");
+/**
+ * Where the policies are: the `adapters` folder of this installation, or the absolute folder the trusted environment names in SEED_REPLAY_POLICY_DIR
+ * (a host setting like SEED_HOST_CONFIG; a client of the CLI or MCP cannot set it).
+ */
+export const defaultAdaptersDir = (): string => {
+  const set = process.env.SEED_REPLAY_POLICY_DIR;
+  return set && isAbsolute(set) ? set : join(__dirname, "..", "..", "adapters");
+};
 
 /** Reads and checks `<adaptersDir>/<adapterId>/replay.json`. Never throws for a bad file; says what is wrong. */
 export function loadReplayPolicy(adapterId: string, adaptersDir: string = defaultAdaptersDir()): ReplayPolicyResult {

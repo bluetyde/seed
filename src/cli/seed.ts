@@ -1,6 +1,7 @@
 import type { Readable } from "node:stream";
 import { runFromHostFile } from "../core/fileRunHost";
 import { runSweepFromHostFile } from "../core/sweepHost";
+import { replayFromHostFile } from "../core/replayHost";
 import { addStudyNote } from "../core/studyNoteHost";
 import { queryFromHostFile } from "../core/queryHost";
 import { requestHostCancellation } from "../core/hostControl";
@@ -61,9 +62,9 @@ export async function runCli(
     },
   });
   const transferVerbs = ["transfer-propose", "transfer-status", "transfer-apply"];
-  if (argv.length !== 1 || !["run", "sweep", "note", "query", "cancel", "report", "draft-conclusion", ...transferVerbs].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "sweep", "replay", "note", "query", "cancel", "report", "draft-conclusion", ...transferVerbs].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|sweep|note|query|cancel|report|draft-conclusion|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|sweep|replay|note|query|cancel|report|draft-conclusion|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   const isTransfer = transferVerbs.includes(argv[0]!);
@@ -90,6 +91,8 @@ export async function runCli(
           ? requestHostCancellation(hostConfig!, request)
           : argv[0] === "sweep"
             ? await runSweepFromHostFile(hostConfig!, request)
+            : argv[0] === "replay"
+              ? await replayFromHostFile(hostConfig!, request)
             : argv[0] === "note"
               ? addStudyNote(hostConfig!, request)
               : argv[0] === "query"
@@ -102,9 +105,13 @@ export async function runCli(
         ? (outcome as { complete?: boolean }).complete === true
           ? 0
           : 1
-        : argv[0] !== "run" || (outcome as { state?: string }).state === "completed"
-          ? 0
-          : 1,
+        : argv[0] === "replay"
+          ? ["reproduced", "reproduced-within-tolerance"].includes((outcome as { result?: { verdict?: string } }).result?.verdict ?? "")
+            ? 0
+            : 1
+          : argv[0] !== "run" || (outcome as { state?: string }).state === "completed"
+            ? 0
+            : 1,
     reply: { schema: "seed.cli-reply/0.1", ...outcome },
   };
 }
