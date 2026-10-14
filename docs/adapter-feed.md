@@ -119,3 +119,11 @@ FEED's plan 11 (a coolant side that changes with time, the case block `transient
 
 **The adapter needed no change.** There is no new quantity and no new place in `results.json`; the case passes through unchanged, and the adapter passes FEED's own refusal codes through when they match the code pattern (both new ones do). `tests/feed-oracles.test.ts` accepts the 92 and the 101 until FEED main has the 101, then the 92 goes. Verified 2026-10-14 against FEED's branch with the real solver: the oracle, adapter, transfer and burnup files, 92 tests, all passing; the oracle set passes with the three peak entries inside their tolerances.
 
+## Standalone versus workspace (plan 05 acceptance 4), 2026-10-14
+
+`tests/feed-direct-agreement.test.ts` runs the same immutable case twice: once with FEED's own headless runner (`headless run <case> --out <dir> --run-id feed`, the standalone side) and once through SEED (the adapter and the run manager, the workspace side). It compares **FEED's native files**, not what the adapter makes of them: `results.json`, `derived.json` and `case.json` of the two runs must be **byte for byte identical**, the input file must be untouched, and the run record must name exactly the inputs it was given. For a refused case the runner's own `validate` and the adapter's `validate` must give the same codes in the same order.
+
+- **Result (2026-10-14, Windows 11, FEED branch `claude/tvb-b5` at `db6311a`, the real solver in the `feed-solver` distro):** all nine representative good cases identical (steady thermal, annular geometry, film limits, burnup, thermo-elastic gap closure, a stress limit, a transient pulse, a lumped boundary history, the published GA-7882 pulse) and the three refusals equal; 14 tests, 158 s. `SEED_FEED_AGREEMENT_ALL=1` runs every distinct case of the oracle set (about 40 minutes); that was not run.
+- **A by-product, for the replay policy:** two standalone runs of one case give byte-identical `results.json`, and the test asserts it. FEED is bit-deterministic on this machine for these cases, so its shipped replay policy (a relative bound of 1e-9) has room to spare; whether it holds across machines or a changed thread count is not tested.
+- Not covered: the quantities as the adapter exposes them are checked by the oracle tests, not here; a case that fails or is cancelled.
+
