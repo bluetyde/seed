@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { supervisedRun } from "./supervisor";
+import { supervisedReplay, supervisedRun } from "./supervisor";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { addStudyNote } from "../core/studyNoteHost";
@@ -154,6 +154,30 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
     },
     async request => {
       const reply = { schema: "seed.mcp-reply/0.1", ...addStudyNote(hostConfig, request) };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !reply.ok,
+      };
+    },
+  );
+  server.registerTool(
+    "seed_replay_run",
+    {
+      title: "Replay a completed run and compare",
+      description:
+        "Run the registered case of an earlier completed run again and say whether the new run reproduces it. Only requestId (the replay's own), originalRequestId and a budget are accepted; no case, input, path or tolerance. Nothing runs unless the original is proven from the audit log, is completed and current, and the host configuration is the one it was admitted under (so never across an engine, adapter or input change); the replay is then a guarded run like any other. The comparison uses the adapter's own policy (exact, a tolerance, or statistical) and answers reproduced, reproduced-within-tolerance, differs or not-comparable, listing every difference. A verdict is a result, not an error; a refusal is an error. Cancel it with seed_cancel_calculation and the replay's requestId.",
+      inputSchema: z
+        .object({
+          requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+          originalRequestId: z.string().min(1).max(256),
+          budget: requestSchema.shape.budget,
+        })
+        .strict(),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...(await supervisedReplay(hostConfig, request)) };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(reply) }],
         structuredContent: reply,

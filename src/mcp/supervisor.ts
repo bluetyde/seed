@@ -2,10 +2,13 @@ import { fork } from "node:child_process";
 import { join } from "node:path";
 import type { DispatchRequest } from "../core/runDispatcher";
 import { runFromHostFile } from "../core/fileRunHost";
+import { replayFromHostFile, type ReplayOutcome, type ReplayRequest } from "../core/replayHost";
 import type { RunOutcome } from "../core/runManager";
 
-/** A detached, per-call owner survives a client's termination of the MCP process. */
-export function supervisedRun(hostConfig: string, request: DispatchRequest): Promise<RunOutcome> {
+type Verb = "run" | "replay";
+
+/** A detached, per-call owner survives a client's termination of the MCP process. Used for every call that starts a calculation. */
+function supervised<T>(hostConfig: string, verb: Verb, request: unknown): Promise<T> {
   return new Promise(resolve => {
     let replied = false;
     const failure = () => {
@@ -21,7 +24,7 @@ export function supervisedRun(hostConfig: string, request: DispatchRequest): Pro
               source: "seed",
             },
           ],
-        });
+        } as T);
       }
     };
     const child = fork(join(__dirname, "supervisor.js"), [], {
@@ -35,18 +38,25 @@ export function supervisedRun(hostConfig: string, request: DispatchRequest): Pro
     child.once("message", value => {
       if (!replied) {
         replied = true;
-        resolve(value as RunOutcome);
+        resolve(value as T);
       }
     });
-    child.send(request, error => {
+    child.send({ verb, request }, error => {
       if (error) failure();
     });
   });
 }
+export function supervisedRun(hostConfig: string, request: DispatchRequest): Promise<RunOutcome> {
+  return supervised<RunOutcome>(hostConfig, "run", request);
+}
+export function supervisedReplay(hostConfig: string, request: ReplayRequest): Promise<ReplayOutcome> {
+  return supervised<ReplayOutcome>(hostConfig, "replay", request);
+}
 if (require.main === module) {
   // IPC disconnect does not cancel an admitted host operation. Its timers/children own its lifetime.
-  process.once("message", async request => {
-    const outcome = await runFromHostFile(process.env.SEED_HOST_CONFIG ?? "", request);
+  process.once("message", async (message: { verb?: Verb; request?: unknown }) => {
+    const file = process.env.SEED_HOST_CONFIG ?? "";
+    const outcome = message?.verb === "replay" ? await replayFromHostFile(file, message.request) : await runFromHostFile(file, message?.request);
     if (process.connected && process.send) {
       process.send(outcome, () => {
         if (process.connected) process.disconnect?.();
