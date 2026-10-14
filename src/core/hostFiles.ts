@@ -158,6 +158,12 @@ export function appendReplayRecord(stateRoot: string, event: unknown): void {
   appendFileSync(file, JSON.stringify({ schema: "seed.replay-record/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
 }
 
+/** One line per material merge (dry run, merged, refused) in `materials.jsonl` of the state folder; not chained. */
+export function appendMaterialsRecord(stateRoot: string, event: unknown): void {
+  const file = safeChild(stateRoot, "materials.jsonl");
+  appendFileSync(file, JSON.stringify({ schema: "seed.materials-record/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
+}
+
 export async function withEngineLease<T>(
   stateRoot: string,
   engineKey: string,
