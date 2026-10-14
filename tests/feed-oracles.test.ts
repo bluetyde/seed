@@ -102,12 +102,17 @@ async function observe(entry: OracleEntry): Promise<Observed> {
 }
 
 describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT solver)", () => {
-  // FEED main has 92 entries since 2026-10-10 (adb9995): the 78 before it (the 74 of 6165412 plus the first `published` oracles, from General Atomic report
-  // GA-7882) and 14 thermo-elastic ones (7 good, 6 bad-input, and 1 known-limit with a number that is expected to miss). Anything else is a silent addition or
-  // removal.
-  const KNOWN_SETS = [{ total: 92, good: 59, badInput: 30, knownLimit: 3 }];
+  // Two sets are known. FEED main has 92 entries since 2026-10-10 (adb9995): the 78 before it (the 74 of 6165412 plus the first `published` oracles, from General
+  // Atomic report GA-7882) and 14 thermo-elastic ones (7 good, 6 bad-input, and 1 known-limit with a number that is expected to miss). FEED's branch
+  // `claude/tvb-b5` (plan 11, a coolant side that changes with time; request of 2026-10-14) adds 9 on top, byte-identical for the 92: 101 = 63 good, 35 bad-input, 3
+  // known-limit (3 lumped-pin `temperature_peak_max`, 1 `energy_deposited`, 5 refusals). Drop the 92 once FEED main has the 101. Anything else is a silent
+  // addition or removal.
+  const KNOWN_SETS = [
+    { total: 92, good: 59, badInput: 30, knownLimit: 3 },
+    { total: 101, good: 63, badInput: 35, knownLimit: 3 },
+  ];
   const MECHANICS_QUANTITIES = ["contact_pressure", "displacement_radial_clad_last_cell", "displacement_radial_fuel_last_cell", "gas_pressure", "stress_axial_fuel_min", "stress_hoop_clad_first_cell", "stress_limit_margin"];
-  it("loads FEED's 92 entries (59 good, 30 bad-input, 3 known-limit), all pinned and valid", () => {
+  it("loads a known set of FEED entries (its 92, or its 101 with the boundary-history entries), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
     const count = (tag: string) => r.entries.filter((i) => i.entry.tag === tag).length;
