@@ -168,6 +168,7 @@ describe("what is refused before anything runs", () => {
     expect(r).toMatchObject({ ok: false });
     if (!r.ok) expect(r.errors[0]!.code).toBe("E_SCHEMA_INVALID");
     await nothingRan(f, 1);
+    expect(log(f)).toEqual([]); // refused by the verb's own check: it never got as far as the log, nor the run path
   });
 
   it("refuses a request that uses the original's id as its own", async () => {
@@ -232,6 +233,19 @@ describe("what is refused before anything runs", () => {
     expect(other.ok && other.result.verdict).toBe("reproduced");
   });
 
+  it("refuses a sweep case whose sweep is no longer registered: the case is not there to run", async () => {
+    const f = await fx();
+    const sw = await runSweepFromHostFile(f.file, { requestId: "s1", sweepId: "t", budget });
+    expect(sw.ok && sw.complete).toBe(true);
+    const before = runCount(f.project);
+    // the sweeps may differ from the original's, so the configuration check passes; the case is gone
+    writeHostJson(f.file, { ...f.config, sweeps: {} });
+    const r = await replayFromHostFile(f.file, replayRequest({ originalRequestId: "s1.t-002" }), policies(EXACT));
+    expect(r.ok === false && r.errors[0]!.code).toBe("E_NOT_FOUND");
+    expect(r.ok === false && r.errors[0]!.message).toMatch(/no longer registered/);
+    await nothingRan(f, before);
+  });
+
   it("refuses a stale original: an input changed since it ran", async () => {
     const f = await fx();
     await run(f);
@@ -239,6 +253,9 @@ describe("what is refused before anything runs", () => {
     const r = await replayFromHostFile(f.file, replayRequest(), policies(EXACT));
     expect(r.ok === false && r.errors[0]!.code).toBe("E_STALE_REVISION");
     await nothingRan(f, 1);
+    // refused by the verb itself, before it asked the run path (which would also refuse a changed input, with the same code)
+    expect(log(f).map((x) => x.phase)).toEqual(["refused"]);
+    expect(log(f)[0]!.reason).toMatch(/stale: an input has changed/);
   });
 
   it("refuses an original whose saved record or saved output was changed after the run", async () => {
@@ -253,10 +270,13 @@ describe("what is refused before anything runs", () => {
     expect(a.ok === false && a.errors[0]!.code).toBe("E_REQUEST_CONFLICT");
     expect(a.ok === false && a.errors[0]!.message).toMatch(/differs from its audited outcome/);
     writeFileSync(recordFile, original);
-    const out = record.outputs.find((o: any) => /out\.json$|data/.test(o.path)) ?? record.outputs[0];
-    writeFileSync(join(f.project, out.path), "{}");
+    // a saved data file changed to another valid series: only the hash can tell
+    const out = record.outputs.find((o: any) => o.path.endsWith("out.json"));
+    const outFile = join(f.project, out.path);
+    const data = JSON.parse(readFileSync(outFile, "utf8"));
+    writeFileSync(outFile, JSON.stringify({ ...data, values: [1, 2, 3.5] }));
     const b = await replayFromHostFile(f.file, replayRequest({ requestId: "rep2" }), policies(EXACT));
-    expect(b.ok).toBe(false);
+    expect(b.ok === false && b.errors[0]!.message).toMatch(/no longer matches its hash/);
     await nothingRan(f, 1);
   });
 
