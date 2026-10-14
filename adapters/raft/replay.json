@@ -1,0 +1,8 @@
+{
+  "schema": "seed.replay-policy/0.1",
+  "adapter": "raft",
+  "policy": {
+    "mode": "exact"
+  },
+  "basis": "RAFT is a deterministic engine: the same inputs, settings and seed give the same numbers on the same machine. SEED's judgment, not yet measured with real replays."
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "seed.replay-policy/0.1",
+  "adapter": "openmc",
+  "policy": {
+    "mode": "statistical",
+    "sigmas": 3
+  },
+  "basis": "OpenMC is a Monte Carlo code: a replay with the same seed and thread count normally repeats exactly (verdict reproduced); with another thread count it repeats only statistically, within 3 combined standard deviations, and both runs must declare an uncertainty. SEED's judgment, not yet measured with real replays."
+}

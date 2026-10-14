@@ -1,0 +1,8 @@
+{
+  "schema": "seed.replay-policy/0.1",
+  "adapter": "nodal",
+  "policy": {
+    "mode": "exact"
+  },
+  "basis": "NODAL's solver is deterministic for the same inputs on the same machine. SEED's judgment, not yet measured with real replays."
+}

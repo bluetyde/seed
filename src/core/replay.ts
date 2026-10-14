@@ -80,9 +80,13 @@ export type ReplayResult =
 const bad = (field: string, message: string): ReplayResult => ({ ok: false, errors: [{ code: "E_SCHEMA_INVALID", field, message, source: "seed" }] });
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
 
-function validPolicy(p: ReplayPolicy): string | null {
-  if (p === null || typeof p !== "object") return "the policy must be an object";
-  if (p.mode === "exact") return Object.keys(p).length === 1 ? null : "an exact policy has no other field";
+/** What is wrong with a policy, or null when it is usable. Fields it does not know are refused, so a typo cannot loosen a policy silently. */
+export function validReplayPolicy(p: ReplayPolicy): string | null {
+  if (p === null || typeof p !== "object" || Array.isArray(p)) return "the policy must be an object";
+  const only = (...keys: string[]) => Object.keys(p).every((k) => k === "mode" || keys.includes(k));
+  if (p.mode === "exact") return only() ? null : "an exact policy has no other field";
+  if (p.mode === "tolerance" && !only("abs", "rel")) return "a tolerance policy has only abs and rel";
+  if (p.mode === "statistical" && !only("sigmas")) return "a statistical policy has only sigmas";
   if (p.mode === "tolerance") return finite(p.abs) && p.abs >= 0 && finite(p.rel) && p.rel >= 0 && (p.abs > 0 || p.rel > 0) ? null : "a tolerance policy needs abs and rel, finite and not negative, and not both zero (use exact for that)";
   if (p.mode === "statistical") return finite(p.sigmas) && p.sigmas > 0 && p.sigmas <= 10 ? null : "a statistical policy needs sigmas above 0 and at most 10";
   return "the policy mode must be exact, tolerance or statistical";
@@ -202,7 +206,7 @@ const RANK: Record<ReplayVerdict, number> = { reproduced: 0, "reproduced-within-
 
 /** Compares a replay with the run it repeats. */
 export function compareReplay(req: { original: ReplayRun; replay: ReplayRun; policy: ReplayPolicy; gridTolerance?: number }): ReplayResult {
-  const p = validPolicy(req?.policy);
+  const p = validReplayPolicy(req?.policy);
   if (p) return bad("/policy", p);
   const e1 = validRun(req.original, "original"), e2 = validRun(req.replay, "replay");
   if (e1) return bad("/original", e1);

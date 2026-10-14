@@ -1,0 +1,10 @@
+{
+  "schema": "seed.replay-policy/0.1",
+  "adapter": "feed",
+  "policy": {
+    "mode": "tolerance",
+    "abs": 0,
+    "rel": 1e-09
+  },
+  "basis": "FEED runs an iterative finite-volume solver; the same case on the same machine should repeat, but a relative bound of 1e-9 leaves room for reordering in the solver. SEED's judgment, not yet measured with real replays."
+}
