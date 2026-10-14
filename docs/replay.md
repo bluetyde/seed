@@ -30,9 +30,10 @@ Each quantity reports the largest absolute and relative difference; a statistica
 
 - A replay **counts as a case**: it is a run, so it is checked by the gate like any other (budget, `maxCases` of the study, tier A1 and above), and it is a step in the study record ("replay of run X by run Y: verdict").
 - It runs the **registered case of the original run** (for a sweep case, with its values); a client supplies no inputs, paths or settings. It uses the original's seed.
-- The policy is the **adapter's**, not the caller's: exact for the deterministic apps, statistical for OpenMC. Where it is stored is open (an adapter file beside `resources.json`, or a contract field); it is decided with the host verb.
+- The policy is the **adapter's**, not the caller's, and lives in SEED: **`adapters/<id>/replay.json`** (decided by the user, 2026-10-14, option A; no contract change). Format: `{ "schema": "seed.replay-policy/0.1", "adapter": "<id>", "policy": { ... }, "basis": "why" }`, read by `src/core/replayPolicy.ts`, which refuses a missing file (there is **no default policy**: a default would decide what "the same" means for an adapter nobody has looked at), an unknown field, another adapter's id, a bad policy or a missing reason. Shipped: RAFT, NODAL and SNEED exact; FEED a relative bound of 1e-9; OpenMC statistical at 3 sigmas. **These are SEED's judgment, not measured**: each file says so, and the first real replays should be used to check them.
 - It never runs across engine versions: if the engine or adapter now installed is not the one in the original record, the replay is refused before anything runs, with the differences listed.
 
 ## Not done
 
-- The host verb (`replay` through the gate, CLI and MCP), the study-record step, the per-adapter policy and the report section. The pure comparison above is built and tested (`tests/replay.test.ts`, 60 tests).
+- The host verb (`replay` through the gate: prove the original from the audit log, run its registered case again with its seed, compare), CLI and MCP, the study-record step and the report section. The pure comparison (`tests/replay.test.ts`, 60 tests) and the policy files with their loader (`tests/replay-policy.test.ts`, 36) are built.
+- **Counting a replay as a case:** a single run (`run_case`) is not counted against a study's `maxCases` today (only a sweep's case count is), so a replay is bounded like any run, by the per-case budget, the tier and the engine lease. A study-wide count of runs would be a new rule and is not part of this.

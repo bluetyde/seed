@@ -1,0 +1,8 @@
+{
+  "schema": "seed.replay-policy/0.1",
+  "adapter": "pra",
+  "policy": {
+    "mode": "exact"
+  },
+  "basis": "SNEED's engines are deterministic for the same model. SEED's judgment, not yet measured with real replays."
+}
