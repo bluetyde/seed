@@ -62,10 +62,24 @@ describe("reading a policy file", () => {
     if (!r.ok) expect(r.errors[0]!.code).toBe(code);
   });
 
-  it("refuses an adapter id that could reach another folder, and a file that is too large", () => {
+  it("refuses an adapter id that could reach another folder, even when a valid policy file is there", () => {
     for (const id of ["../x", "a/b", "", "A", "x".repeat(40), ".."]) expect(loadReplayPolicy(id, adapters({})).ok).toBe(false);
-    const r = loadReplayPolicy("demo", adapters({ demo: JSON.stringify(doc({ basis: "x".repeat(20000) })) }));
+    // a good policy file one level above the adapters folder, whose own adapter field names the traversing id: only the id check stops it
+    const parent = mkdtempSync(join(tmpdir(), "seed-replay-parent-"));
+    dirs.push(parent);
+    mkdirSync(join(parent, "adapters"));
+    mkdirSync(join(parent, "elsewhere"));
+    writeFileSync(join(parent, "elsewhere", "replay.json"), JSON.stringify(doc({ adapter: "../elsewhere" })));
+    const r = loadReplayPolicy("../elsewhere", join(parent, "adapters"));
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toMatchObject({ code: "E_SCHEMA_INVALID", field: "/adapter" });
+  });
+
+  it("refuses a file that is too large even when it is otherwise a good policy", () => {
+    const padded = JSON.stringify(doc()) + " ".repeat(20000);
+    const r = loadReplayPolicy("demo", adapters({ demo: padded }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]!.message).toMatch(/larger than/);
   });
 });
 
