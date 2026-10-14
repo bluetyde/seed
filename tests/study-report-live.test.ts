@@ -283,6 +283,15 @@ describe("a record that cannot be trusted stops the export, and nothing is saved
     expect(msg.length).toBeGreaterThan(0);
   });
 
+  it("a header that does not cover the run's inputs says how many revisions it lists and which, and which the run used", async () => {
+    const f = await fixture();
+    process.env.SEED_STUDY_HEADER = f.headerFile;
+    await f.run("r1");
+    writeHostJson(f.headerFile, { ...f.header, startRevisions: [...(f.header.startRevisions as object[]), { artifact: "other.json", revision: "e".repeat(64) }] });
+    const msg = await refused(f, "r1");
+    expect(msg).toMatch(/the header lists 2 \(.*eeeeeeee.*\), the run used 1 \([0-9a-f]{8}\)/);
+  });
+
   it("a cited run whose saved record was changed after it finished", async () => {
     const f = await fixture();
     process.env.SEED_STUDY_HEADER = f.headerFile;

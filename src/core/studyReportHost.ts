@@ -151,8 +151,11 @@ export async function exportStudyReport(file: string, headerFile: string | undef
         if (!["completed", "cancelled", "failed", "interrupted", "terminated-by-trip"].includes(record.state))
           throw Error("run is not terminal");
         const revisions = header.startRevisions.map((r: any) => r.revision).sort();
-        if (canonicalJson(revisions) !== canonicalJson(record.inputs.map((i: any) => i.sha256).sort()))
-          throw Error("human header does not cover exactly the run's input revisions");
+        const used = record.inputs.map((i: any) => i.sha256).sort();
+        if (canonicalJson(revisions) !== canonicalJson(used)) {
+          const short = (l: string[]) => (l.length ? l.map((h) => String(h).slice(0, 8)).join(", ") : "none");
+          throw Error(`human header does not cover exactly the run's input revisions: the header lists ${revisions.length} (${short(revisions)}), the run used ${used.length} (${short(used)})`);
+        }
         if (
           oracle.verdict !== "pass" ||
           oracle.blocked !== false ||
