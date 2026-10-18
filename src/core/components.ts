@@ -40,7 +40,8 @@ export type Installed = {
   artifactSha256?: string[];
   selectedByUser: boolean;
   installedAt: string;
-  previous?: { version: string; location: string };
+  /** The version this one replaced, kept for rollback. With the pins it was installed under, so a rollback restores a complete record. */
+  previous?: { version: string; location: string; manifestSha256?: string; artifactSha256?: string[]; installedAt?: string };
 };
 export type TxState =
   | "queued" | "preflight" | "staging" | "verifying" | "activating" | "ready"
@@ -77,7 +78,19 @@ export const COMPONENT_ERROR_CODES = [
   "E_RECORD_UNKNOWN",
   "E_RECORD_VERSION",
   "E_RECORD_NO_PRODUCER",
-  "E_RECORD_AMBIGUOUS"
+  "E_RECORD_AMBIGUOUS",
+  // W4 (the installer): what can go wrong while files are really fetched, checked, unpacked and switched on
+  "E_ARCHIVE_UNSAFE",
+  "E_ARCHIVE_CORRUPT",
+  "E_ARCHIVE_UNSUPPORTED",
+  "E_ARCHIVE_TOO_LARGE",
+  "E_HASH_MISMATCH",
+  "E_ARTIFACT_MISSING",
+  "E_PREREQUISITE",
+  "E_INSTALL_BUSY",
+  "E_INSTALL_FAILED",
+  "E_INSTALL_CANCELLED",
+  "E_HEALTH_CHECK"
 ] as const;
 export type ComponentErrorCode = (typeof COMPONENT_ERROR_CODES)[number];
 export type ComponentError = { code: ComponentErrorCode; component?: string; field?: string; message: string };
