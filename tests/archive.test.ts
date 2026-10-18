@@ -260,6 +260,29 @@ describe("a damaged archive is corrupt, not half trusted", () => {
   });
 });
 
+describe("the rest of the guards", () => {
+  it("a folder entry where an earlier entry is a file is refused", async () => {
+    await refusal(tgz([{ name: "a", data: "x" }, { name: "a/", type: "5" }]), "E_ARCHIVE_UNSAFE");
+  });
+  it("an entry that declares more than the limit allows is refused before anything of it is written", async () => {
+    const t = tgz([{ name: "big", data: Buffer.alloc(5000) }], "big.tar.gz", 1000);
+    await refusal(t, "E_ARCHIVE_TOO_LARGE");
+    expect(fs.existsSync(path.join(work, "out", "big"))).toBe(false);
+    const z = zip([{ name: "big", data: Buffer.alloc(5000) }], "big.zip", 1000);
+    await refusal(z, "E_ARCHIVE_TOO_LARGE", path.join(work, "outz"));
+    expect(fs.existsSync(path.join(work, "outz", "big"))).toBe(false);
+  });
+  it("tar: data after the first closing empty block is corrupt", async () => {
+    const one = makeTar([{ name: "a", data: "1" }], { noEnd: true });
+    const more = makeTar([{ name: "b", data: "2" }]);
+    const bytes = zlib.gzipSync(Buffer.concat([one, Buffer.alloc(512), more]));
+    await refusal({ file: writeFile("g.tar.gz", bytes), kind: "tar.gz", maxBytes: BIG }, "E_ARCHIVE_CORRUPT");
+  });
+  it("zip: an entry shorter than its directory says is corrupt", async () => {
+    await refusal(zip([{ name: "short", data: "abc", claimSize: 5000 }]), "E_ARCHIVE_CORRUPT");
+  });
+});
+
 describe("what is not supported is said so", () => {
   it("an encrypted zip entry", async () => { await refusal(zip([{ name: "s", data: "x", flags: 1 }]), "E_ARCHIVE_UNSUPPORTED"); });
   it("a zip method other than stored and deflate", async () => { await refusal(zip([{ name: "s", data: "x", method: 12 as unknown as 8 }]), "E_ARCHIVE_UNSUPPORTED"); });
