@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { installSelection, listInstalled, rollbackComponent } from "../src/core/componentInstaller";
 import { validateInstallState } from "../src/core/components";
+import { storeLayout } from "../src/core/installStore";
 import { makeTarGz } from "./helpers/archives";
 import { CAD, CORE, LIBS, cleanWorlds, linux, makeWorld, type Spec } from "./helpers/installFixture";
 
@@ -125,6 +126,23 @@ describe("a damaged or hostile artifact (R2)", () => {
     expect(fs.existsSync(path.join(w.root, ".seed", "cache"))).toBe(false);
     expect(w.state().installs).toEqual([]);
     expect(w.leftovers()).toEqual([]);
+  });
+  it("a download of the right size whose content is not the pinned one is refused", async () => {
+    const w = makeWorld();
+    const m = w.manifest([CORE()]);
+    const real = w.served.get("fakeapp-core-1.2.0")!;
+    w.served.set("fakeapp-core-1.2.0", Buffer.alloc(real.length, 1));
+    const r = await installSelection(w.env, m.manifest, m.sha, []);
+    expect(codes(r)).toEqual(["E_HASH_MISMATCH"]);
+    expect(!r.ok && r.errors[0]!.message).toContain("pins");
+    expect(fs.existsSync(path.join(w.root, ".seed", "cache"))).toBe(false);
+  });
+  it("the disk is checked again just before staging, not only when the plan was made", async () => {
+    let calls = 0;
+    const w = makeWorld({ freeBytes: () => (++calls === 1 ? 1e12 : 10) });
+    const r = await install(w, [CORE()]);
+    expect(codes(r)).toEqual(["E_DISK_SPACE"]);
+    expect(w.downloads).toEqual([]);
   });
   it("a size that does not match is refused", async () => {
     const w = makeWorld();
@@ -319,6 +337,17 @@ describe("upgrade, health check and rollback (R3)", () => {
     expect(rec.version).toBe("1.3.0");
     expect(w.leftovers()).toEqual([]);
   });
+  it("a component SEED did not install is never switched by a rollback", async () => {
+    const w = makeWorld();
+    const first = await install(w, [CORE("1.2.0")]);
+    if (!first.ok) throw new Error("setup");
+    const st = w.state();
+    st.installs[0].origin = "adopted";
+    st.installs[0].previous = { version: "1.0.0", location: w.versionDir("fakeapp-core", "1.2.0") };
+    fs.writeFileSync(path.join(w.root, ".seed", "components.json"), JSON.stringify(st));
+    expect(codes(await rollbackComponent(w.env, first.m.manifest, "fakeapp-core"))).toEqual(["E_ADOPTED_PROTECTED"]);
+    expect(w.pointer("fakeapp-core")).toBe("1.2.0");
+  });
   it("rollback with nothing kept, with a job running, or with a failing health check changes nothing", async () => {
     const w = makeWorld();
     const first = await install(w, [CORE("1.2.0")]);
@@ -451,6 +480,19 @@ describe("one installer at a time, and cancel", () => {
     expect(r.ok).toBe(true);
     expect(w.pointer("fakeapp-core")).toBe("1.2.0");
     expect(w.state().transaction).toMatchObject({ state: "ready" });
+  });
+});
+
+describe("paths built from ids", () => {
+  it("an id or a version that is not in the manifest pattern never becomes part of a path", () => {
+    const l = storeLayout("/some/root");
+    expect(() => l.pointer("../evil", "c")).toThrow();
+    expect(() => l.component("app", "a/b")).toThrow();
+    expect(() => l.version("app", "c", "1.2")).toThrow();
+    expect(() => l.version("app", "c", "../../1.2.3")).toThrow();
+    expect(() => l.cacheFile("not-a-digest")).toThrow();
+    expect(() => l.staging("../x")).toThrow();
+    expect(l.version("app", "c", "1.2.3")).toContain("1.2.3");
   });
 });
 
