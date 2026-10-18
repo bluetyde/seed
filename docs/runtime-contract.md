@@ -1,6 +1,6 @@
 # Runtime and component contract (plan 11, W2)
 
-Status: **design with a pure implementation and fake fixtures**, 2026-10-07. It decides what is recorded, what is refused and which states a transaction passes through. It does not install anything: no download, no extraction, no process handling. Those are W3 (processes) and W4 (staged install), and they must follow this document. [Plan 11](plans/11-runtime-and-shared-acceptance.md) has the requirements; [runtime-inventory.md](runtime-inventory.md) has what exists today.
+Status: **design with a pure implementation and fake fixtures**, 2026-10-07; **the staged installer (W4) was built on 2026-10-18** against local fake artifacts, see [The staged install](#the-staged-install-w4-2026-10-18) below. The contract decides what is recorded, what is refused and which states a transaction passes through; process handling is W3. [Plan 11](plans/11-runtime-and-shared-acceptance.md) has the requirements; [runtime-inventory.md](runtime-inventory.md) has what exists today.
 
 Code: `src/core/components.ts` (no file or process access of its own). Schemas: `schema/component-manifest.schema.json`, `install-state.schema.json`, `process-owner.schema.json`. Tests: `tests/components.test.ts`, fixture `tests/fixtures/runtime/fake-manifest.json`. These are separate from the contract v0.1 families signed off for E0; nothing there changed.
 
@@ -27,7 +27,7 @@ Consistency rules checked by `validateManifest`: at least one core; no duplicate
 
 `seed.install-state/0.1`, one file in SEED's own store, outside every project. One record per installed or adopted component: app, component, version, `origin` (`managed` = SEED installed it and may remove it; `adopted` = it was already there and SEED never deletes it), location, the manifest hash it came from, artifact hashes, whether the **user chose it** (as opposed to being installed as a dependency), when, and the `previous` version kept for rollback. At most one **transaction** is recorded at a time (below).
 
-Proposed layout, to be confirmed in W4: `<install root>/<app>/<component>/<version>/` for installed versions; `<install root>/.seed/components.json` for this record; `.seed/active/<app>/<component>` a one-line pointer naming the active version, changed only by writing a temp file and renaming it (the one atomic step of an install); `.seed/staging/<transaction id>/` for work in progress; `.seed/cache/<sha256>` for verified artifacts (the offline cache).
+Layout (confirmed by W4, one folder per artifact below the version): `<install root>/<app>/<component>/<version>/<artifact id>/` for installed versions; `<install root>/.seed/components.json` for this record; `.seed/active/<app>/<component>` a one-line pointer naming the active version, changed only by writing a temp file and renaming it (the one atomic step of an install); `.seed/staging/<transaction id>/` for work in progress; `.seed/cache/<sha256>` for verified artifacts (the offline cache).
 
 ## Choosing what to install: `resolveSelection`
 
@@ -62,6 +62,27 @@ At startup `recoverTransaction` decides, from the record **and what is on disk**
 
 Serialization: one transaction per managed runtime at a time (`E_INSTALL_BUSY` when another is in flight, enforced in W4 with the claim machinery of the request log, which is proven under load). An update or removal is deferred while any process-owner record names the component.
 
+## The staged install (W4, 2026-10-18)
+
+Code: `src/core/componentInstaller.ts` (`installSelection`, `rollbackComponent`, `removeComponent`, `recoverInstalls`, `listInstalled`), `src/core/installStore.ts` (layout, state file, pointer, cache), `src/core/archive.ts` (safe extraction). Tests: `tests/component-installer.test.ts`, `component-installer-recovery.test.ts`, `component-installer-processes.test.ts` (real processes, needs `npm run build`), `archive.test.ts`; fixtures in `tests/helpers/installFixture.ts` and `archives.ts`.
+
+**One install is one transaction per component**, run under the writer lock of the install root (`<root>/.seed/lock`, the lock the project store uses and the load tests prove), so a second installer on the same root is told `E_INSTALL_BUSY` and a lock left by a dead process is taken over. `installSelection` asks `resolveSelection` for the plan and then runs the steps in order; the first failure stops the run and lists what was completed before it.
+
+| Step | What happens | Failure leaves |
+|---|---|---|
+| preflight | platform and app version, a job using the component (updates), the app's prerequisite check (`E_PREREQUISITE`), free disk against the expanded size (`E_DISK_SPACE`) | nothing created |
+| staging | each artifact goes to the cache `.seed/cache/<sha256>` (size and hash checked, `E_HASH_MISMATCH`; offline, only the cache: `E_OFFLINE_MISSING`; a cached copy whose hash no longer matches is deleted, never used), then is unpacked into `.seed/staging/<tx>/version/<artifact id>/` by the safe extractor with the manifest's `expandedBytes` as the limit | the cache keeps verified artifacts; staging is deleted |
+| verifying | the pending record is written to the staging folder (`installed.json`), then the app's health check runs on the staged files (`E_HEALTH_CHECK`: the version is never switched on) | the old version stays active |
+| activating | the staged folder is moved to `<root>/<app>/<component>/<version>`, the pointer file is written to a temporary file and renamed (**the one atomic step**), the install record and the transaction state are saved. A cancel that arrives from here on does not stop it | any failure puts everything back: old pointer, old record, no new folder |
+
+The version being replaced is recorded as `previous` (with the manifest and artifact pins it was installed under, so a rollback restores a complete record); the version before it is deleted. `rollbackComponent` switches back (and a second rollback goes forward again). An update is deferred while a launch or job uses the component (`E_COMPONENT_IN_USE`); an adopted component is never replaced.
+
+**Recovery** (`recoverInstalls`, and automatically at the start of every install, rollback and removal): the recorded owner of an unfinished transaction counts as running only if its pid **and start identity** are still those of a process (the process-owner rule); if it is running the new operation waits (`E_INSTALL_BUSY`). Otherwise `recoverTransaction` decides from the record and the pointer: before the pointer was flipped the transaction becomes `interrupted` and the old version stays; after it, the staged `installed.json` completes the record and the new version is the active one (the file system decides, not the record). Orphan version folders, staging and trash folders are deleted.
+
+**Removal** moves the component folder to `.seed/trash/<tx>` in one rename, deletes the record and the pointer, then deletes the trash; a host that dies in between is settled by the recovery rows above. An adopted component is unregistered and its files stay. Models, results, custom materials and original files are never below a component's folder, so removal cannot touch them (the tests keep a project file in the install root and check it).
+
+**Not built yet:** a source that really downloads (https only, size cap, time limit, no redirects to other schemes), the gate operations `install_component` (rule `grant`) and `remove_component` (rule `human`) with the grant file and the admin verb that issues it, a shell or CLI verb that calls the installer, the catalog's pin of the manifest hash, authenticated health after the switch, runs on real WSL and macOS. Safe extraction supports tar.gz (ustar, GNU long names, pax `path` and `size`) and zip (stored and deflate, no zip64 and no encryption: refused by name).
+
 ## Process ownership
 
 `seed.process-owner/0.1`: one record per app launch or job, written when it starts (exclusive create, then rename) and removed or marked `stopped` when it ends: launch id, kind, the runtime component and version it uses, who supervises it (`seed` or `standalone`: exactly one), the host process, the worker process (native or in a named WSL distro), the endpoint (loopback only), a generation token and a state.
@@ -72,7 +93,7 @@ A process is named by **pid and start identity** (Windows creation time; Linux b
 
 ## Errors
 
-Component errors are local to this contract (the E0 error-code list is untouched): `E_SCHEMA_INVALID`, `E_COMPONENT_UNKNOWN`, `E_COMPONENT_CYCLE`, `E_COMPONENT_DEPENDENCY`, `E_COMPONENT_NOT_SELECTABLE`, `E_COMPONENT_PLATFORM`, `E_COMPONENT_APP_VERSION`, `E_COMPONENT_CONFLICT`, `E_COMPONENT_REQUIRED_BY`, `E_COMPONENT_IN_USE`, `E_COMPONENT_CORE`, `E_ADOPTED_PROTECTED`, `E_OFFLINE_MISSING`, `E_DISK_SPACE`. Each carries the component it concerns and a message that says what to do. W4 adds the I/O errors (hash mismatch, unsafe archive path, prerequisite missing, busy) when it exists.
+Component errors are local to this contract (the E0 error-code list is untouched): `E_SCHEMA_INVALID`, `E_COMPONENT_UNKNOWN`, `E_COMPONENT_CYCLE`, `E_COMPONENT_DEPENDENCY`, `E_COMPONENT_NOT_SELECTABLE`, `E_COMPONENT_PLATFORM`, `E_COMPONENT_APP_VERSION`, `E_COMPONENT_CONFLICT`, `E_COMPONENT_REQUIRED_BY`, `E_COMPONENT_IN_USE`, `E_COMPONENT_CORE`, `E_ADOPTED_PROTECTED`, `E_OFFLINE_MISSING`, `E_DISK_SPACE`. Each carries the component it concerns and a message that says what to do. W4 added the I/O errors: `E_ARCHIVE_UNSAFE`, `E_ARCHIVE_CORRUPT`, `E_ARCHIVE_UNSUPPORTED`, `E_ARCHIVE_TOO_LARGE`, `E_HASH_MISMATCH`, `E_ARTIFACT_MISSING`, `E_PREREQUISITE`, `E_INSTALL_BUSY`, `E_INSTALL_FAILED`, `E_INSTALL_CANCELLED`, `E_HEALTH_CHECK`.
 
 ## Decisions recorded (transport and ownership)
 
@@ -91,12 +112,12 @@ Component errors are local to this contract (the E0 error-code list is untouched
 
 | Check (plan 11) | Covered here | Left for |
 |---|---|---|
-| R1 prerequisites, spaces in path | the cost and platform/app-version refusals | W4 (real preflight) |
-| R2 corrupt or unsafe archive, interrupted install | recovery table, no cancel while activating | W4 (hashing, safe extraction) |
-| R3 upgrade with an active job; failed health check | `E_COMPONENT_IN_USE`, rollback rows | W4 |
+| R1 prerequisites, spaces in path | the cost and platform/app-version refusals | proven by W4 on fakes (prerequisite hook, a root with spaces); a real prerequisite check is the app's |
+| R2 corrupt or unsafe archive, interrupted install | recovery table, no cancel while activating | proven by W4 (hashing, safe extraction, a crash at every step, a killed process) |
+| R3 upgrade with an active job; failed health check | `E_COMPONENT_IN_USE`, rollback rows | proven by W4 on fakes |
 | R4 forced host termination | ownership record and identity rule | W3 (job object, WSL cleanup) |
 | R5 attach, sibling survives, stale pid | `mayActOn` | W3 |
-| R6 offline | `E_OFFLINE_MISSING`, cache cost | W4 |
+| R6 offline | `E_OFFLINE_MISSING`, cache cost | proven by W4 (offline from a cache, a missing artifact named, a damaged cache entry refused) |
 | Add-ons: core-only, later add, remove, shared library kept, incompatible versions | `resolveSelection`, `planRemoval` on a fake manifest | W6 on the real OpenMC recipe |
 
 ## Cross-app packages (manifest v0.2)

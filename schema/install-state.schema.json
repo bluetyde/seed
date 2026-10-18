@@ -29,7 +29,10 @@
             "required": ["version", "location"],
             "properties": {
               "version": { "$ref": "component-manifest.schema.json#/$defs/version" },
-              "location": { "type": "string", "minLength": 1, "maxLength": 1000 }
+              "location": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "manifestSha256": { "$ref": "component-manifest.schema.json#/$defs/sha256" },
+              "artifactSha256": { "type": "array", "items": { "$ref": "component-manifest.schema.json#/$defs/sha256" } },
+              "installedAt": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/time" }
             }
           }
         }
