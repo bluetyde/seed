@@ -360,6 +360,51 @@ describe("upgrade, health check and rollback (R3)", () => {
   });
 });
 
+describe("a failure in the middle of the switch (not a dead host: an error)", () => {
+  for (const point of ["activating:moved", "activating:pointer", "activating:record"]) {
+    it(`at ${point} during an update: the old version, its pointer and its record are put back exactly`, async () => {
+      const w = makeWorld();
+      await install(w, [CORE("1.2.0")]);
+      const before = w.state().installs[0];
+      const r = await install(w, [CORE("1.3.0")], [], w.with({ hooks: { step: (s) => { if (s === point) throw new Error("the disk said no"); } } }));
+      expect(codes(r)).toEqual(["E_INSTALL_FAILED"]);
+      expect(w.pointer("fakeapp-core")).toBe("1.2.0");
+      expect(w.state().installs[0]).toEqual(before);
+      expect(fs.existsSync(w.versionDir("fakeapp-core", "1.3.0"))).toBe(false);
+      expect(read(path.join(w.versionDir("fakeapp-core", "1.2.0"), "fakeapp-core-1.2.0", "bin", "run"))).toBe("fakeapp-core 1.2.0\n");
+      expect(w.state().transaction).toMatchObject({ state: "failed" });
+      expect(w.leftovers()).toEqual([]);
+    });
+    it(`at ${point} during a first install: no pointer, no record, no folder`, async () => {
+      const w = makeWorld();
+      const r = await install(w, [CORE()], [], w.with({ hooks: { step: (s) => { if (s === point) throw new Error("the disk said no"); } } }));
+      expect(codes(r)).toEqual(["E_INSTALL_FAILED"]);
+      expect(w.pointer("fakeapp-core")).toBeNull();
+      expect(w.state().installs).toEqual([]);
+      expect(fs.existsSync(path.join(w.root, "fakeapp"))).toBe(false);
+      expect(w.leftovers()).toEqual([]);
+    });
+  }
+});
+
+describe("an artifact that is a single file (archive none)", () => {
+  it("is placed under its artifact id, unchanged", async () => {
+    const w = makeWorld();
+    const r = await install(w, [{ ...CORE(), archive: "none", files: { only: "just one file, not an archive" } }]);
+    expect(r.ok).toBe(true);
+    expect(read(path.join(w.versionDir("fakeapp-core", "1.2.0"), "fakeapp-core-1.2.0", "fakeapp-core-1.2.0"))).toBe("just one file, not an archive");
+  });
+  it("larger than the manifest says is refused", async () => {
+    const w = makeWorld();
+    const bytes = "x".repeat(300);
+    const m = w.manifest([{ ...CORE(), archive: "none", files: { only: bytes } }]);
+    m.manifest.components[0]!.artifacts[0]!.expandedBytes = 200;
+    const out = await installSelection(w.env, m.manifest, m.sha, []);
+    expect(codes(out)).toEqual(["E_ARCHIVE_TOO_LARGE"]);
+    expect(w.leftovers()).toEqual([]);
+  });
+});
+
 describe("one installer at a time, and cancel", () => {
   it("a second install on the same root is told it is busy while the first runs, and works once it has finished", async () => {
     let release!: () => void;
