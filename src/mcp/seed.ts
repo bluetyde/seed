@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { supervisedReplay, supervisedRun } from "./supervisor";
+import { supervisedInstall, supervisedReplay, supervisedRun } from "./supervisor";
+import { listComponentsFromHost } from "../core/installHost";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { addStudyNote } from "../core/studyNoteHost";
@@ -26,7 +27,7 @@ const requestSchema = z
   .strict();
 
 /** The path is selected once by the trusted process environment, never by MCP arguments. */
-export function createSeedMcpServer(hostConfig: string, transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG): McpServer {
+export function createSeedMcpServer(hostConfig: string, transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG, installHostConfig = process.env.SEED_INSTALL_HOST_CONFIG): McpServer {
   const studyHeader = process.env.SEED_STUDY_HEADER;
   const server = new McpServer(
     { name: "seed", version: "0.1.0" },
@@ -185,6 +186,36 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
       };
     },
   );
+  // Components: only when the trusted environment names an install host. Granting, revoking and removing are human verbs of the admin CLI and have no tool here.
+  if (installHostConfig) {
+    const id = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
+    const reply = (outcome: unknown) => {
+      const r = { schema: "seed.mcp-reply/0.1", ...(outcome as object) } as { ok?: boolean };
+      return { content: [{ type: "text" as const, text: JSON.stringify(r) }], structuredContent: r as Record<string, unknown>, isError: !r.ok };
+    };
+    server.registerTool(
+      "seed_list_components",
+      {
+        title: "List installable components",
+        description:
+          "Read which components each configured app has (core, add-ons, libraries), their versions, sizes, capabilities, whether this machine can install them, what is installed already and which install is in flight. Nothing is changed. Use it to choose the add-on ids for seed_install_component.",
+        inputSchema: z.object({ app: id.optional() }).strict(),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async (request) => reply(listComponentsFromHost(installHostConfig, request)),
+    );
+    server.registerTool(
+      "seed_install_component",
+      {
+        title: "Install the core of an app and chosen add-ons",
+        description:
+          "Ask the trusted SEED host to install the core of an app and the add-ons in select, with the libraries they need. It works only inside a grant a person issued for this actor, this app and these add-ons, with a download and disk ceiling that every request spends from; without one it is refused and says what to grant. Only app, select and an optional requestId are accepted: no manifest, url, command or path. The call waits for the end of the install, which runs in a process that finishes even if this connection closes; a run that was stopped is settled at the next start.",
+        inputSchema: z.object({ requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/).optional(), app: id, select: z.array(id).max(16).default([]) }).strict(),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      },
+      async (request) => reply(await supervisedInstall(installHostConfig, request)),
+    );
+  }
   // Transfers: only when the trusted environment names a transfer host. Approval is a human verb of the admin CLI and has no tool here.
   if (transferHostConfig) {
     const annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };

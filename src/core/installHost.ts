@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import { copyFileSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import Ajv2020 from "ajv/dist/2020";
 import { installSelection, removeComponent, type ArtifactSource, type InstallEnv, type InstallOutcome } from "./componentInstaller";
-import { resolveSelection, validateManifest, type ComponentError, type Manifest, type Platform } from "./components";
+import { eligible, resolveSelection, validateManifest, type ComponentError, type Manifest, type Platform } from "./components";
 import { appendInstallRecord, inside, readHostJson, regularFile } from "./hostFiles";
+import { httpsSource, type HttpsSourceOptions } from "./httpsSource";
 import { evaluateInstallGate, foldGrants, issueInstallGrant, type Cost, type InstallDecision, type InstallGrant } from "./installGrant";
 import { appendGrantEvent, readGrantLog } from "./installGrantStore";
 import { cachedShas, readInstallState } from "./installStore";
@@ -19,7 +20,7 @@ import type { TypedError } from "./validate";
  * nothing else: no manifest, no url, no command, no path. Everything a request does is one line in `installs.jsonl` of the state folder.
  */
 
-type AppEntry = { manifestFile: string; manifestSha256: string; appVersion: string; artifactsDir?: string };
+type AppEntry = { manifestFile: string; manifestSha256: string; appVersion: string; artifactsDir?: string; downloads?: { hosts: string[] } };
 export type InstallHostConfig = {
   schema: "seed.install-host/0.1";
   actor: Actor;
@@ -32,6 +33,8 @@ export type InstallHostConfig = {
 export type InstallHostOpts = {
   now?: () => Date;
   env?: Partial<InstallEnv>;
+  /** Test seam: extra options of the https source (a test certificate, a name lookup, shorter time limits). `allowedHosts` always comes from the configuration. */
+  https?: Partial<Omit<HttpsSourceOptions, "allowedHosts">>;
   /** Test seam: runs between the first look at the grants and the moment the cost is counted under the lock (to let another request in between). */
   beforeAdmit?: () => void;
 };
@@ -78,12 +81,21 @@ function loadHost(file: string, apps: readonly string[] | "all"): Host {
 function envFor(h: Host, app: string, opts: InstallHostOpts): InstallEnv {
   const entry = h.config.apps[app]!;
   const dir = entry.artifactsDir;
-  const source: ArtifactSource | undefined = dir
+  const local: ArtifactSource | undefined = dir
     ? async (a, dest) => {
         const from = join(dir, a.id);
         regularFile(from);
         if (statSync(from).size > a.downloadBytes) throw Error(`${a.id} in the artifacts folder is larger than the manifest says`);
         copyFileSync(from, dest);
+      }
+    : undefined;
+  const remote: ArtifactSource | undefined = entry.downloads ? httpsSource({ ...opts.https, allowedHosts: entry.downloads.hosts }) : undefined;
+  // a file in the artifacts folder is used before any download; the url of the manifest is used only when the host configuration allows downloads
+  const source: ArtifactSource | undefined = local || remote
+    ? async (a, dest, signal) => {
+        if (local && dir && existsSync(join(dir, a.id))) return local(a, dest, signal);
+        if (remote) return remote(a, dest, signal);
+        return local!(a, dest, signal);
       }
     : undefined;
   const inUse = h.config.ownersFolder
@@ -179,6 +191,54 @@ export async function installFromHost(file: string, request: unknown, opts: Inst
     }
     log({ phase: "finished", ok: true, steps: outcome.steps });
     return { ok: true as const, via: decision.via, ...(decision.grantId ? { grantId: decision.grantId } : {}), steps: outcome.steps, cost: outcome.cost };
+  });
+}
+
+// ---- reading: what could be installed, and what is ---------------------------------------------------------------------------------------
+
+export type ComponentListing = {
+  app: string;
+  appVersion: string;
+  /** Whether artifacts can be fetched at all: a local folder, a download host list, or only what is cached. */
+  sources: ("local" | "https" | "cache")[];
+  components: {
+    id: string; kind: string; version: string; title: string; description?: string; capabilities: string[];
+    dependsOn: string[]; downloadBytes: number; expandedBytes: number;
+    /** Null when it can be installed here; otherwise the reason (platform, app version). */
+    unavailable: string | null;
+    installed: { version: string; origin: string; selectedByUser: boolean } | null;
+  }[];
+};
+
+/** `{app?}`: the components of the pinned manifest of each configured app (or one), what is installed of them, and the transaction in flight. Any actor may read this. */
+export function listComponentsFromHost(file: string, request: unknown = {}): { ok: true; apps: ComponentListing[]; transaction?: unknown } | { ok: false; errors: TypedError[] } {
+  return guard(() => {
+    const r = strictObject(request ?? {}, ["app"]);
+    if ("code" in r) return refuse([r as TypedError]);
+    if (r.app !== undefined && (typeof r.app !== "string" || !ID.test(r.app))) return refuse([err("E_SCHEMA_INVALID", "/app", "app is the id of an app in the host configuration")]);
+    const h = loadHost(file, r.app === undefined ? "all" : [r.app as string]);
+    const state = readInstallState(h.config.installRoot);
+    if (!state.ok) return refuse(state.errors.map(fromComponent));
+    const apps: ComponentListing[] = [];
+    for (const [name, { manifest }] of h.manifests) {
+      const entry = h.config.apps[name]!;
+      apps.push({
+        app: name, appVersion: entry.appVersion,
+        sources: [...(entry.artifactsDir ? ["local" as const] : []), ...(entry.downloads ? ["https" as const] : []), "cache" as const],
+        components: manifest.components.map((c) => {
+          const have = state.state.installs.find((i) => i.app === name && i.component === c.id);
+          const bad = eligible(c, h.config.platform, entry.appVersion);
+          return {
+            id: c.id, kind: c.kind, version: c.version, title: c.title, ...(c.description ? { description: c.description } : {}), capabilities: c.capabilities,
+            dependsOn: (c.dependsOn ?? []).map((d) => d.component),
+            downloadBytes: c.artifacts.reduce((n, a) => n + a.downloadBytes, 0), expandedBytes: c.artifacts.reduce((n, a) => n + a.expandedBytes, 0),
+            unavailable: bad ? bad.message : null,
+            installed: have ? { version: have.version, origin: have.origin, selectedByUser: have.selectedByUser } : null
+          };
+        })
+      });
+    }
+    return { ok: true as const, apps, ...(state.state.transaction ? { transaction: state.state.transaction } : {}) };
   });
 }
 
