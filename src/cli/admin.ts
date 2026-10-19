@@ -4,6 +4,7 @@ import { releaseLessonReservation } from "../core/lessonHistory";
 import { approveTransfer } from "../core/transferHost";
 import { reconcileStudyRecord } from "../core/studyReconcile";
 import { mergeMaterialsFromHost } from "../core/materialMergeHost";
+import { grantInstallFromHost, listInstallGrantsFromHost, removeFromHost, revokeInstallGrantFromHost } from "../core/installHost";
 import { clearOracleFailure, oracleJournalStatus, recordOracleEvaluation } from "../core/oracleJournalHost";
 import { readRequest } from "./seed";
 
@@ -12,13 +13,15 @@ import { readRequest } from "./seed";
  * It reads its own configuration variable, SEED_ADMIN_HOST_CONFIG, so an agent's SEED_HOST_CONFIG never reaches it,
  * and the operation itself still requires the configured actor to be a human.
  */
-export const ADMIN_VERBS = ["release-intent-reservation", "recover", "approve-transfer", "oracle-record", "oracle-clear", "oracle-status", "reconcile-study", "import-materials"];
+export const ADMIN_VERBS = ["release-intent-reservation", "recover", "approve-transfer", "oracle-record", "oracle-clear", "oracle-status", "reconcile-study", "import-materials", "grant-install", "revoke-install-grant", "list-install-grants", "remove-component"];
+const INSTALL_VERBS = ["grant-install", "revoke-install-grant", "list-install-grants", "remove-component"];
 
 export async function runAdminCli(
   argv: string[],
   stream: Readable,
   hostConfig = process.env.SEED_ADMIN_HOST_CONFIG,
   transferHostConfig = process.env.SEED_ADMIN_TRANSFER_HOST_CONFIG,
+  installHostConfig = process.env.SEED_ADMIN_INSTALL_HOST_CONFIG,
 ): Promise<{ code: number; reply: unknown }> {
   const failure = (message: string, code = "E_SCHEMA_INVALID") => ({
     code: 2,
@@ -34,7 +37,11 @@ export async function runAdminCli(
       "E_VERB_UNKNOWN",
     );
   }
-  if (argv[0] === "approve-transfer" ? !transferHostConfig : !hostConfig) {
+  const isInstall = INSTALL_VERBS.includes(argv[0]!);
+  if (isInstall && !installHostConfig) {
+    return failure("set SEED_ADMIN_INSTALL_HOST_CONFIG to an install host configuration whose actor is a human", "E_SETUP_REQUIRED");
+  }
+  if (!isInstall && (argv[0] === "approve-transfer" ? !transferHostConfig : !hostConfig)) {
     return failure(
       argv[0] === "approve-transfer"
         ? "set SEED_ADMIN_TRANSFER_HOST_CONFIG to a transfer host configuration whose actor is a human"
@@ -47,6 +54,17 @@ export async function runAdminCli(
     request = await readRequest(stream);
   } catch (e) {
     return failure(e instanceof Error ? e.message : "invalid input");
+  }
+  if (isInstall) {
+    const done =
+      argv[0] === "grant-install"
+        ? grantInstallFromHost(installHostConfig!, request)
+        : argv[0] === "revoke-install-grant"
+          ? revokeInstallGrantFromHost(installHostConfig!, request)
+          : argv[0] === "list-install-grants"
+            ? listInstallGrantsFromHost(installHostConfig!)
+            : await removeFromHost(installHostConfig!, request);
+    return { code: done.ok ? 0 : 2, reply: { schema: "seed.cli-reply/0.1", ...done } };
   }
   const outcome =
     argv[0] === "approve-transfer"

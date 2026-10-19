@@ -164,6 +164,12 @@ export function appendMaterialsRecord(stateRoot: string, event: unknown): void {
   appendFileSync(file, JSON.stringify({ schema: "seed.materials-record/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
 }
 
+/** One line per install decision (admitted, refused, finished, removal) in `installs.jsonl` of the state folder; not chained. */
+export function appendInstallRecord(stateRoot: string, event: unknown): void {
+  const file = safeChild(stateRoot, "installs.jsonl");
+  appendFileSync(file, JSON.stringify({ schema: "seed.install-record/0.1", time: new Date().toISOString(), event }) + "\n", { mode: 0o600 });
+}
+
 export async function withEngineLease<T>(
   stateRoot: string,
   engineKey: string,

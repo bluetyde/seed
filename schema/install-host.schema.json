@@ -1,0 +1,42 @@
+{
+  "$id": "https://seed.invalid/schema/install-host.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "seed.install-host/0.1: the trusted host configuration of the component installer (written by a person, outside every project and study)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "actor", "installRoot", "stateRoot", "platform", "apps"],
+  "properties": {
+    "schema": { "const": "seed.install-host/0.1" },
+    "actor": { "$ref": "https://seed.invalid/schema/common.schema.json#/$defs/actor" },
+    "installRoot": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "stateRoot": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "ownersFolder": { "type": "string", "minLength": 1, "maxLength": 500, "description": "The process-owner records of the shell: a component a record names as in use is not updated or removed." },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch"],
+      "properties": {
+        "os": { "enum": ["windows", "macos", "linux"] },
+        "arch": { "enum": ["x64", "arm64"] },
+        "via": { "enum": ["native", "wsl"] }
+      }
+    },
+    "apps": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifestFile", "manifestSha256", "appVersion"],
+        "properties": {
+          "manifestFile": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "manifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The pin: the manifest file is used only if its bytes have this hash." },
+          "appVersion": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$" },
+          "artifactsDir": { "type": "string", "minLength": 1, "maxLength": 500, "description": "A folder of local artifact files named by artifact id. Absent: only the cache is used (offline)." }
+        }
+      }
+    }
+  }
+}
