@@ -8,6 +8,7 @@ import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { proposeConclusion } from "../core/conclusionDraft";
 import { applyTransferFromHost, proposeTransfer, transferStatus } from "../core/transferHost";
+import { installFromHost } from "../core/installHost";
 
 export const MAX_CLI_BYTES = 1_048_576;
 export function readRequest(stream: Readable, timeoutMs = 10000): Promise<unknown> {
@@ -52,6 +53,7 @@ export async function runCli(
   stream: Readable,
   hostConfig = process.env.SEED_HOST_CONFIG,
   transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG,
+  installHostConfig = process.env.SEED_INSTALL_HOST_CONFIG,
 ): Promise<{ code: number; reply: unknown }> {
   const failure = (message: string, code = "E_SCHEMA_INVALID") => ({
     code: 2,
@@ -62,19 +64,24 @@ export async function runCli(
     },
   });
   const transferVerbs = ["transfer-propose", "transfer-status", "transfer-apply"];
-  if (argv.length !== 1 || !["run", "sweep", "replay", "note", "query", "cancel", "report", "draft-conclusion", ...transferVerbs].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "sweep", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", ...transferVerbs].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|sweep|replay|note|query|cancel|report|draft-conclusion|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|sweep|replay|note|query|cancel|report|draft-conclusion|install-component|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   const isTransfer = transferVerbs.includes(argv[0]!);
   if (isTransfer && !transferHostConfig) return failure("set SEED_TRANSFER_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
-  if (!isTransfer && !hostConfig) return failure("set SEED_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
+  if (argv[0] === "install-component" && !installHostConfig) return failure("set SEED_INSTALL_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
+  if (!isTransfer && argv[0] !== "install-component" && !hostConfig) return failure("set SEED_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
   let request: unknown;
   try {
     request = await readRequest(stream);
   } catch (e) {
     return failure(e instanceof Error ? e.message : "invalid input");
+  }
+  if (argv[0] === "install-component") {
+    const installed = await installFromHost(installHostConfig!, request);
+    return { code: installed.ok ? 0 : 2, reply: { schema: "seed.cli-reply/0.1", ...installed } };
   }
   const outcome =
     argv[0] === "transfer-propose"

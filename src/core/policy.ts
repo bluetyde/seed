@@ -34,6 +34,9 @@ export const OPERATION_RULES = {
   propose_transfer: "A2",
   accept_material_set: "grant",
   enable_transfer: "grant",
+  // runtime components (W4, src/core/installGrant.ts): an agent may ask inside a human grant; removal is a person's
+  install_component: "grant",
+  remove_component: "human",
   change_tier: "human",
   change_budget: "human",
   change_bounds: "human",
