@@ -25,6 +25,8 @@ export type Spec = {
   sha256?: string;
   platforms?: Platform[];
   appVersions?: { min: string; max?: string };
+  /** The url the manifest gives for the artifact; `{id}` is replaced by the artifact id. */
+  url?: string;
 };
 
 export const linux: Platform = { os: "linux", arch: "x64" };
@@ -56,7 +58,7 @@ export function fixtureManifest(specs: Spec[], served: Map<string, Buffer>, app 
       capabilities: [],
       ...(s.appVersions ? { appVersions: s.appVersions } : {}),
       ...(s.dependsOn ? { dependsOn: s.dependsOn } : {}),
-      artifacts: [{ id: artifactId, sha256: s.sha256 ?? sha(bytes), downloadBytes: s.downloadBytes ?? bytes.length, expandedBytes: s.expandedBytes ?? Math.max(expanded, bytes.length), archive }],
+      artifacts: [{ id: artifactId, ...(s.url ? { url: s.url.replace("{id}", artifactId) } : {}), sha256: s.sha256 ?? sha(bytes), downloadBytes: s.downloadBytes ?? bytes.length, expandedBytes: s.expandedBytes ?? Math.max(expanded, bytes.length), archive }],
       license: { spdx: "MIT" }
     };
   });
