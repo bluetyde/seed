@@ -92,6 +92,7 @@ Code: `src/core/httpsSource.ts` (an `ArtifactSource`), `installHost.ts` (the wir
 - **No private address:** loopback, private, link-local, shared, documentation, multicast and reserved ranges (IPv4 and IPv6, also as IPv4-mapped and NAT64 forms) are refused on the address a name resolves to when the connection is made, so a name that resolves to an internal address or changes its answer is refused too, and on a literal address in a url.
 - **The manifest's size is the size:** a `Content-Length` that differs is refused before a byte is read, a body that grows past it is cut off, one that stops short is an error, and a `Content-Encoding` other than identity is refused. The installer then checks size and hash again before anything is cached.
 - **Time:** 30 s to the response headers, 60 s between two chunks, 1 hour for the transfer, and the caller's cancel; a file that was begun and failed is deleted, a file that was already there is never touched.
+- **Breakage checks (2026-10-19).** About forty one-line changes to the source, the host wiring, the supervisor and the MCP tools were each run against the tests; every one is caught. Two real findings came from the work: a failed download first deleted a file that was already at the target (now only a file the download created is ever deleted), and a cancel while the server never answers was not tested (now it is).
 - **Not done:** resuming a partial download, retries, a bandwidth limit, proxies, a trust root chosen in the host configuration.
 
 ## The install gate (2026-10-18)
