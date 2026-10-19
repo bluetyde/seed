@@ -29,7 +29,12 @@ export type InstallHostConfig = {
   platform: Platform;
   apps: Record<string, AppEntry>;
 };
-export type InstallHostOpts = { now?: () => Date; env?: Partial<InstallEnv> };
+export type InstallHostOpts = {
+  now?: () => Date;
+  env?: Partial<InstallEnv>;
+  /** Test seam: runs between the first look at the grants and the moment the cost is counted under the lock (to let another request in between). */
+  beforeAdmit?: () => void;
+};
 
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 ajv.addSchema(JSON.parse(readFileSync(join(__dirname, "../../schema/common.schema.json"), "utf8")));
@@ -153,6 +158,7 @@ export async function installFromHost(file: string, request: unknown, opts: Inst
     let decision: InstallDecision = evaluateInstallGate(gateReq, foldGrants(readGrantLog(h.config.stateRoot).map((x) => x.event)), now());
     if (decision.allow && decision.via === "grant") {
       // the ceiling is spent under the lock, against the log as it is at that moment
+      opts.beforeAdmit?.();
       const spent = appendGrantEvent<InstallDecision>(h.config.stateRoot, (rows) => {
         const again = evaluateInstallGate(gateReq, foldGrants(rows.map((x) => x.event)), now());
         if (!again.allow || again.via !== "grant") return { refuse: again.allow ? "the grant changed" : again.errors.map((e) => e.message).join("; ") };
