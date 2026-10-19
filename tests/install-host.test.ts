@@ -289,6 +289,34 @@ describe("the trust anchors", () => {
     fs.writeFileSync(f, fs.readFileSync(f, "utf8").slice(0, -20));
     expect(msg(await ask(h, ["fake-cad"]))).toContain("partial");
   });
+  it("a host configuration inside the install root or the state folder is refused", async () => {
+    const h = host();
+    fs.mkdirSync(h.root, { recursive: true });
+    for (const dir of [h.root, h.stateRoot]) {
+      const f = path.join(dir, "cfg.json");
+      fs.writeFileSync(f, JSON.stringify(h.config(h.bot)));
+      expect(msg(await installFromHost(f, { app: "fakeapp", select: [] }, opts))).toContain("outside the install root and the state folder");
+    }
+  });
+  it("a grant log with its first line removed is refused (the chain no longer starts at 1)", async () => {
+    const h = host();
+    issue(h);
+    issue(h, { components: ["fake-nodal"] });
+    const f = path.join(h.stateRoot, "install-grants.jsonl");
+    const lines = fs.readFileSync(f, "utf8").split("\n").filter(Boolean);
+    fs.writeFileSync(f, lines.slice(1).join("\n") + "\n");
+    const r = await ask(h, ["fake-nodal"]);
+    expect(msg(r)).toContain("hash chain");
+    expect(installedIds(h)).toEqual([]);
+  });
+  it("an artifact file larger than the manifest says is not copied", async () => {
+    const h = host();
+    fs.writeFileSync(path.join(h.artifactsDir, "fakeapp-core-1.2.0"), Buffer.alloc(h.served.get("fakeapp-core-1.2.0")!.length + 10));
+    const r = await ask(h, [], h.humanFile);
+    expect(codes(r)).toEqual(["E_INSTALL_FAILED"]);
+    expect(msg(r)).toContain("larger than the manifest says");
+    expect(installedIds(h)).toEqual([]);
+  });
   it("host configurations that put things in the wrong place are refused", async () => {
     const h = host();
     const bad = (cfg: Record<string, unknown>) => installFromHost(h.write("bad.json", cfg), { app: "fakeapp", select: [] }, opts);
