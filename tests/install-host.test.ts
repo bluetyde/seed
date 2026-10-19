@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { grantInstallFromHost, installFromHost, listInstallGrantsFromHost, removeFromHost, revokeInstallGrantFromHost } from "../src/core/installHost";
+import { appendGrantEvent } from "../src/core/installGrantStore";
 import { OwnerStore } from "../src/core/ownerStore";
 import { CAD, CORE, LIBS, cleanWorlds } from "./helpers/installFixture";
 import { makeHost, type Host } from "./helpers/installHostFixture";
@@ -171,6 +172,24 @@ describe("an agent asking for an install", () => {
     expect(both.filter((r) => r.ok && r.via === "grant")).toHaveLength(1);
     expect(h.grantLog().filter((x) => x.event.type === "used")).toHaveLength(1);
     expect(installedIds(h)).toEqual(["fake-cad", "fakeapp-core", "shared-libs"]);
+  });
+  it("another request that spends the ceiling between the first look and the count is seen: the ceiling is checked again under the lock", async () => {
+    const h = host();
+    const g = issue(h);
+    const cad = ["fakeapp-core", "shared-libs", "fake-cad"].flatMap((id) => h.manifest.components.find((c) => c.id === id)!.artifacts);
+    const r = await installFromHost(h.agentFile, { app: "fakeapp", select: ["fake-cad"] }, {
+      ...opts,
+      beforeAdmit: () => {
+        // what a second process would have done in that gap: use up the whole ceiling
+        const used = appendGrantEvent(h.stateRoot, () => ({ event: { type: "used", grantId: g.grantId, requestId: "other", actor: { kind: "agent", name: "setup-bot", model: "m" }, app: "fakeapp", components: ["fake-cad"], cost: CEIL }, value: 1 }));
+        expect(used.ok).toBe(true);
+        expect(cad.length).toBe(3);
+      }
+    });
+    expect(codes(r)).toEqual(["E_NOT_PERMITTED"]);
+    expect(msg(r)).toContain("ceiling");
+    expect(installedIds(h)).toEqual([]);
+    expect(h.downloads).toEqual([]);
   });
   it("a grant does not cover an add-on it does not name", async () => {
     const h = host();
