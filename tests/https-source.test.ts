@@ -189,6 +189,13 @@ describe("time limits and cancel", () => {
     await fails(p, /cancelled/);
     expect(fs.existsSync(dest())).toBe(false);
   });
+  it("the caller's cancel stops a request the server never answers", async () => {
+    handler = () => { /* no answer */ };
+    const ac = new AbortController();
+    const p = src({ connectTimeoutMs: 30_000 })(art(), dest(), ac.signal);
+    setTimeout(() => ac.abort(), 150);
+    await fails(p, /cancelled/);
+  });
   it("a cancel before the start does nothing at all", async () => {
     const ac = new AbortController();
     ac.abort();
