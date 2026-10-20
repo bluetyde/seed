@@ -47,7 +47,7 @@ Step-by-step procedures. Sections marked **(planned)** describe work that does n
 1. A human creates the study: question, hypothesis, assumptions, parameters and bounds, budget, tier.
 2. Run the adapter's oracle set; a failure blocks the study.
 3. Run cases (a student by hand, an agent through MCP) inside the budget; every step is recorded with its actor.
-4. Compare compatible quantities; note anything `unverified`.
+4. Compare compatible quantities; note anything `unverified`. A quantity marked `verified (by name)` was matched to an oracle by its name only: compare the oracle's case with your model ([oracle-coverage.md](oracle-coverage.md)).
 5. Generate the report from the record. Read the fixed statements and the failures section before sharing.
 
 ## 6. Run an agent study safely **(planned, E2)**

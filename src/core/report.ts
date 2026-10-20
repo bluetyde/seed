@@ -2,6 +2,9 @@ import type { TypedError } from "./validate";
 import { validate } from "./validate";
 import { checkResultsAgainstRecord, checkResultsIndex, verifyStudyLog } from "./semantic";
 
+export const COVERAGE_BASIS_NOTE =
+  "A quantity is marked verified when a passed oracle entry of its adapter names that quantity. SEED matches by name only: it does not check that this model resembles the case the oracle ran (its fluid, geometry or regime). Verified therefore means the adapter reproduced a reference for a quantity of that name, not that this model is inside the verified range.";
+
 export const EDUCATIONAL_USE_STATEMENT =
   "This report was produced for education. It is not a licensing-grade analysis, a safety assessment or a prediction of the behavior of any real plant. Results hold only under the stated assumptions and within the verified coverage.";
 
@@ -907,6 +910,7 @@ ${oracleRowsHtml}
 </tbody>
 </table>
 <p>Quantities verified: ${String(verifiedCount)}, unverified: ${String(unverifiedCount)}</p>
+<p class="coverage-basis">${escapeHtml(COVERAGE_BASIS_NOTE)}</p>
 ${unverifiedCount > 0 ? `<p class="warning">Warning: ${String(unverifiedCount)} quantities are unverified and outside verified coverage.</p>` : ""}
 </section>`);
 
@@ -952,7 +956,7 @@ ${unverifiedCount > 0 ? `<p class="warning">Warning: ${String(unverifiedCount)} 
         const verBadge =
           q.verification === "unverified"
             ? `<span class="badge badge-unverified">UNVERIFIED</span>`
-            : `<span class="badge badge-verified">verified</span>`;
+            : `<span class="badge badge-verified">verified (by name)</span>`;
 
         figuresHtml += `\n<figure>
 <figcaption>${captionHtml}</figcaption>
@@ -1129,6 +1133,7 @@ ${stepRowsHtml}
 <h2>Limits</h2>
 <p>${escapeHtml(EDUCATIONAL_USE_STATEMENT)}</p>
 <p>Quantities marked UNVERIFIED are outside the verified coverage of their adapter.</p>
+<p>${escapeHtml(COVERAGE_BASIS_NOTE)}</p>
 </section>`);
 
   htmlParts.push(`</body>\n</html>\n`);
@@ -1240,7 +1245,9 @@ ${inputsChangedRowsMd}`);
 | --- | --- | --- |
 ${oracleRowsMd}
 
-Quantities verified: ${String(verifiedCount)}, unverified: ${String(unverifiedCount)}`;
+Quantities verified: ${String(verifiedCount)}, unverified: ${String(unverifiedCount)}
+
+${COVERAGE_BASIS_NOTE}`;
   if (unverifiedCount > 0) {
     verMd += `\n\n**Warning:** ${String(unverifiedCount)} quantities are unverified and outside verified coverage.`;
   }
@@ -1267,7 +1274,7 @@ Quantities verified: ${String(verifiedCount)}, unverified: ${String(unverifiedCo
       const figuresMdParts: string[] = [];
       for (const q of res.quantities) {
         const captionText = `Run ${rId}: ${q.name} [${q.unit}; normalization ${q.normalization}]`;
-        const verText = q.verification === "unverified" ? "UNVERIFIED" : "verified";
+        const verText = q.verification === "unverified" ? "UNVERIFIED" : "verified (by name)";
         const uncertaintyMd = q.uncertainty
           ? `\nUncertainty: ${escapeMarkdown(q.uncertainty.kind)} ${String(q.uncertainty.value)}${q.uncertainty.unit ? " " + escapeMarkdown(q.uncertainty.unit) : ""}`
           : "";
@@ -1404,7 +1411,9 @@ ${escapeMarkdown(agentSentence)}`);
 
 > ${EDUCATIONAL_USE_STATEMENT}
 
-Quantities marked UNVERIFIED are outside the verified coverage of their adapter.`);
+Quantities marked UNVERIFIED are outside the verified coverage of their adapter.
+
+${COVERAGE_BASIS_NOTE}`);
 
   const markdownOutput = mdParts.join("\n\n") + "\n";
 
