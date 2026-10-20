@@ -73,3 +73,8 @@ Design decisions with their reasons, newest last. A decision changes only by a n
 - **Why:** a release should not carry one machine's folder names. The variables stay the reliable route; the generic names keep the convenience for anyone who clones the apps next to SEED.
 - **Consequence:** a developer whose checkouts have other names sets the variables, or links the folders.
 
+## D11 (2026-10-20): Oracle coverage is matched by name; reports say so now, a scope on oracle entries later
+
+- **Decision (user):** "a now, then b later". (a) Reports label a verified quantity "verified (by name)" and carry a fixed note that SEED matches by quantity name only and does not check that the model resembles the oracle's case. (b) Later, an oracle entry names the model features it applies to and coverage counts only inside that scope.
+- **Why:** the gap was found by the suite-test session (a heavy-water model with an output named like a light-water oracle's would count as covered). (a) is cheap and hides nothing; (b) changes every app's oracle entries and the adapters, so it waits for the app sessions.
+- **Details:** [oracle-coverage.md](oracle-coverage.md). **Not decided:** when (b) starts, and the exact scope fields.
