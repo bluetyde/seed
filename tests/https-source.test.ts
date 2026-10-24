@@ -72,6 +72,26 @@ describe("a download", () => {
     expect(hits.map((h) => h.url)).toEqual(["/pack", "/mirror/pack", "/final"]);
     expect(fs.readFileSync(dest()).equals(BODY)).toBe(true);
   });
+  it("closes a redirect or an error response whose body the server never ends", async () => {
+    const closed: Promise<void>[] = [];
+    handler = (req, res) => {
+      if (req.url === "/pack") {
+        closed.push(new Promise<void>((r) => res.on("close", () => r())));
+        res.writeHead(302, { Location: `https://cdn.example.test:${port}/final`, "Content-Length": "1000" });
+        res.write("x");
+      } else res.end(BODY);
+    };
+    await src()(art(), dest());
+    await Promise.race([Promise.all(closed), new Promise((_r, rej) => setTimeout(() => rej(new Error("the redirect response was left open")), 3000))]);
+    const errors: Promise<void>[] = [];
+    handler = (_req, res) => {
+      errors.push(new Promise<void>((r) => res.on("close", () => r())));
+      res.writeHead(503, { "Content-Length": "1000" });
+      res.write("x");
+    };
+    await fails(src()(art(), path.join(work, "other.part")), /HTTP 503/);
+    await Promise.race([Promise.all(errors), new Promise((_r, rej) => setTimeout(() => rej(new Error("the error response was left open")), 3000))]);
+  });
   it("does not overwrite a file that is there", async () => {
     fs.writeFileSync(dest(), "mine");
     await fails(src()(art(), dest()), /EEXIST/);
@@ -215,10 +235,10 @@ describe("the certificate is checked", () => {
 });
 
 describe("addresses a download must never talk to", () => {
-  it.each(["0.0.0.0", "10.0.0.1", "10.255.255.255", "100.64.0.1", "127.0.0.1", "127.9.9.9", "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.0.0.1", "192.168.1.1", "198.18.0.1", "198.51.100.7", "203.0.113.9", "224.0.0.1", "240.0.0.1", "255.255.255.255", "::", "::1", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1", "2001:db8::1", "::ffff:10.0.0.1", "::ffff:7f00:1", "64:ff9b::10.0.0.1", "not an address"])("%s is refused", (a) => {
+  it.each(["0.0.0.0", "10.0.0.1", "10.255.255.255", "100.64.0.1", "127.0.0.1", "127.9.9.9", "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.0.0.1", "192.168.1.1", "198.18.0.1", "198.51.100.7", "203.0.113.9", "224.0.0.1", "240.0.0.1", "255.255.255.255", "::", "::1", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1", "2001:db8::1", "::ffff:10.0.0.1", "::ffff:7f00:1", "64:ff9b::10.0.0.1", "not an address", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0:0:0:0:0:ffff:7f00:1", "0:0:0:0:0:ffff:127.0.0.1", "::127.0.0.1", "FE80::1%eth0", "100::1", "1:2:3:4:5:6:7:8:9", "1::2::3"])("%s is refused", (a) => {
     expect(isPrivateAddress(a)).toBe(true);
   });
-  it.each(["8.8.8.8", "1.1.1.1", "140.82.112.3", "172.15.255.255", "172.32.0.1", "100.63.255.255", "100.128.0.1", "169.253.0.1", "192.169.0.1", "198.17.0.1", "198.20.0.1", "2606:4700:4700::1111", "2001:4860:4860::8888", "::ffff:8.8.8.8", "64:ff9b::8.8.8.8"])("%s is public", (a) => {
+  it.each(["8.8.8.8", "1.1.1.1", "140.82.112.3", "172.15.255.255", "172.32.0.1", "100.63.255.255", "100.128.0.1", "169.253.0.1", "192.169.0.1", "198.17.0.1", "198.20.0.1", "2606:4700:4700::1111", "2001:4860:4860::8888", "::ffff:8.8.8.8", "64:ff9b::8.8.8.8", "2606:4700:4700:0:0:0:0:1111", "0:0:0:0:0:ffff:808:808"])("%s is public", (a) => {
     expect(isPrivateAddress(a)).toBe(false);
   });
 });

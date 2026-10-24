@@ -76,6 +76,6 @@ export class OwnerStore {
   }
 
   remove(launchId: string): void {
-    try { unlinkSync(this.file(launchId)); } catch { /* already gone */ }
+    try { unlinkSync(this.file(launchId)); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
   }
 }

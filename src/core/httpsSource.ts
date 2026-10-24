@@ -62,24 +62,40 @@ export function isPrivateAddress(address: string): boolean {
     );
   }
   if (kind === 6) {
-    const lower = address.toLowerCase();
-    const mapped = lower.match(/^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isPrivateAddress(mapped[1]!);
-    const hexMapped = lower.match(/^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-    if (hexMapped) {
-      const hi = parseInt(hexMapped[1]!, 16), lo = parseInt(hexMapped[2]!, 16);
-      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
-    }
-    const first = parseInt(lower.split(":")[0] || "0", 16);
+    const g = ipv6Groups(address);
+    if (!g) return true; // not an address we can read: never a public one
+    const [a, b, c, d, e, f, g6, h] = g as [number, number, number, number, number, number, number, number];
+    const v4 = () => isPrivateAddress(`${g6 >> 8}.${g6 & 255}.${h >> 8}.${h & 255}`);
+    if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && (f === 0 || f === 0xffff)) return f === 0xffff ? v4() : true; // :: , ::1 , ::a.b.c.d and ::ffff:a.b.c.d
+    if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) return v4(); // NAT64 of an IPv4 address
     return (
-      lower === "::" || lower === "::1" ||
-      (first & 0xfe00) === 0xfc00 ||
-      (first & 0xffc0) === 0xfe80 ||
-      (first & 0xff00) === 0xff00 ||
-      lower.startsWith("2001:db8:") || lower.startsWith("2001:0db8:")
+      (a & 0xfe00) === 0xfc00 ||
+      (a & 0xffc0) === 0xfe80 ||
+      (a & 0xff00) === 0xff00 ||
+      (a === 0x2001 && b === 0x0db8) ||
+      (a === 0x0100 && b === 0 && c === 0 && d === 0)
     );
   }
   return true;
+}
+
+/** The eight 16-bit groups of an IPv6 address in any spelling (`::`, an IPv4 tail, leading zeros), or null when it is not one. */
+export function ipv6Groups(address: string): number[] | null {
+  let text = address.toLowerCase().replace(/%.*$/, "");
+  const tail = text.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (tail) {
+    if (net.isIPv4(tail[2]!) === false) return null;
+    const o = tail[2]!.split(".").map(Number);
+    text = tail[1]! + ((o[0]! << 8) | o[1]!).toString(16) + ":" + ((o[2]! << 8) | o[3]!).toString(16);
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const part = (x: string) => (x === "" ? [] : x.split(":"));
+  const head = part(halves[0]!), rest = halves.length === 2 ? part(halves[1]!) : [];
+  if (halves.length === 1 ? head.length !== 8 : head.length + rest.length > 7) return null;
+  const all = halves.length === 1 ? head : [...head, ...new Array<string>(8 - head.length - rest.length).fill("0"), ...rest];
+  const out = all.map((x) => (/^[0-9a-f]{1,4}$/.test(x) ? parseInt(x, 16) : NaN));
+  return out.some(Number.isNaN) ? null : out;
 }
 
 class SourceError extends Error {}
@@ -146,7 +162,7 @@ export function httpsSource(opts: HttpsSourceOptions): ArtifactSource {
 
         const status = res.statusCode ?? 0;
         if ([301, 302, 303, 307, 308].includes(status)) {
-          res.resume();
+          res.destroy(); // the body is not wanted, and a server that never ends it must not keep the socket
           const location = res.headers.location;
           if (!location) throw new SourceError(`HTTP ${status} without a Location`);
           if (hop >= maxRedirects) throw new SourceError(`more than ${maxRedirects} redirects`);
@@ -154,7 +170,7 @@ export function httpsSource(opts: HttpsSourceOptions): ArtifactSource {
           continue;
         }
         if (status !== 200) {
-          res.resume();
+          res.destroy();
           throw new SourceError(`${url.hostname} answered HTTP ${status}`);
         }
         const encoding = String(res.headers["content-encoding"] ?? "identity").toLowerCase();
