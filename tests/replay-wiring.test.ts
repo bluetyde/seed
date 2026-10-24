@@ -24,7 +24,7 @@ describe("the CLI verb: replay", () => {
   it("is in the usage line, and needs the trusted host configuration like every verb", async () => {
     const usage = await runCli(["nonsense"], input({}), "/x");
     expect(usage.code).toBe(2);
-    expect(JSON.stringify(usage.reply)).toMatch(/run\|sweep\|replay\|note/);
+    expect(JSON.stringify(usage.reply)).toMatch(/run\|sweep\|sample\|replay\|note/);
     const noHost = await runCli(["replay"], input(request()), undefined);
     expect(noHost).toMatchObject({ code: 2, reply: { ok: false, errors: [{ code: "E_SETUP_REQUIRED" }] } });
   });

@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import { runFromHostFile } from "../core/fileRunHost";
 import { runSweepFromHostFile } from "../core/sweepHost";
 import { replayFromHostFile } from "../core/replayHost";
+import { runSamplingFromHostFile } from "../core/samplingHost";
 import { addStudyNote } from "../core/studyNoteHost";
 import { queryFromHostFile } from "../core/queryHost";
 import { requestHostCancellation } from "../core/hostControl";
@@ -64,9 +65,9 @@ export async function runCli(
     },
   });
   const transferVerbs = ["transfer-propose", "transfer-status", "transfer-apply"];
-  if (argv.length !== 1 || !["run", "sweep", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", "list-components", ...transferVerbs].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "sweep", "sample", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", "list-components", ...transferVerbs].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|sweep|replay|note|query|cancel|report|draft-conclusion|install-component|list-components|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|sweep|sample|replay|note|query|cancel|report|draft-conclusion|install-component|list-components|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   const isTransfer = transferVerbs.includes(argv[0]!);
@@ -102,6 +103,8 @@ export async function runCli(
           ? requestHostCancellation(hostConfig!, request)
           : argv[0] === "sweep"
             ? await runSweepFromHostFile(hostConfig!, request)
+            : argv[0] === "sample"
+            ? await runSamplingFromHostFile(hostConfig!, request)
             : argv[0] === "replay"
               ? await replayFromHostFile(hostConfig!, request)
             : argv[0] === "note"
@@ -112,7 +115,7 @@ export async function runCli(
   return {
     code: !outcome.ok
       ? 2
-      : argv[0] === "sweep"
+      : argv[0] === "sweep" || argv[0] === "sample"
         ? (outcome as { complete?: boolean }).complete === true
           ? 0
           : 1
