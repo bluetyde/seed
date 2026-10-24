@@ -89,7 +89,7 @@ export function validateLoop(def: unknown): { ok: true; def: LoopDefinition } | 
       if (q.min !== undefined && !isNum(q.min)) errors.push(`${at}.min is a finite number`);
       if (q.max !== undefined && !isNum(q.max)) errors.push(`${at}.max is a finite number`);
       if (isNum(q.min) && isNum(q.max) && q.min > q.max) errors.push(`${at}.min ${q.min} is above max ${q.max}`);
-      if (idOk && isNum(q.tolerance) && q.tolerance >= 1e-15 && q.tolerance < 1 && (q.floor === undefined || q.floor >= 1e-200) && (q.floor === undefined || isNum(q.floor)) && (q.min === undefined || isNum(q.min)) && (q.max === undefined || isNum(q.max))) {
+      if (idOk && isNum(q.tolerance) && q.tolerance >= 1e-15 && q.tolerance < 1 && (q.floor === undefined || (isNum(q.floor) && q.floor >= 1e-200)) && (q.min === undefined || isNum(q.min)) && (q.max === undefined || isNum(q.max))) {
         const e: Exchanged = { id: q.id as string, tolerance: q.tolerance };
         if (q.floor !== undefined) e.floor = q.floor as number;
         if (q.min !== undefined) e.min = q.min as number;
