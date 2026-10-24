@@ -84,12 +84,12 @@ export function validateLoop(def: unknown): { ok: true; def: LoopDefinition } | 
       if (typeof q.id !== "string" || !ID.test(q.id) || FORBIDDEN_KEYS.has(q.id)) errors.push(`${at}.id is a name of letters, digits, dots, dashes, colons or underscores`);
       else if (seen.has(q.id)) errors.push(`${at}.id ${q.id} is listed twice (duplicate id)`);
       else { seen.add(q.id); idOk = true; }
-      if (!isNum(q.tolerance) || q.tolerance <= 0 || q.tolerance >= 1) errors.push(`${at}.tolerance is a relative tolerance above 0 and below 1`);
-      if (q.floor !== undefined && (!isNum(q.floor) || q.floor <= 0)) errors.push(`${at}.floor is a number above 0`);
+      if (!isNum(q.tolerance) || q.tolerance < 1e-15 || q.tolerance >= 1) errors.push(`${at}.tolerance is a relative tolerance of at least 1e-15 and below 1`);
+      if (q.floor !== undefined && (!isNum(q.floor) || q.floor < 1e-200)) errors.push(`${at}.floor is a number of at least 1e-200`);
       if (q.min !== undefined && !isNum(q.min)) errors.push(`${at}.min is a finite number`);
       if (q.max !== undefined && !isNum(q.max)) errors.push(`${at}.max is a finite number`);
       if (isNum(q.min) && isNum(q.max) && q.min > q.max) errors.push(`${at}.min ${q.min} is above max ${q.max}`);
-      if (idOk && isNum(q.tolerance) && q.tolerance > 0 && q.tolerance < 1 && (q.floor === undefined || isNum(q.floor)) && (q.min === undefined || isNum(q.min)) && (q.max === undefined || isNum(q.max))) {
+      if (idOk && isNum(q.tolerance) && q.tolerance >= 1e-15 && q.tolerance < 1 && (q.floor === undefined || q.floor >= 1e-200) && (q.floor === undefined || isNum(q.floor)) && (q.min === undefined || isNum(q.min)) && (q.max === undefined || isNum(q.max))) {
         const e: Exchanged = { id: q.id as string, tolerance: q.tolerance };
         if (q.floor !== undefined) e.floor = q.floor as number;
         if (q.min !== undefined) e.min = q.min as number;

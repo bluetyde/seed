@@ -36,7 +36,7 @@ The functions make and read points with values between 0 and 1. These are probab
 
     value_j = quantile(distribution_j, openUnit(u_j))
 
-`quantile` needs a probability strictly between 0 and 1. A Morris point can be exactly 0 or exactly 1. **Callers must pass each Morris value through `openUnit` before `quantile`.** `openUnit` maps exactly 0 to 1e-9 and exactly 1 to 1 - 1e-9 and leaves all other values alone. Sobol points come from the sampler's generator and are never exactly 0 or 1, so `openUnit` is harmless there.
+`quantile` needs a probability strictly between 0 and 1. A Morris point can be exactly 0 or exactly 1. **Callers must pass each Morris value through `openUnit` before `quantile`.** `openUnit` maps exactly 0 to 1e-9 and exactly 1 to 1 - 1e-9 and leaves all other values in [0, 1] alone; a value outside [0, 1] or not finite is an error, not a point near the edge. Sobol points come from the sampler's generator and are never exactly 0 or 1, so `openUnit` is harmless there.
 
 ## Sobol: the design and the order of runs
 

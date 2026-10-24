@@ -417,6 +417,8 @@ describe("what is refused before any pass", () => {
     ["duplicate ids", { ...base, exchanged: [{ id: "x", tolerance: 1e-3 }, { id: "x", tolerance: 1e-2 }] }, /x is listed twice/],
     ["a bad id", { ...base, exchanged: [{ id: "", tolerance: 1e-3 }] }, /\.id/],
     ["a forbidden id", { ...base, exchanged: [{ id: "constructor", tolerance: 1e-3 }] }, /\.id/],
+    ["a tolerance below double precision (its scaled residual would overflow)", { ...base, exchanged: [{ id: "x", tolerance: 1e-320 }] }, /at least 1e-15/],
+    ["a floor so small that the scale underflows", { ...base, exchanged: [{ id: "x", tolerance: 1e-3, floor: 1e-250 }] }, /1e-200/],
     ["floor 0", { ...base, exchanged: [{ id: "x", tolerance: 1e-3, floor: 0 }] }, /floor/],
     ["min above max", { ...base, exchanged: [{ id: "x", tolerance: 1e-3, min: 5, max: 1 }] }, /above max/],
     ["an unknown key", { ...base, speed: 3 }, /not speed/],

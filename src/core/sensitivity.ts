@@ -101,6 +101,7 @@ function estimate(fA: readonly number[], fB: readonly number[], fAB: readonly (r
   let ss = 0;
   for (const j of rows) ss += (fA[j]! - mean) ** 2 + (fB[j]! - mean) ** 2;
   const variance = ss / (2 * m - 1);
+  if (!Number.isFinite(mean) || !Number.isFinite(variance)) throw new Error("the model outputs are too large: their mean or variance overflows, so no index can be given");
   if (!(variance > 0)) return null;
   const first: number[] = [];
   const total: number[] = [];
@@ -110,8 +111,10 @@ function estimate(fA: readonly number[], fB: readonly number[], fAB: readonly (r
       s1 += (fB[j]! - mean) * (f[j]! - fA[j]!);
       s2 += (fA[j]! - f[j]!) ** 2;
     }
-    first.push(s1 / m / variance);
-    total.push(s2 / (2 * m) / variance);
+    const fi = s1 / m / variance, ti = s2 / (2 * m) / variance;
+    if (!Number.isFinite(fi) || !Number.isFinite(ti)) throw new Error("the model outputs are too large: an index overflows");
+    first.push(fi);
+    total.push(ti);
   }
   return { mean, variance, first, total };
 }
@@ -195,6 +198,7 @@ export type MorrisDesignOptions = { r: number; d: number; levels?: number; seed:
 
 /** Maps exactly 0 and exactly 1 to 1e-9 and 1 - 1e-9 and leaves any other value unchanged. Callers use it before `quantile`. */
 export function openUnit(u: number): number {
+  if (!Number.isFinite(u) || u < 0 || u > 1) throw new Error(`a unit value is a number from 0 to 1, not ${u}`);
   return u <= 0 ? 1e-9 : u >= 1 ? 1 - 1e-9 : u;
 }
 
@@ -248,7 +252,9 @@ export function morrisEffects(outputs: readonly number[], design: MorrisDesign):
     for (let s = 0; s < d; s++) {
       const base = t * (d + 1) + s;
       const step = design.steps[t]![s]!;
-      effects[step.parameter]!.push((outputs[base + 1]! - outputs[base]!) / step.delta);
+      const effect = (outputs[base + 1]! - outputs[base]!) / step.delta;
+      if (!Number.isFinite(effect)) throw new Error(`the elementary effect of parameter ${step.parameter} in trajectory ${t} is not a finite number (the outputs differ by more than can be divided by the step)`);
+      effects[step.parameter]!.push(effect);
     }
   }
   return effects.map((ee) => {
