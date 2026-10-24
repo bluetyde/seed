@@ -11,7 +11,7 @@ import { gateStopStep, type Actor, type Decision } from "./policy";
 import { appendStudySteps, studyRecordFile, type StepDraft } from "./studyRecord";
 import { validate } from "./validate";
 
-export type LiveContext = { sweep?: { sweepId: string; index: number; count: number; values: { id: string; value: number }[] } };
+export type LiveContext = { sweep?: { sweepId: string; index: number; count: number; values: { id: string; value: number }[]; kind?: "sweep" | "sampling" } };
 type Cfg = { study: { studyId: string; tier: string; budget: unknown; parameters: unknown }; actor: Actor; oracles: { evidenceSha256: string } };
 
 /** The human header the host was given through its trusted environment (SEED_STUDY_HEADER), or null when none was. Throws when it does not match the host. */
@@ -74,7 +74,7 @@ export function stepDrafts(a: DraftArgs): StepDraft[] {
   const drafts: StepDraft[] = [];
   const via = a.decision && a.decision.allow ? a.decision.via + (a.decision.grantId ? ` (grant ${a.decision.grantId})` : "") : "";
   const sweep = a.context?.sweep
-    ? ` Sweep ${a.context.sweep.sweepId}, case ${a.context.sweep.index} of ${a.context.sweep.count} (${a.context.sweep.values.map((v) => `${v.id}=${v.value}`).join(", ")}).`
+    ? ` ${a.context.sweep.kind === "sampling" ? "Sampling" : "Sweep"} ${a.context.sweep.sweepId}, ${a.context.sweep.kind === "sampling" ? "point" : "case"} ${a.context.sweep.index} of ${a.context.sweep.count} (${a.context.sweep.values.map((v) => `${v.id}=${v.value}`).join(", ")}).`
     : "";
   if (a.decision && !a.decision.allow) {
     const s = gateStopStep(a.decision, actor, 1, time) as { reason: string; gateStop: { request: string; rule: string } };
