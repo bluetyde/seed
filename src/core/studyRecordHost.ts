@@ -173,8 +173,9 @@ const distText = (d: SamplingFacts["parameters"][number]["distribution"]) =>
  * sampling noise as two separate figures**, and the quantiles. Keyed by the sampling's request id, so the same request writes it once. The report builder
  * refuses a step of this kind that lacks either figure for an output (plan 09: noise and input uncertainty are never merged).
  */
-export function samplingStepDraft(a: { actor: Actor; time: string; facts: SamplingFacts }): StepDraft {
+export function samplingStepDraft(a: { actor: Actor; time: string; facts: SamplingFacts; prefix?: string }): StepDraft {
   const f = a.facts;
+  const prefix = a.prefix ?? "";
   const block = (o: SamplingFacts["outputs"][number]) => {
     const noise = o.noise.rms === null ? "not reported by the adapter" : `${num(o.noise.rms)} rms over ${o.noise.reportedRuns} runs`;
     const q = o.quantiles ? `; p05, p50, p95 ${num(o.quantiles.p05)}, ${num(o.quantiles.p50)}, ${num(o.quantiles.p95)}` : "";
@@ -189,11 +190,11 @@ export function samplingStepDraft(a: { actor: Actor; time: string; facts: Sampli
   let left = 0;
   for (const o of f.outputs) {
     const b = block(o);
-    if (first.length + body.length + b.length + tail.length + 70 > 2000) left++;
+    if (prefix.length + first.length + body.length + b.length + tail.length + 70 > 2000) left++;
     else body += b;
   }
   const more = left > 0 ? ` ${left} more outputs are in the sampling log.` : "";
-  const reason = first + body + more + tail;
+  const reason = prefix + first + body + more + tail;
   return { action: "compare", actor: a.actor, time: a.time, runs: f.runIds.slice(0, MAX_CITED_RUNS), reason: reason.slice(0, 2000), key: `sampling:${f.requestId}` };
 }
 

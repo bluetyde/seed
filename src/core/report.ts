@@ -271,7 +271,7 @@ function extent(values: number[]): [number, number] {
  * each one needs "; input spread " and "; sampling noise ". A report is refused rather than shown with a summary that merges the two or leaves one out.
  */
 export function samplingSummaryProblem(reason: string): string | null {
-  if (!reason.startsWith("Sampling summary ")) return null;
+  if (!/^(Backfilled from the audit log\. )?Sampling summary /.test(reason)) return null;
   const outputs = reason.split(" Output ").slice(1);
   if (outputs.length === 0) return "a sampling summary lists no output";
   for (const o of outputs) {
