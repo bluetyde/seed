@@ -199,6 +199,22 @@ describe("what is refused before anything runs", () => {
     expect(same.ok && same.result.verdict).toBe("reproduced");
   });
 
+  it("refuses a replay request id that was already used for a replay of another original: nothing is launched, the first replay is not handed back", async () => {
+    const f = await fx();
+    await run(f, "orig");
+    await run(f, "orig2");
+    const first = await replayFromHostFile(f.file, replayRequest(), policies(EXACT));
+    expect(first.ok && first.result.verdict).toBe("reproduced");
+    const before = runCount(f.project);
+    const r = await replayFromHostFile(f.file, replayRequest({ originalRequestId: "orig2" }), policies(EXACT));
+    expect(r.ok === false && r.errors[0]!.code).toBe("E_REQUEST_CONFLICT");
+    expect(r.ok === false && r.errors[0]!.message).toMatch(/already used for a replay of orig/);
+    await nothingRan(f, before);
+    // the same id for the same original is still the same replay
+    const again = await replayFromHostFile(f.file, replayRequest(), policies(EXACT));
+    expect(again.ok).toBe(true);
+  });
+
   it("refuses a stale original: an input changed since it ran", async () => {
     const f = await fx();
     await run(f);

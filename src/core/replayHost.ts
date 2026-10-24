@@ -44,6 +44,19 @@ const refusal = (message: string, code: string, field = ""): ReplayOutcome => ({
  * proven (audit log, saved record, saved files), is completed and current, was admitted under the configuration the host has now (same runtime,
  * adapter, study rules, oracle evidence and case), its case is still registered, and the adapter has a replay policy.
  */
+/** The original request the replay log shows this replay request id was admitted for (the first), or undefined. Unreadable lines are not evidence. */
+function priorOriginalOf(stateRoot: string, requestId: string): string | undefined {
+  let text: string;
+  try { text = readFileSync(safeChild(stateRoot, "replays.jsonl"), "utf8"); } catch { return undefined; }
+  for (const line of text.split("\n")) {
+    try {
+      const e = (JSON.parse(line) as { event?: { requestId?: unknown; originalRequestId?: unknown; phase?: unknown } }).event;
+      if (e?.phase === "admitted" && e.requestId === requestId && typeof e.originalRequestId === "string") return e.originalRequestId;
+    } catch { /* not a row */ }
+  }
+  return undefined;
+}
+
 export async function replayFromHostFile(file: string, request: unknown, opts: { adaptersDir?: string } = {}): Promise<ReplayOutcome> {
   const r = request as Partial<ReplayRequest> | null;
   if (
@@ -127,6 +140,9 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     const stale = record.inputs.some((i: any) => { try { regularFile(join(projectRoot, i.path)); return sha256Hex(readFileSync(join(projectRoot, i.path))) !== i.sha256; } catch { return true; } });
     if (stale) return deny("the original run is stale: an input has changed since it ran", "E_STALE_REVISION", "/originalRequestId");
     if (!Object.hasOwn(allCases(c), caseId)) return deny(`the case ${caseId} of the original run is no longer registered`, "E_NOT_FOUND", "/originalRequestId");
+    // a replay request id belongs to one original: reused for another, the run path would hand back the first replay's run, and the comparison would be of the wrong pair
+    const earlier = priorOriginalOf(state, requestId);
+    if (earlier !== undefined && earlier !== originalRequestId) return deny(`the request id ${requestId} was already used for a replay of ${earlier}; use a new request id for a replay of ${originalRequestId}`, "E_REQUEST_CONFLICT", "/requestId");
     const original = loadRunEvidence(projectRoot, runRoot, record);
     note({ phase: "admitted", caseId, originalRunId, adapter: c.adapter.id, policy: policy.policy });
 
