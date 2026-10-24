@@ -58,12 +58,18 @@ if (scenario === "crash") {
 
 if (scenario === "hang" || scenario === "slow-start") {
   // Heartbeat forever; never finish
-} else if (scenario === "success" || scenario === "slow" || scenario === "series" || scenario === "jitter") {
+} else if (scenario === "success" || scenario === "slow" || scenario === "series" || scenario === "jitter" || scenario === "response" || scenario === "response-noise") {
   setTimeout(() => {
     try {
       // "series" and "jitter" write a series the shared data reader knows (a time axis and values); "jitter" makes the last value differ a little from run to run
       // (up to 1e-6), like a nondeterministic engine. The replay tests need both.
-      if (scenario === "series" || scenario === "jitter") {
+      // "response" and "response-noise" write a seed.quantity-data/0.2 series whose last value is a linear function of the case's delayMs (5 + 0.1 * delayMs),
+      // so a sampling over delayMs has a known answer; "response-noise" also reports a deviation of 0.25 on that value (a Monte Carlo engine's error bar).
+      if (scenario === "response" || scenario === "response-noise") {
+        const doc = { schema: "seed.quantity-data/0.2", kind: "series", quantity: "out", unit: "1", axis: { name: "t", unit: "s" }, x: [0, 1, 2], values: [1, 2, 5 + 0.1 * delayMs] };
+        if (scenario === "response-noise") doc.std = [0, 0, 0.25];
+        atomicWrite(outPath, JSON.stringify(doc) + "\n");
+      } else if (scenario === "series" || scenario === "jitter") {
         const last = scenario === "jitter" ? 3 + Number(process.hrtime.bigint() % 1000003n) * 1e-12 : 3;
         atomicWrite(outPath, JSON.stringify({ quantity: "out", unit: "1", t: [0, 1, 2], values: [1, 2, last] }) + "\n");
       } else {
