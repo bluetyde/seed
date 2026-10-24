@@ -16,7 +16,7 @@ export const fixtureDirs: string[] = [];
 export const budget = { maxWallSeconds: 30, maxCores: 1, maxMemoryMB: 512, maxDiskMB: 512 };
 
 /** The fake-adapter host of tests/file-run-host.test.ts with one bounded parameter, delayMs, that a sweep can vary. */
-export async function fixture(opts: { scenario?: string; tier?: "A0" | "A1"; maxCases?: number; values?: number[]; sweeps?: HostConfiguration["sweeps"] } = {}) {
+export async function fixture(opts: { scenario?: string; tier?: "A0" | "A1"; maxCases?: number; values?: number[]; sweeps?: HostConfiguration["sweeps"]; samplings?: HostConfiguration["samplings"] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "seed sweep host "));
   fixtureDirs.push(root);
   const project = join(root, "project"), state = join(root, "state"), repo = join(root, "app-repo"), entries = join(repo, "entries");
@@ -52,6 +52,7 @@ export async function fixture(opts: { scenario?: string; tier?: "A0" | "A1"; max
     study: { studyId: "study", tier: opts.tier ?? "A1", budget: { ...budget, ...(opts.maxCases ? { maxCases: opts.maxCases } : {}) }, parameters: [{ id: "delayMs", min: 0, max: 1000 }] },
     cases: { approved: { artifact: { path: "models/case.json", revision: { hash: inputs[0]!.sha256, counter: 1 } }, inputs, params: [{ id: "delayMs", value: 10 }], settings: { scenario: opts.scenario ?? "success", delayMs: 10 } } },
     sweeps: opts.sweeps ?? { t: { base: "approved", axes: [{ id: "delayMs", values: opts.values ?? [10, 20, 30] }] } },
+    ...(opts.samplings ? { samplings: opts.samplings } : {}),
     runtime: { path: runtime, sha256: sha256Hex(readFileSync(runtime)) },
     oracles: { repository: repo, entriesDir: entries, inputsRoot: repo, evidenceFile: evidence, evidenceSha256: sha256Hex(readFileSync(evidence)) },
     acceptedPins: result.pins
