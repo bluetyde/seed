@@ -4,9 +4,10 @@ import type { DispatchRequest } from "../core/runDispatcher";
 import { runFromHostFile } from "../core/fileRunHost";
 import { replayFromHostFile, type ReplayOutcome, type ReplayRequest } from "../core/replayHost";
 import { installFromHost, type InstallRequestOutcome } from "../core/installHost";
+import { runSamplingFromHostFile, type SamplingOutcome } from "../core/samplingHost";
 import type { RunOutcome } from "../core/runManager";
 
-type Verb = "run" | "replay" | "install";
+type Verb = "run" | "replay" | "install" | "sample";
 
 /** A detached, per-call owner survives a client's termination of the MCP process. Used for every call that starts a calculation. */
 function supervised<T>(hostEnv: Record<string, string>, verb: Verb, request: unknown): Promise<T> {
@@ -53,6 +54,10 @@ export function supervisedRun(hostConfig: string, request: DispatchRequest): Pro
 export function supervisedReplay(hostConfig: string, request: ReplayRequest): Promise<ReplayOutcome> {
   return supervised<ReplayOutcome>({ SEED_HOST_CONFIG: hostConfig }, "replay", request);
 }
+/** A sampling study is many runs: like a run, it is held by a detached owner so that a client that disconnects does not stop an admitted point. */
+export function supervisedSampling(hostConfig: string, request: unknown): Promise<SamplingOutcome> {
+  return supervised<SamplingOutcome>({ SEED_HOST_CONFIG: hostConfig }, "sample", request);
+}
 /** An install is long and must finish even if the client closes the MCP process: it runs in the same kind of detached owner. */
 export function supervisedInstall(installHostConfig: string, request: unknown): Promise<InstallRequestOutcome> {
   return supervised<InstallRequestOutcome>({ SEED_INSTALL_HOST_CONFIG: installHostConfig }, "install", request);
@@ -64,7 +69,9 @@ if (require.main === module) {
     const outcome =
       message?.verb === "install"
         ? await installFromHost(process.env.SEED_INSTALL_HOST_CONFIG ?? "", message.request)
-        : message?.verb === "replay"
+        : message?.verb === "sample"
+          ? await runSamplingFromHostFile(file, message.request)
+          : message?.verb === "replay"
           ? await replayFromHostFile(file, message.request)
           : await runFromHostFile(file, message?.request);
     if (process.connected && process.send) {

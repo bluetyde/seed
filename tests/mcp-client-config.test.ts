@@ -71,7 +71,7 @@ it("started as the block says (real paths in place of the placeholders), the ser
   await client.connect(transport);
   try {
     const names = (await client.listTools()).tools.map((t) => t.name);
-    for (const expected of ["seed_run_case", "seed_cancel_calculation", "seed_query_model", "seed_add_study_note", "seed_export_study_report", "seed_replay_run"]) expect(names).toContain(expected);
+    for (const expected of ["seed_run_case", "seed_cancel_calculation", "seed_query_model", "seed_add_study_note", "seed_export_study_report", "seed_replay_run", "seed_run_sampling"]) expect(names).toContain(expected);
     // an agent connected this way has no way to approve, clear or accept anything
     expect(names.filter((n) => /approve|clear|accept|grant|recover/.test(n))).toEqual([]);
   } finally {

@@ -75,7 +75,7 @@ After the points have run, each completed run's results are read from its saved,
 
 ## Not done
 
-- **No MCP tool**, for the reason sweeps have none (a long call needs a decision on holding it open and cancelling it).
+- **MCP:** `seed_run_sampling` takes `{requestId, samplingId, budget}` (strict) and is held by a detached owner like a run and a replay ([mcp.md](mcp.md)); `seed_cancel_calculation` with a point's own request id (`<requestId>.<caseId>`) stops that point. There is no whole-sampling cancel yet. Sweeps still have no MCP tool.
 - **No separate sampling table in the report.** The summary shows as a step; a table of the points' values would need a structured form of the step, which the study schema does not have.
 - **No sensitivity indices in the host.** The core of Sobol and Morris indices is built and tested ([sensitivity.md](sensitivity.md)) but a sampling cannot ask for them yet. No sampling with correlated inputs. Correlations are descriptive.
 - **No surrogate model**, and no sampling of the settings an adapter takes outside the study's parameters.
