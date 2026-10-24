@@ -1,3 +1,4 @@
+// @covers R-STUDY-08
 import { describe, expect, it } from "vitest";
 import { Rng } from "../src/core/sampler";
 import { morrisEffects, morrisUnitDesign, openUnit, sobolIndices, sobolRows, sobolSplit, sobolUnitDesign, type SobolResult } from "../src/core/sensitivity";
