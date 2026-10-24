@@ -311,6 +311,27 @@ describe("the trust anchors", () => {
     expect(installedIds(h)).toEqual([]);
     expect(codes(grantInstallFromHost(h.humanFile, grantBody(h), opts))).toEqual(["E_SETUP_REQUIRED"]);
   });
+  it("a log whose hashes agree but that uses a grant nobody issued is refused", async () => {
+    const h = host();
+    const g = issue(h);
+    const bot = { kind: h.bot.kind, name: h.bot.name };
+    const w = appendGrantEvent(h.stateRoot, () => ({ event: { type: "used" as const, grantId: "g-nobody", requestId: "x", actor: bot as never, app: "fakeapp", components: [], cost: { downloadBytes: 0, expandedBytes: 0 } }, value: 1 }));
+    expect(w.ok).toBe(true);
+    const r = await ask(h, ["fake-cad"]);
+    expect(codes(r)).toEqual(["E_SETUP_REQUIRED"]);
+    expect(msg(r)).toContain("not issued before");
+    expect(g.grantId).toBeTruthy();
+    expect(installedIds(h)).toEqual([]);
+  });
+  it("a log whose hashes agree but that issues one grant twice (which would reset what was spent) is refused", async () => {
+    const h = host();
+    const g = issue(h);
+    expect(appendGrantEvent(h.stateRoot, () => ({ event: { type: "issued" as const, grant: g }, value: 1 })).ok).toBe(true);
+    const r = await ask(h, ["fake-cad"]);
+    expect(codes(r)).toEqual(["E_SETUP_REQUIRED"]);
+    expect(msg(r)).toContain("twice");
+    expect(installedIds(h)).toEqual([]);
+  });
   it("a grant log cut in the middle of a line is refused", async () => {
     const h = host();
     issue(h);
