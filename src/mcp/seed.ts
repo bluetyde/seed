@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { supervisedInstall, supervisedReplay, supervisedRun } from "./supervisor";
+import { supervisedInstall, supervisedReplay, supervisedRun, supervisedSampling } from "./supervisor";
 import { listComponentsFromHost } from "../core/installHost";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
@@ -179,6 +179,30 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
     },
     async request => {
       const reply = { schema: "seed.mcp-reply/0.1", ...(await supervisedReplay(hostConfig, request)) };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        structuredContent: reply,
+        isError: !reply.ok,
+      };
+    },
+  );
+  server.registerTool(
+    "seed_run_sampling",
+    {
+      title: "Run a registered sampling study",
+      description:
+        "Run a sampling study the host registered: its points are drawn from distributions a person declared, each run through the guarded path like a sweep case, then summarised. The reply gives per output the mean, the spread over the inputs, and the sampling noise the adapter reported as a separate figure that is never added to the spread, with quantiles, convergence and correlations. Only requestId, the registered samplingId and a per-case budget are accepted: no value, distribution, seed or count. The call waits for every point; it is held by a detached owner, so a client that disconnects does not stop an admitted point, and seed_cancel_calculation with a point's own request id (the requestId, a dot and the case id) stops that point.",
+      inputSchema: z
+        .object({
+          requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+          samplingId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,55}$/),
+          budget: requestSchema.shape.budget,
+        })
+        .strict(),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...(await supervisedSampling(hostConfig, request)) };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(reply) }],
         structuredContent: reply,
