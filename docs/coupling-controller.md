@@ -33,8 +33,8 @@ It does not:
 { exchanged: [{ id, tolerance, floor?, min?, max? }], maxPasses, relaxation, consecutive }
 ```
 
-- `tolerance`: above 0 and below 1 (relative). Zero is refused.
-- `floor`: the absolute scale used when a value is tiny. Default `1e-12`. Above 0.
+- `tolerance`: at least 1e-15 and below 1 (relative). Zero is refused, and so is a tolerance below double precision, which no loop can meet and whose scaled residual could overflow.
+- `floor`: the absolute scale used when a value is tiny. Default `1e-12`. At least `1e-200` (a smaller floor makes the scale underflow).
 - `min`, `max`: the physical range of the calc. A calc outside it is `diverged`. `min` must not be above `max`.
 - `maxPasses`: a whole number from 1 to 25. The ceiling of 25 is hard: more is refused, whatever is typed.
 - `relaxation`: above 0, at most 1. Default 1 when omitted.

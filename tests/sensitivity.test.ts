@@ -122,6 +122,12 @@ describe("Sobol indices against analytic answers", () => {
       expect(p.totalInterval).toEqual([0, 0]);
     }
   });
+  it("finite outputs whose variance overflows are refused with a reason, never NaN indices", () => {
+    const n = 8;
+    const fA = Array.from({ length: n }, (_, i) => (i % 2 ? 1e155 : 0));
+    const zero = new Array<number>(n).fill(0);
+    expect(() => sobolIndices(fA, fA.slice(), [zero])).toThrow(/too large/);
+  });
   it("a constant output has no variance: refused, not NaN", () => {
     const n = 16;
     const c = new Array<number>(n).fill(0.1);
@@ -324,11 +330,22 @@ describe("Morris design structure", () => {
     expect(openUnit(1e-12)).toBe(1e-12);
     expect(openUnit(2 / 3)).toBe(2 / 3);
   });
+  it("openUnit refuses what is not a unit value instead of moving it to the edge", () => {
+    for (const bad of [-0.2, 1.2, NaN, Infinity]) expect(() => openUnit(bad)).toThrow(/0 to 1/);
+  });
   it("refuses bad input", () => {
     expect(() => morrisUnitDesign({ r: 1, d: 3, seed: 1 })).toThrow(/r.*2 or more/);
     expect(() => morrisUnitDesign({ r: 5, d: 0, seed: 1 })).toThrow(/d.*1 or more/);
     expect(() => morrisUnitDesign({ r: 5, d: 3, levels: 5, seed: 1 })).toThrow(/even/);
     expect(() => morrisUnitDesign({ r: 5, d: 3, seed: -1 })).toThrow();
+  });
+});
+
+describe("Morris effects that overflow", () => {
+  it("outputs 0 and 1.5e308 give an effect that is not a finite number: an error naming the trajectory", () => {
+    const design = morrisUnitDesign({ r: 2, d: 1, seed: 1 });
+    const outputs = design.points.map((_, i) => (i % 2 ? 1.5e308 : 0));
+    expect(() => morrisEffects(outputs, design)).toThrow(/trajectory \d is not a finite number/);
   });
 });
 
