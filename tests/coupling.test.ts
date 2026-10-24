@@ -1,3 +1,4 @@
+// @covers R-STUDY-09
 import { describe, expect, it } from "vitest";
 import { HARD_MAX_PASSES, runCoupling, validateLoop, type CouplingOutcome, type LoopDefinition, type PassFunction } from "../src/core/coupling";
 
