@@ -47,7 +47,11 @@ export function loadRunEvidence(projectRoot: string, runRoot: string, record: an
     if (!record.outputs.some((o: any) => o.path === q.data.path && o.sha256 === q.data.sha256)) throw Error("a quantity is not bound to the run's outputs");
     const read = readQuantityData(JSON.parse(checked(q.data.path, q.data.sha256).toString()), { name: q.name, unit: q.unit, ...(q.dimension ? { dimension: q.dimension } : {}), ...(q.coordinates ? { coordinates: q.coordinates } : {}) });
     if (!read.ok) throw Error(`the data of ${q.name} cannot be read: ${read.errors.map((e) => e.message).join("; ")}`);
-    run.quantities.push({ name: q.name, unit: q.unit, normalization: q.normalization, data: read.data });
+    // an uncertainty the index declares for a scalar whose data file gives none is the number's own noise; it is carried, never invented, never taken from a different kind
+    let data = read.data;
+    const u = q.uncertainty;
+    if (data.kind === "scalar" && data.std === undefined && u && u.kind === "statistical" && typeof u.value === "number" && (u.unit === undefined || u.unit === q.unit)) data = { ...data, std: u.value };
+    run.quantities.push({ name: q.name, unit: q.unit, normalization: q.normalization, data });
   }
   return run;
 }
