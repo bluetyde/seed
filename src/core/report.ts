@@ -266,6 +266,22 @@ function extent(values: number[]): [number, number] {
   return [lo, hi];
 }
 
+/**
+ * Null when a step is not a sampling summary or keeps the two figures apart; otherwise what is wrong. A summary lists outputs (" Output <key> (n ..): mean ...");
+ * each one needs "; input spread " and "; sampling noise ". A report is refused rather than shown with a summary that merges the two or leaves one out.
+ */
+export function samplingSummaryProblem(reason: string): string | null {
+  if (!reason.startsWith("Sampling summary ")) return null;
+  const outputs = reason.split(" Output ").slice(1);
+  if (outputs.length === 0) return "a sampling summary lists no output";
+  for (const o of outputs) {
+    const name = o.slice(0, o.indexOf(" (")) || "an output";
+    if (!o.includes("; input spread ")) return `the sampling summary gives no input spread for ${name}: the spread over the inputs and the sampling noise are always given as two figures`;
+    if (!o.includes("; sampling noise ")) return `the sampling summary gives no sampling noise for ${name}: the spread over the inputs and the sampling noise are always given as two figures`;
+  }
+  return null;
+}
+
 function buildReportChecked(
   input: ReportInput
 ): { ok: true; value: ReportOutput } | { ok: false; errors: TypedError[] } {
@@ -303,6 +319,14 @@ function buildReportChecked(
         }
       ]
     };
+  }
+
+  // A sampling summary (docs/sampling.md) must give, for every output it lists, the input spread and the sampling noise as two figures (plan 09).
+  for (const step of steps) {
+    const problem = samplingSummaryProblem(typeof step.reason === "string" ? step.reason : "");
+    if (problem !== null) {
+      return { ok: false, errors: [{ code: "E_SCHEMA_INVALID", field: `/steps/${String(step.seq)}/reason`, message: problem, source: "seed" }] };
+    }
   }
 
   // The anchor: the record must really end where the caller verified it to, and still carry its hash chain.

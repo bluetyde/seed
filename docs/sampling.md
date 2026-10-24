@@ -65,6 +65,10 @@ After the points have run, each completed run's results are read from its saved,
 
 `samplings.jsonl` in the host's state folder: `admitted` (cases, budget, design, parameters, outputs), `refused` (why), `finished` (every case's state), `summary` (the numbers per output). Not chained. Each sample point's step in the live study record reads "Sampling `<id>`, point `i` of `n` (`parameter=value`)".
 
+**The summary is also a step of the live study record** (when the host has a human study header, as for a replay): one `compare` step after the points' own steps, keyed `sampling:<requestId>` (so a repeated request writes it once), citing the runs that were read (the first 100), and giving per output `Output <key> (n ..): mean ..; input spread ..; sampling noise ..; p05, p50, p95 ..`, followed by the fixed sentence that the spread contains each run's noise and that the two are never added. The reply says `studyRecord: {appended}` or `{failed}`; a failure is written to the host diagnostics and never changes the sampling's answer. A step that would pass 2000 characters leaves out whole outputs and says how many; it never holds half of one.
+
+**The report builder refuses a sampling summary that lacks either figure** for any output it lists (`samplingSummaryProblem` in `report.ts`; plan 09: noise and input uncertainty are reported separately, or the report is not built). The report shows the summary in its steps table; there is no separate sampling table.
+
 ## Running one
 
 `node dist/cli/seed.js sample` with `{"requestId": "...", "samplingId": "...", "budget": {...}}` on stdin. Exit code 0 when every point ran to its end, 1 when the run stopped early, 2 when it was refused.
@@ -72,7 +76,7 @@ After the points have run, each completed run's results are read from its saved,
 ## Not done
 
 - **No MCP tool**, for the reason sweeps have none (a long call needs a decision on holding it open and cancelling it).
-- **No report table.** The summary is in the reply and the sampling log; the study report does not yet show it, and the report builder does not yet refuse a sampling result that lacks the noise line (the summary type always carries it).
+- **No separate sampling table in the report.** The summary shows as a step; a table of the points' values would need a structured form of the step, which the study schema does not have.
 - **No sensitivity indices** (Sobol, Morris) and no sampling with correlated inputs. Correlations are descriptive.
 - **No surrogate model**, and no sampling of the settings an adapter takes outside the study's parameters.
 - **The coupling driver** (the other E5 item) is not started; its prerequisites are in plan 09.

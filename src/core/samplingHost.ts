@@ -1,7 +1,9 @@
 import { realpathSync } from "node:fs";
+import { sha256Hex } from "./canonical";
 import { validateHostConfiguration, type HostConfiguration } from "./fileRunHost";
 import { appendSamplingRecord, inside, readHostJson, safeChild } from "./hostFiles";
 import { loadRunEvidence } from "./runEvidence";
+import { recordSamplingInStudy } from "./studyRecordHost";
 import { openProject } from "./projectStore";
 import type { Budget } from "./policy";
 import { expandSampling, outputKey, reduceQuantity, summarizeSampling, SAMPLING_CAVEATS, type OutputSummary, type SampleRun, type SamplingDefinition } from "./sampling";
@@ -31,6 +33,8 @@ export type SamplingOutcome =
       complete: boolean;
       stoppedAt?: { caseId: string; reason: string };
       summary: SamplingSummary;
+      /** The summary's step in the live study record: how many rows were appended (0 when the host has no human header, or the step was already there), or why it could not be. */
+      studyRecord: { appended: number } | { failed: string };
       recordingError?: string;
     }
   | { ok: false; errors: TypedError[] };
@@ -70,7 +74,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
     const message = "the runs finished but their summary could not be made: " + (e instanceof Error ? e.message : "read failed");
     recordingError = recordingError ? recordingError + "; " + message : message;
     summary = { planned: rest.results.length, completed: rest.results.filter((r) => r.state === "completed" || r.state === "terminated-by-trip").length, outputs: [], unread: [], caveats: SAMPLING_CAVEATS };
-    return { ok: true, samplingId: id, requestId: rest.requestId, results: rest.results, complete: rest.complete, ...(rest.stoppedAt ? { stoppedAt: rest.stoppedAt } : {}), summary, recordingError };
+    return { ok: true, samplingId: id, requestId: rest.requestId, results: rest.results, complete: rest.complete, ...(rest.stoppedAt ? { stoppedAt: rest.stoppedAt } : {}), summary, studyRecord: { failed: "no summary was made, so no step was written" }, recordingError };
   }
   let logged: string | undefined;
   try {
@@ -79,11 +83,32 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
     logged = "the sampling ran but its summary row could not be written to the sampling log: " + (e instanceof Error ? e.message : "write failed");
   }
   if (logged) recordingError = recordingError ? recordingError + "; " + logged : logged;
+  // the summary becomes a step of the live study record (when the host has a human header); a failure never changes the sampling's answer
+  let studyRecord: { appended: number } | { failed: string };
+  try {
+    const projectRoot = realpathSync(c.projectRoot);
+    const project = openProject(projectRoot);
+    if (!project.ok) throw Error(project.errors[0]?.message ?? "the project cannot be opened");
+    const folders = project.value.manifest.folders as { studies: string };
+    const engine = safeChild(safeChild(realpathSync(c.stateRoot), "engines", true), sha256Hex(realpathSync(c.runtime.path)), true);
+    const studied = recordSamplingInStudy({
+      c, projectRoot, studiesFolder: folders.studies, projectId: project.value.manifest.projectId as string, engineRoot: engine,
+      facts: {
+        samplingId: id, requestId: rest.requestId, design: def.design, parameters: def.parameters,
+        planned: summary.planned, completed: summary.completed,
+        runIds: rest.results.filter((r) => r.state === "completed" && typeof r.runId === "string").map((r) => r.runId as string),
+        outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: { rms: o.noise.rms, reportedRuns: o.noise.reportedRuns }, quantiles: o.quantiles ? { p05: o.quantiles.p05, p50: o.quantiles.p50, p95: o.quantiles.p95 } : null }))
+      }
+    });
+    studyRecord = studied.ok ? { appended: studied.appended ?? 0 } : { failed: studied.reason ?? "the study record could not be written" };
+  } catch (e) {
+    studyRecord = { failed: e instanceof Error ? e.message : "the study record could not be written" };
+  }
   return {
     ok: true, samplingId: id, requestId: rest.requestId,
     design: def.design, parameters: def.parameters,
     results: rest.results, complete: rest.complete, ...(rest.stoppedAt ? { stoppedAt: rest.stoppedAt } : {}),
-    summary, ...(recordingError ? { recordingError } : {})
+    summary, studyRecord, ...(recordingError ? { recordingError } : {})
   };
 }
 

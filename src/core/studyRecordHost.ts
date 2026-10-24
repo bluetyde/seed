@@ -151,6 +151,76 @@ export function recordReplayInStudy(a: { c: Cfg; projectRoot: string; studiesFol
   }
 }
 
+/** What a sampling's step says; every field is in the sampling reply and the sampling log too. */
+export type SamplingFacts = {
+  samplingId: string;
+  requestId: string;
+  design: { method: string; n: number; seed: number };
+  parameters: { id: string; distribution: { kind: string; [k: string]: unknown } }[];
+  planned: number;
+  completed: number;
+  /** The runs whose outputs were read (the first 100 are cited by the step). */
+  runIds: string[];
+  outputs: { key: string; n: number; mean: number | null; inputSpread: number | null; noise: { rms: number | null; reportedRuns: number }; quantiles: { p05: number; p50: number; p95: number } | null }[];
+};
+const MAX_CITED_RUNS = 100;
+const num = (x: number | null) => (x === null ? "none" : Number(x.toPrecision(6)).toString());
+const distText = (d: SamplingFacts["parameters"][number]["distribution"]) =>
+  d.kind === "uniform" ? `uniform ${d.min} to ${d.max}` : d.kind === "triangular" ? `triangular ${d.min}, mode ${d.mode}, ${d.max}` : d.kind === "normal" ? `normal mean ${d.mean} sd ${d.sd} cut to ${d.min} to ${d.max}` : `lognormal mu ${d.mu} sigma ${d.sigma} cut to ${d.min} to ${d.max}`;
+
+/**
+ * The step a sampling leaves in the study record: action `compare`, citing the runs that were read, giving per output the mean, **the input spread and the
+ * sampling noise as two separate figures**, and the quantiles. Keyed by the sampling's request id, so the same request writes it once. The report builder
+ * refuses a step of this kind that lacks either figure for an output (plan 09: noise and input uncertainty are never merged).
+ */
+export function samplingStepDraft(a: { actor: Actor; time: string; facts: SamplingFacts }): StepDraft {
+  const f = a.facts;
+  const block = (o: SamplingFacts["outputs"][number]) => {
+    const noise = o.noise.rms === null ? "not reported by the adapter" : `${num(o.noise.rms)} rms over ${o.noise.reportedRuns} runs`;
+    const q = o.quantiles ? `; p05, p50, p95 ${num(o.quantiles.p05)}, ${num(o.quantiles.p50)}, ${num(o.quantiles.p95)}` : "";
+    return ` Output ${o.key} (n ${o.n}): mean ${num(o.mean)}; input spread ${num(o.inputSpread)}; sampling noise ${noise}${q}.`;
+  };
+  const tail = " Input spread is the spread of the outputs over the sampled inputs and includes each run's noise; sampling noise is what the adapter reported and is never added to or taken from the spread. This describes the declared inputs only and is not a scientific conclusion.";
+  const head = (params: string) => `Sampling summary ${f.samplingId} (request ${f.requestId}): ${f.completed} of ${f.planned} points ran to the end; design ${f.design.method}, n ${f.design.n}, seed ${f.design.seed}; ${params}.`;
+  let first = head(f.parameters.map((p) => `${p.id} ${distText(p.distribution)}`).join("; "));
+  if (first.length > 700) first = head(f.parameters.map((p) => p.id).join(", "));
+  // outputs are added whole while they fit; the ones left out are said, so the step never holds half an output
+  let body = "";
+  let left = 0;
+  for (const o of f.outputs) {
+    const b = block(o);
+    if (first.length + body.length + b.length + tail.length + 70 > 2000) left++;
+    else body += b;
+  }
+  const more = left > 0 ? ` ${left} more outputs are in the sampling log.` : "";
+  const reason = first + body + more + tail;
+  return { action: "compare", actor: a.actor, time: a.time, runs: f.runIds.slice(0, MAX_CITED_RUNS), reason: reason.slice(0, 2000), key: `sampling:${f.requestId}` };
+}
+
+/** Appends a sampling's step. Never throws: a failure is written to the host diagnostics and returned, and the sampling's answer is not changed by it. */
+export function recordSamplingInStudy(a: { c: Cfg; projectRoot: string; studiesFolder: string; projectId: string; engineRoot: string; facts: SamplingFacts; now?: () => Date }): { ok: boolean; appended?: number; reason?: string } {
+  try {
+    const header = loadLiveHeader(a.c, a.projectRoot, a.projectId);
+    if (header === null) return { ok: true, appended: 0 };
+    const time = (a.now ?? (() => new Date()))().toISOString();
+    const file = studyRecordFile(a.projectRoot, a.studiesFolder, a.c.study.studyId, true);
+    const r = appendStudySteps(file, header, [samplingStepDraft({ actor: a.c.actor, time, facts: a.facts })], a.projectRoot);
+    if (!r.ok) throw Error(r.errors.map((e) => e.message).join("; "));
+    return { ok: true, appended: r.appended };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "study record failed";
+    try {
+      appendFileSync(
+        safeChild(a.engineRoot, "diagnostics.jsonl"),
+        JSON.stringify({ time: new Date().toISOString(), project: a.projectId, stage: "study-record", kind: "StudyRecord", message: ("sampling step: " + reason).slice(0, 1000) }) + "\n"
+      );
+    } catch {
+      // diagnostics are best effort
+    }
+    return { ok: false, reason };
+  }
+}
+
 /** Appends the steps one request produced. Never throws: a failure is written to the host diagnostics and returned. */
 export function recordRequestInStudy(a: RecordArgs): { ok: boolean; appended?: number; reason?: string } {
   try {
