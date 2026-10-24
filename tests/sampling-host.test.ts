@@ -95,6 +95,48 @@ describe("a sampling with a known linear response", () => {
   }, 120000);
 });
 
+describe("points that give no number are listed, never skipped in silence", () => {
+  it("a quantity the runs do not have: every point is listed with the reason, and the output has no numbers", async () => {
+    const f = await host({ sampling: def({ outputs: [{ quantity: "nonexistent", reduce: "last" }, { quantity: "out", reduce: "last" }] }) });
+    const r = await run(f);
+    if (!r.ok) throw new Error("setup");
+    expect(r.complete).toBe(true);
+    const missing = r.summary.unread.filter((u) => u.output === "nonexistent:last");
+    expect(missing).toHaveLength(8);
+    expect(missing[0]).toEqual({ caseId: "uq-001", output: "nonexistent:last", reason: "the run has no quantity nonexistent" });
+    expect(r.summary.outputs[0]).toMatchObject({ key: "nonexistent:last", n: 0, planned: 8, mean: null, inputSpread: null });
+    expect(r.summary.outputs[0]!.note).toMatch(/8 of 8 planned points gave no number/);
+    expect(r.summary.outputs[1]).toMatchObject({ key: "out:last", n: 8 });
+    expect(r.summary.unread.filter((u) => u.output === "out:last")).toEqual([]);
+  }, 120000);
+
+  it("runs that ended by a trip are results of the experiment (the sampling goes on) but have no results to read: each point is listed as not completed", async () => {
+    const f = await host({ scenario: "trip" });
+    const r = await run(f);
+    if (!r.ok) throw new Error("setup");
+    expect(r.results.map((x) => x.state)).toEqual(Array(8).fill("terminated-by-trip"));
+    expect(r.complete).toBe(true);
+    expect(r.summary.completed).toBe(0);
+    expect(r.summary.unread).toHaveLength(8);
+    expect(r.summary.unread.every((u) => /^the run ended terminated-by-trip, not completed$/.test(u.reason))).toBe(true);
+    expect(r.summary.outputs[0]).toMatchObject({ n: 0, planned: 8, mean: null });
+  }, 120000);
+
+  it("a run that fails stops the sampling: the points after it are listed as not started, the earlier ones are summarised", async () => {
+    const f = await host({ scenario: "crash" });
+    const r = await run(f);
+    if (!r.ok) throw new Error("setup");
+    expect(r.complete).toBe(false);
+    expect(r.stoppedAt).toBeDefined();
+    const started = r.results.filter((x) => x.state !== "not-started");
+    expect(started.length).toBeGreaterThanOrEqual(1);
+    expect(r.results.at(-1)!.state).toBe("not-started");
+    expect(r.summary.completed).toBe(0);
+    expect(r.summary.unread.some((u) => /did not start/.test(u.reason))).toBe(true);
+    expect(r.summary.outputs[0]!.n).toBe(0);
+  }, 180000);
+});
+
 describe("records and repeatability", () => {
   it("the sampling log says what was admitted (design, parameters, outputs), what finished and the summary; the sweep log is not touched", async () => {
     const f = await host();

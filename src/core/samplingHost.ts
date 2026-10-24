@@ -100,8 +100,12 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
     const values = def.parameters.map((p) => (row.values.find((v) => v.id === p.id) as { value: number }).value);
     const outputs: SampleRun["outputs"] = Object.fromEntries(def.outputs.map((o) => [outputKey(o), null]));
     runs.push({ caseId: row.caseId, values, outputs });
-    // a run that ended by a trip is a result of the experiment but is not read as an output of the calculation: only a completed run has a results index
-    if (row.state !== "completed" || typeof row.runId !== "string") continue;
+    // only a completed run has a results index: a point that did not start, or ended another way (a trip, a failure), is listed, never read and never counted
+    if (row.state !== "completed" || typeof row.runId !== "string") {
+      const why = row.state === "not-started" ? "the point did not start (the run stopped before it)" : `the run ended ${row.state}, not completed`;
+      for (const o of def.outputs) unread.push({ caseId: row.caseId, output: outputKey(o), reason: why });
+      continue;
+    }
     completed++;
     try {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(row.runId)) throw Error("the run id is not a safe name");

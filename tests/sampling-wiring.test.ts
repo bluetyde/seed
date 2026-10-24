@@ -27,6 +27,12 @@ describe("the sample verb", () => {
     expect(reply.summary.outputs[0]).toMatchObject({ n: 4, noise: { kind: "statistical" } });
     expect(reply.summary.caveats).toContain("never added");
   }, 120000);
+  it("exits 1 when the run stopped early (a point failed), like a sweep", async () => {
+    const f = await fixture({ scenario: "crash", maxCases: 10, samplings });
+    const r = await runCli(["sample"], input(request), f.file);
+    expect(r.code).toBe(1);
+    expect(r.reply).toMatchObject({ ok: true, complete: false });
+  }, 180000);
   it("refuses a sampling that is not registered, and a request that carries a value or a seed: exit 2", async () => {
     const f = await fixture({ scenario: "response", maxCases: 10, samplings });
     expect((await runCli(["sample"], input({ ...request, samplingId: "nope" }), f.file)).code).toBe(2);
