@@ -430,7 +430,9 @@ app.whenReady().then(() => {
   }
   // Servers a previous host started and left behind (it was killed): stop the ones that are provably the same process, leave everything else alone.
   processes.owners = new OwnerStore(path.join(app.getPath("userData"), "process-owners"));
-  void recoverOwners(processes.owners).then((r) => {
+  const recovery = recoverOwners(processes.owners);
+  processes.gate = recovery.then(() => undefined, () => undefined);
+  void recovery.then((r) => {
     const acted = r.results.filter((x) => x.outcome !== "host-alive" && x.outcome !== "standalone");
     if (acted.length || r.unreadable.length) console.error("[seed] process records from an earlier run:", JSON.stringify({ results: acted, unreadable: r.unreadable }));
   }).catch((e) => console.error("[seed] could not check the process records:", e));
