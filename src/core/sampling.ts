@@ -245,7 +245,8 @@ export function summarizeSampling(parameters: readonly string[], outputs: readon
     if (n >= 2 && (sd === null || !Number.isFinite(sd))) throw new Error(`the numbers of ${key} are too large to take a spread of without overflow`);
     if (rms !== null && !Number.isFinite(rms)) throw new Error(`the reported noise of ${key} is too large to combine without overflow`);
     let note: string | null = null;
-    if (n < runs.length) note = `${runs.length - n} of ${runs.length} planned points gave no number for this output and are left out`;
+    if (o.reduce === "mean") note = "the noise of a mean of a series is not given: the covariance of its points is unknown, so no deviation is combined";
+    if (n < runs.length) note = (note ? note + "; " : "") + `${runs.length - n} of ${runs.length} planned points gave no number for this output and are left out`;
     if (n < 2) note = (note ? note + "; " : "") + "fewer than two numbers: no spread can be given";
     else if (rms !== null && sd !== null && sd > 0 && rms > 0.5 * sd) note = (note ? note + "; " : "") + `the reported sampling noise (${rms.toPrecision(3)}) is more than half of the observed spread (${sd.toPrecision(3)}): the spread says little about the inputs until the noise is lower (more histories, or a rerun with another seed)`;
     return {

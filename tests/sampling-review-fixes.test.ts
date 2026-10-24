@@ -1,8 +1,12 @@
 // @covers R-STUDY-06
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { distributionProblem, samplePoints } from "../src/core/sampler";
 import { reduceQuantity, summarizeSampling, type SampleRun } from "../src/core/sampling";
-import { basisProblem, factsOf, type SamplingSummary } from "../src/core/samplingHost";
+import { rmSync } from "node:fs";
+import { sha256Hex, canonicalJson } from "../src/core/canonical";
+import { writeHostJson } from "../src/core/hostFiles";
+import { auditProblem, basisProblem, factsOf, runSamplingFromHostFile, type SamplingSummary } from "../src/core/samplingHost";
+import { budget, fixture, fixtureDirs } from "./helpers/replayFixture";
 import { samplingStepDraft, type SamplingFacts } from "../src/core/studyRecordHost";
 import type { QuantityData } from "../src/core/quantityData";
 import { FIXTURE_HUMAN } from "./helpers/studyFixtures";
@@ -83,5 +87,79 @@ describe("the study step", () => {
     const summary: SamplingSummary = { planned: 4, completed: 4, outputs: [], unread: [], used: ["uq-1", "uq-3"], caveats: "" };
     const f = factsOf("uq", "s1", { base: "approved", design: { method: "lhs", n: 4, seed: 1 }, parameters: [], outputs: [] }, summary, results as never);
     expect(f.runIds).toEqual(["r1", "r3"]);
+  });
+});
+
+describe("the run record a summary reads", () => {
+  const record = { runId: "r-1", state: "completed", x: 1 };
+  const row = (over: Record<string, unknown> = {}) => ({ event: { phase: "outcome", event: { runId: "r-1", ok: true, state: "completed", recordSha256: sha256Hex(canonicalJson(record)), ...over } } });
+  it("is the one the audit log shows the run ended with", () => {
+    expect(auditProblem([row()], record, "r-1")).toBeNull();
+  });
+  it("is refused when it was changed since, when the state differs, when the run did not end well, or when the log has no outcome", () => {
+    expect(auditProblem([row()], { ...record, x: 2 }, "r-1")).toMatch(/differs from its audited outcome/);
+    expect(auditProblem([row({ state: "failed" })], record, "r-1")).toMatch(/state differs/);
+    expect(auditProblem([row({ ok: false })], record, "r-1")).toMatch(/did not end well/);
+    expect(auditProblem([], record, "r-1")).toMatch(/no outcome/);
+    expect(auditProblem([row()], record, "r-2")).toMatch(/no outcome/);
+  });
+});
+
+describe("a sampling whose configuration changes while the points run", () => {
+  afterEach(() => { for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+  it("is not summarized by the new definition: the runs are reported, the summary is said to be unavailable", async () => {
+    const f = await fixture({
+      scenario: "response", maxCases: 20,
+      samplings: { uq: { base: "approved", design: { method: "lhs", n: 6, seed: 5 }, parameters: [{ id: "delayMs", distribution: { kind: "uniform", min: 100, max: 300 } }], outputs: [{ quantity: "out", reduce: "last" }] } }
+    });
+    const pending = runSamplingFromHostFile(f.file, { requestId: "s1", samplingId: "uq", budget });
+    setTimeout(() => writeHostJson(f.file, { ...f.config, cases: { ...f.config.cases, extra: f.config.cases.approved } }), 400);
+    const r = await pending;
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summaryAvailable).toBe(false);
+    expect(r.recordingError).toMatch(/changed while the points ran/);
+    expect(r.summary.outputs).toEqual([]);
+  }, 120000);
+});
+
+describe("a run record changed after the run, before the summary", () => {
+  afterEach(() => { for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+  it("that point is left out with the reason, and the others are summarized", async () => {
+    const f = await fixture({
+      scenario: "response", maxCases: 20,
+      samplings: { uq: { base: "approved", design: { method: "lhs", n: 6, seed: 5 }, parameters: [{ id: "delayMs", distribution: { kind: "uniform", min: 100, max: 300 } }], outputs: [{ quantity: "out", reduce: "last" }] } }
+    });
+    const pending = runSamplingFromHostFile(f.file, { requestId: "s1", samplingId: "uq", budget });
+    const { readdirSync, readFileSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    // wait until one run has ended (its record says completed), then change that record
+    let file = "", rec: any;
+    for (let i = 0; i < 100 && !file; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      for (const n of readdirSync(join(f.project, "runs")).filter((x) => x.startsWith("r-"))) {
+        try {
+          const cand = JSON.parse(readFileSync(join(f.project, "runs", n, "run-record.json"), "utf8"));
+          if (cand.state === "completed") { file = join(f.project, "runs", n, "run-record.json"); rec = cand; break; }
+        } catch { /* not written yet */ }
+      }
+    }
+    expect(file).not.toBe("");
+    rec.settings = { ...rec.settings, tampered: true };
+    writeFileSync(file, JSON.stringify(rec));
+    const r = await pending;
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary.unread.map((u) => u.reason)).toEqual(expect.arrayContaining([expect.stringMatching(/differs from its audited outcome/)]));
+    expect(r.summary.outputs[0]!.n).toBeGreaterThanOrEqual(1);
+    expect(r.summary.outputs[0]!.n).toBeLessThan(6);
+  }, 120000);
+});
+
+describe("the note on a mean of a series", () => {
+  it("says that its noise is not given, instead of 'not reported'", () => {
+    const runs = [1, 2, 3].map((v, i) => ({ caseId: `c${i}`, values: [i], outputs: { "out:mean": { value: v, std: null } } }));
+    const [o] = summarizeSampling(["x"], [{ quantity: "out", reduce: "mean" }], runs);
+    expect(o!.note).toMatch(/noise of a mean of a series is not given/);
   });
 });

@@ -1,7 +1,7 @@
-import { realpathSync } from "node:fs";
-import { sha256Hex } from "./canonical";
+import { readFileSync, realpathSync } from "node:fs";
+import { canonicalJson, sha256Hex } from "./canonical";
 import { validateHostConfiguration, type HostConfiguration } from "./fileRunHost";
-import { appendSamplingRecord, inside, readHostJson, safeChild } from "./hostFiles";
+import { appendSamplingRecord, inside, readAdmissions, readHostJson, safeChild } from "./hostFiles";
 import { loadRunEvidence } from "./runEvidence";
 import { recordSamplingInStudy, type SamplingFacts } from "./studyRecordHost";
 import { openProject } from "./projectStore";
@@ -62,6 +62,9 @@ const SAMPLING_MODE: ListMode = {
  * is listed. The sampling noise an adapter reports and the spread over the inputs are two separate lines.
  */
 export async function runSamplingFromHostFile(file: string, request: unknown): Promise<SamplingOutcome> {
+  // the configuration the points were admitted under: if the file is another one when they have run, the summary would describe the runs by a definition they were not made with
+  let hashBefore: string | undefined;
+  try { hashBefore = sha256Hex(readFileSync(file)); } catch { /* the run path refuses an unreadable file in its own words */ }
   const out = await runCaseList(file, request, SAMPLING_MODE);
   if (!out.ok) return out;
   const { id, ...rest } = out;
@@ -70,6 +73,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
   let summary: SamplingSummary;
   let recordingError = rest.recordingError;
   try {
+    if (hashBefore !== undefined && sha256Hex(readFileSync(file)) !== hashBefore) throw Error("the host configuration changed while the points ran, so their summary would describe them by another definition");
     c = validateHostConfiguration(readHostJson(file));
     def = (c.samplings as Record<string, SamplingDefinition>)[id] as SamplingDefinition;
     summary = readSummary(c, def, rest.results);
@@ -122,6 +126,20 @@ export function factsOf(id: string, requestId: string, def: SamplingDefinition, 
   };
 }
 
+/**
+ * The run record a summary reads must be the one the audit log shows the run ended with: its hash, its state and the request it served, from the guarded path's own
+ * `outcome` row. Nothing is read from a run whose saved record was changed after the fact. Null when it matches.
+ */
+export function auditProblem(rows: readonly any[], record: any, runId: string): string | null {
+  const outcome = [...rows].reverse().find((row) => row?.event?.phase === "outcome" && row.event.event?.runId === runId);
+  if (!outcome) return "the audit log has no outcome for this run";
+  const e = outcome.event.event;
+  if (e.ok !== true) return "the audit log shows this run did not end well";
+  if (sha256Hex(canonicalJson(record)) !== e.recordSha256) return "the saved run record differs from its audited outcome";
+  if (record.state !== e.state) return "the saved run record's state differs from its audited outcome";
+  return null;
+}
+
 /** Numbers of one output are only combined when every run gave them in the same unit and normalization: the first run read sets the basis, a run that differs is left out with the reason. */
 export function basisProblem(basis: Map<string, string>, key: string, q: { unit: string; normalization: string }): string | null {
   const here = `${q.unit} (${q.normalization})`;
@@ -134,6 +152,8 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
   const projectRoot = realpathSync(c.projectRoot);
   const project = openProject(projectRoot);
   if (!project.ok) throw Error(project.errors[0]?.message ?? "the project cannot be opened");
+  const engine = safeChild(safeChild(realpathSync(c.stateRoot), "engines", true), sha256Hex(realpathSync(c.runtime.path)), true);
+  const audit = readAdmissions(engine);
   const runsRoot = safeChild(projectRoot, (project.value.manifest.folders as { runs: string }).runs, true);
   if (!inside(projectRoot, realpathSync(runsRoot))) throw Error("runs folder leaves project");
   const unread: SamplingSummary["unread"] = [];
@@ -156,6 +176,8 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
       const runRoot = safeChild(runsRoot, row.runId, true);
       const record = readHostJson(safeChild(runRoot, "run-record.json"));
       if (!validate("run-record", record).ok || record.runId !== row.runId) throw Error("the saved run record does not belong to this run");
+      const audited = auditProblem(audit, record, row.runId);
+      if (audited) throw Error(audited);
       const evidence = loadRunEvidence(projectRoot, runRoot, record);
       for (const o of def.outputs) {
         // one output at a time: a failure of one never marks another unread, and never leaves a number counted that was also listed as unread
