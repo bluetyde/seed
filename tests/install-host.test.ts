@@ -163,6 +163,16 @@ describe("an agent asking for an install", () => {
     expect(h.downloads).toEqual([]);
     expect(h.grantLog().map((x) => x.event.type)).toEqual(["issued"]);
   });
+  it("a cache file with the right name but other content is not a hit: its download is counted, so a small ceiling refuses the request", async () => {
+    const h = host();
+    issue(h, { ceiling: { downloadBytes: 10, expandedBytes: 10_000_000 } });
+    fs.mkdirSync(path.join(h.root, ".seed", "cache"), { recursive: true });
+    for (const id of ["fakeapp-core", "shared-libs", "fake-cad"]) for (const art of h.manifest.components.find((c) => c.id === id)!.artifacts) fs.writeFileSync(path.join(h.root, ".seed", "cache", art.sha256), "not the artifact");
+    const r = await ask(h, ["fake-cad"]);
+    expect(codes(r)).toEqual(["E_NOT_PERMITTED"]);
+    expect(h.downloads).toEqual([]);
+    expect(h.grantLog().map((x) => x.event.type)).toEqual(["issued"]);
+  });
   it("two requests at the same moment for a ceiling that fits one: exactly one gets in", async () => {
     const h = host();
     const cad = ["fakeapp-core", "shared-libs", "fake-cad"].flatMap((id) => h.manifest.components.find((c) => c.id === id)!.artifacts);
