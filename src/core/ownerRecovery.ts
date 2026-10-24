@@ -7,7 +7,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { mayActOn, type ProcessIdentity } from "./components";
-import { identityOf, linuxIdentity } from "./processIdentity";
+import { identityOfStrict, linuxIdentity } from "./processIdentity";
 import type { OwnerRecord, OwnerStore } from "./ownerStore";
 
 export type Worker = NonNullable<OwnerRecord["worker"]>;
@@ -41,9 +41,11 @@ function exec(command: string, args: string[], timeoutMs = 10000): Promise<{ ok:
 
 /** The identity of a process inside a WSL distro, from its /proc entry and the distro's boot id. */
 export async function wslIdentityOf(distro: string, pid: number): Promise<ProcessIdentity | null> {
-  const stat = await exec("wsl.exe", ["-d", distro, "--exec", "cat", `/proc/${pid}/stat`]);
+  // the boot id is read first: when the distro itself can not be asked, that is "unknown" (an error), never "the process is gone"
   const boot = await exec("wsl.exe", ["-d", distro, "--exec", "cat", "/proc/sys/kernel/random/boot_id"]);
-  if (!stat.ok || !boot.ok) return null;
+  if (!boot.ok) throw new Error(`the distro ${distro} could not be asked about pid ${pid}`);
+  const stat = await exec("wsl.exe", ["-d", distro, "--exec", "cat", `/proc/${pid}/stat`]);
+  if (!stat.ok) return null;
   const id = linuxIdentity(stat.stdout, boot.stdout);
   return id ? { pid, startIdentity: id } : null;
 }
@@ -63,9 +65,13 @@ function killNativeTree(pid: number): Promise<void> {
 }
 
 export const defaultRecoveryDeps: RecoveryDeps = {
-  workerIdentity: (w) => (w.via === "wsl" && w.distro ? wslIdentityOf(w.distro, w.identity.pid) : identityOf(w.identity.pid)),
-  hostIdentity: (pid) => identityOf(pid),
+  workerIdentity: (w) => {
+    if (w.via === "wsl") return w.distro ? wslIdentityOf(w.distro, w.identity.pid) : Promise.reject(new Error("a WSL worker record names no distro"));
+    return identityOfStrict(w.identity.pid);
+  },
+  hostIdentity: (pid) => identityOfStrict(pid),
   killWorker: async (w) => {
+    if (w.via === "wsl" && !w.distro) throw new Error("a WSL worker record names no distro");
     if (w.via === "wsl" && w.distro) { await exec("wsl.exe", ["-d", w.distro, "--exec", "kill", "-9", String(w.identity.pid)]); return; }
     await killNativeTree(w.identity.pid);
   },
@@ -82,6 +88,7 @@ export async function recoverOwners(store: OwnerStore, deps: RecoveryDeps = defa
   const report: RecoveryReport = { results: [], unreadable: listing.unreadable };
   for (const rec of listing.records) {
     const add = (outcome: RecoveryOutcome, detail?: string, pid?: number) => report.results.push({ launchId: rec.launchId, outcome, ...(pid ? { pid } : {}), ...(detail ? { detail } : {}) });
+    let marked = false;
     try {
       if (rec.state === "stopped") { store.remove(rec.launchId); continue; }
       if (rec.supervisor === "standalone") { add("standalone", "the app supervises itself; SEED does not stop it"); continue; }
@@ -98,6 +105,10 @@ export async function recoverOwners(store: OwnerStore, deps: RecoveryDeps = defa
         add("stale-identity", `pid ${worker.identity.pid} is now a different process (${now.startIdentity}, recorded ${worker.identity.startIdentity}); left running`, worker.identity.pid);
         continue;
       }
+      // once more, as late as possible: the window in which a pid can be reused is only this short (a handle would close it; neither Node nor wsl.exe gives one)
+      const again = await deps.workerIdentity(worker);
+      if (again === null || !mayActOn(worker.identity, again)) { store.remove(rec.launchId); add("already-gone", "the worker ended while the record was being settled", worker.identity.pid); continue; }
+      marked = true;
       store.mark(rec.launchId, "stopping");
       await deps.killWorker(worker);
       await sleep(opts.settleMs ?? 200);
@@ -105,7 +116,10 @@ export async function recoverOwners(store: OwnerStore, deps: RecoveryDeps = defa
       if (after === null || !mayActOn(worker.identity, after)) { store.remove(rec.launchId); add("terminated", undefined, worker.identity.pid); }
       else { store.mark(rec.launchId, "orphaned"); add("kill-failed", `pid ${worker.identity.pid} is still running after the stop`, worker.identity.pid); }
     } catch (e) {
-      add("kill-failed", `could not settle this record: ${(e as Error).message}`);
+      let note = "";
+      // a stop that was started and did not finish is not "in progress" on disk: the next start and a person must see that it failed
+      if (marked) { try { store.mark(rec.launchId, "orphaned"); } catch (m) { note = `; the record could not be marked orphaned either: ${(m as Error).message}`; } }
+      add("kill-failed", `could not settle this record: ${(e as Error).message}${note}`);
     }
   }
   return report;

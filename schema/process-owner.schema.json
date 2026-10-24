@@ -28,7 +28,8 @@
         "via": { "enum": ["native", "wsl"] },
         "distro": { "type": "string", "minLength": 1, "maxLength": 80 },
         "identity": { "$ref": "#/$defs/identity" }
-      }
+      },
+      "allOf": [{ "if": { "properties": { "via": { "const": "wsl" } } }, "then": { "required": ["distro"], "properties": { "distro": true } } }]
     },
     "endpoint": { "type": "string", "pattern": "^http://(127\\.0\\.0\\.1|localhost|\\[::1\\]):[0-9]{2,5}(/.*)?$" },
     "generation": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
