@@ -202,6 +202,14 @@ describe("policy statistical", () => {
     expect(ok(compareReplay({ original: run("a", scalar(1, 0)), replay: run("b", scalar(1.0001, 0)), policy: stat })).verdict).toBe("differs");
   });
 
+  it("a series or a table with no points is not 'reproduced': nothing was compared", () => {
+    const emptyTable: QuantityData = { kind: "table", quantity: "t", unit: "W", columns: [{ name: "c", unit: "W", role: "value" }], rows: [] };
+    expect(ok(compareReplay({ original: run("a", emptyTable), replay: run("b", emptyTable), policy: exact })).quantities[0]).toMatchObject({ verdict: "not-comparable", code: "shape-mismatch" });
+    expect(ok(compareReplay({ original: run("a", emptyTable), replay: run("b", emptyTable), policy: exact })).verdict).toBe("not-comparable");
+    const emptySeries = series([]);
+    expect(ok(compareReplay({ original: run("a", emptySeries), replay: run("b", emptySeries), policy: tol })).verdict).toBe("not-comparable");
+  });
+
   it("a table is not compared statistically", () => {
     const t: QuantityData = { kind: "table", quantity: "t", unit: "W", columns: [{ name: "c", unit: "W", role: "value" }], rows: [[1]] };
     expect(ok(compareReplay({ original: run("a", t), replay: run("b", t), policy: stat })).quantities[0]).toMatchObject({ verdict: "not-comparable", code: "table-unsupported" });

@@ -150,6 +150,8 @@ function numeric(acc: Acc, a: number, b: number, sa: number | undefined, sb: num
 }
 
 function judge(name: string, unit: string, acc: Acc, policy: ReplayPolicy): ReplayQuantityResult {
+  // nothing was compared: an empty series or table is not a reproduction
+  if (acc.points === 0) return notComparable(name, unit, "shape-mismatch", "there are no points to compare");
   const verdict: ReplayVerdict = acc.allIdentical ? "reproduced" : acc.within ? "reproduced-within-tolerance" : "differs";
   return {
     name, unit, verdict, points: acc.points, maxAbsDiff: acc.maxAbs, maxRelDiff: acc.maxRel,
