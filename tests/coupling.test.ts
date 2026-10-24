@@ -34,6 +34,23 @@ function expectedPasses(map: (v: number[]) => number[], start: number[], tols: n
   return null;
 }
 
+/** Independent recurrence for divergence by growth: scale_i = max(|calc_i of pass 1|, 1e-12), R_k = max_i |calc_i - x_i| / (tol_i scale_i); the first pass with three strict increases in a row, or null. */
+function growthPass(map: (v: number[]) => number[], start: number[], tols: number[], relax: number): number | null {
+  let x = start;
+  let scale: number[] = [];
+  const R: number[] = [];
+  for (let k = 1; k <= 25; k++) {
+    const c = map(x);
+    if (k === 1) scale = c.map((ci) => Math.max(Math.abs(ci), 1e-12));
+    let r = 0;
+    for (let i = 0; i < x.length; i++) r = Math.max(r, Math.abs(c[i]! - x[i]!) / (tols[i]! * scale[i]!));
+    R.push(R.length === k - 1 ? r : 0);
+    if (k >= 4 && R[k - 1]! > R[k - 2]! && R[k - 2]! > R[k - 3]! && R[k - 3]! > R[k - 4]!) return k;
+    x = x.map((xi, i) => xi + relax * (c[i]! - xi));
+  }
+  return null;
+}
+
 describe("convergence on a linear map with a known fixed point", () => {
   it("a = 0.5, b = 1, from 0: converges in the number of passes the recurrence gives, to the fixed point 2", async () => {
     // By hand: x_k = 2(1 - 0.5^k), change_k = 0.5^(k-1) / (2(1 - 0.5^k)); the first change under 1e-3 is pass 10, so the second in a row is pass 11.
@@ -100,8 +117,9 @@ describe("convergence on a linear map with a known fixed point", () => {
 });
 
 describe("divergence, oscillation and the order of the checks", () => {
-  it("a = -1.2 started near the fixed point: the change grows on three passes in a row, diverged before maxPasses", async () => {
+  it("a = -1.2 started near the fixed point: the residual grows on three passes in a row, diverged before maxPasses", async () => {
     // fixed point 1/2.2 = 0.4545; the changes from 0.45 are about 0.0217, 0.0268, 0.0311, 0.0388 (growing)
+    expect(growthPass((v) => [-1.2 * v[0]! + 1], [0.45], [1e-3], 1)).toBe(4);
     const o = await runCoupling(loop(), { x: 0.45 }, linear(-1.2, 1));
     expect(o.state).toBe("diverged");
     expect(o.result).toBeUndefined();
@@ -116,11 +134,49 @@ describe("divergence, oscillation and the order of the checks", () => {
     const o = await runCoupling(loop({ maxPasses: 4 }), { x: 0 }, script([{ x: 1 }, { x: 2 }, { x: 2.5 }, { x: 2.9 }]));
     expect(o.state).toBe("not-converged");
   });
-  it("a = -1.2 started far from the fixed point alternates with a growing residual: oscillating at pass 4", async () => {
+  it("a = -1.2 started far from the fixed point alternates AND grows: diverged at pass 4 (the growth check comes before oscillation)", async () => {
+    // residuals 1, -1.2, 1.44, -1.728; scale 1 (|calc of pass 1|); R = |r| / 1e-3 grows on every pass
+    expect(growthPass((v) => [-1.2 * v[0]! + 1], [0], [1e-3], 1)).toBe(4);
     const o = await runCoupling(loop(), { x: 0 }, linear(-1.2, 1));
-    expect(o.state).toBe("oscillating");
+    expect(o.state).toBe("diverged");
     expect(o.passes).toHaveLength(4);
     expect(o.result).toBeUndefined();
+  });
+  it("a monotone growth (a = 1.2, b = 1) is diverged at the pass the recurrence gives", async () => {
+    const at = growthPass((v) => [1.2 * v[0]! + 1], [0], [1e-3], 1);
+    expect(at).toBe(4);
+    const o = await runCoupling(loop(), { x: 0 }, linear(1.2, 1));
+    expect(o.state).toBe("diverged");
+    expect(o.passes).toHaveLength(at!);
+    // residuals are 1, 1.2, 1.44, 1.728 (r_k = 1.2^(k-1))
+    o.passes.forEach((p, i) => expect(p.calc.x! - p.iterate.x!).toBeCloseTo(Math.pow(1.2, i), 9));
+  });
+  it("the relative change does NOT grow here (about 1000, 6000, 1161, 3540 tolerances) but the absolute residual does: diverged, not hidden", async () => {
+    const o = await runCoupling(loop(), { x: 0 }, linear(-1.2, 1));
+    const rel = o.passes.map((p) => p.change.x! / 1e-3);
+    expect(rel[2]!).toBeLessThan(rel[1]!); // the relative change fell on pass 3
+    const abs = o.passes.map((p) => Math.abs(p.calc.x! - p.iterate.x!));
+    expect(abs[1]!).toBeGreaterThan(abs[0]!);
+    expect(abs[2]!).toBeGreaterThan(abs[1]!);
+    expect(abs[3]!).toBeGreaterThan(abs[2]!);
+    expect(o.state).toBe("diverged");
+  });
+  it("two quantities, only the second grows: diverged (the largest R is looked at, and the first quantity's tolerance does not hide it)", async () => {
+    const def: LoopDefinition = { ...loop(), exchanged: [{ id: "a", tolerance: 1e-3 }, { id: "b", tolerance: 1e-3 }] };
+    const pass: PassFunction = async (it) => ({ ok: true, calc: { a: 0.5 * (it.a as number) + 1, b: 1.2 * (it.b as number) + 1 } });
+    // a alone converges; b alone is diverged at pass 4
+    expect(growthPass((v) => [0.5 * v[0]! + 1, 1.2 * v[1]! + 1], [0, 0], [1e-3, 1e-3], 1)).toBe(4);
+    const o = await runCoupling(def, { a: 0, b: 0 }, pass);
+    expect(o.state).toBe("diverged");
+    expect(o.passes).toHaveLength(4);
+    expect(o.reason).toMatch(/residual/);
+  });
+  it("the scale is fixed at pass 1: a residual that grows only against a moving calc is judged against the first calc", async () => {
+    // residual 1, 2, 3, 4 with calc 1, 3, 6, 10 (x = previous calc): R grows on 3 passes in a row; the relative change 1, .67, .5, .4 falls
+    const o = await runCoupling(loop({ maxPasses: 6 }), { x: 0 }, script([{ x: 1 }, { x: 3 }, { x: 6 }, { x: 10 }, { x: 15 }, { x: 21 }]));
+    expect(o.passes.map((p) => p.change.x!).every((c, i, a) => i === 0 || c < a[i - 1]!)).toBe(true);
+    expect(o.state).toBe("diverged");
+    expect(o.passes).toHaveLength(4);
   });
   it("a = -1 exactly: pure alternation without decay is oscillating after four passes", async () => {
     const o = await runCoupling(loop(), { x: 0 }, linear(-1, 1));
