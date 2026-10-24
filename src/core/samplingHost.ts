@@ -122,6 +122,14 @@ export function factsOf(id: string, requestId: string, def: SamplingDefinition, 
   };
 }
 
+/** Numbers of one output are only combined when every run gave them in the same unit and normalization: the first run read sets the basis, a run that differs is left out with the reason. */
+export function basisProblem(basis: Map<string, string>, key: string, q: { unit: string; normalization: string }): string | null {
+  const here = `${q.unit} (${q.normalization})`;
+  const first = basis.get(key);
+  if (first === undefined) { basis.set(key, here); return null; }
+  return first === here ? null : `the run gives ${here}, the first run read gave ${first}; numbers in different units or normalizations are not combined`;
+}
+
 function readSummary(c: HostConfiguration, def: SamplingDefinition, results: SweepCaseResult[]): SamplingSummary {
   const projectRoot = realpathSync(c.projectRoot);
   const project = openProject(projectRoot);
@@ -129,6 +137,7 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
   const runsRoot = safeChild(projectRoot, (project.value.manifest.folders as { runs: string }).runs, true);
   if (!inside(projectRoot, realpathSync(runsRoot))) throw Error("runs folder leaves project");
   const unread: SamplingSummary["unread"] = [];
+  const basis = new Map<string, string>();
   const runs: SampleRun[] = [];
   let completed = 0;
   for (const row of results) {
@@ -153,6 +162,8 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
         try {
           const q = evidence.quantities.find((x) => x.name === o.quantity);
           if (!q) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: `the run has no quantity ${o.quantity}` }); continue; }
+          const mixed = basisProblem(basis, outputKey(o), q);
+          if (mixed) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: mixed }); continue; }
           const reduced = reduceQuantity(q.data, o.reduce);
           if (!reduced.ok) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: reduced.reason }); continue; }
           outputs[outputKey(o)] = { value: reduced.value, std: reduced.std };
