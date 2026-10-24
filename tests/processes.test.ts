@@ -139,7 +139,8 @@ describe("stopping a server the host started", () => {
     let pid = 0;
     try {
       await m.ensure(app());
-      await new Promise((r) => setTimeout(r, 400));
+      // the record is written in the background (it asks the system for the start time): wait for it
+      for (let i = 0; i < 100 && owners.list().records.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
       pid = owners.list().records[0]!.worker!.identity.pid;
       await m.stop("fake");
       const rec = owners.list().records;
@@ -147,7 +148,7 @@ describe("stopping a server the host started", () => {
       expect(rec[0]!.state).toBe("orphaned");
       expect(m.output("fake")).toBe("");
     } finally {
-      try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+      if (pid > 0) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } // never pid 0: that is the whole process group, the test worker included
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -158,7 +159,7 @@ describe("stopping a server the host started", () => {
     managers.push(m);
     try {
       await m.ensure(app());
-      await new Promise((r) => setTimeout(r, 400));
+      for (let i = 0; i < 100 && owners.list().records.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
       expect(owners.list().records).toHaveLength(1);
       await m.stop("fake");
       expect(owners.list().records).toHaveLength(0);
