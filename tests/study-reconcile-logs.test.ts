@@ -115,6 +115,17 @@ describe("reconcile rebuilds the replay step and the sampling summary from their
     expect(w.rows().filter((x) => x.action === "compare")).toHaveLength(2);
   }, 300000);
 
+  it("a finished replay of a request this study's audit does not show is not written, whatever its log rows say", async () => {
+    const w = await world();
+    const row = (event: Record<string, unknown>) => JSON.stringify({ schema: "seed.replay-record/0.1", time: "2026-10-24T12:00:00.000Z", event }) + "\n";
+    appendFileSync(join(w.state, "replays.jsonl"), row({ requestId: "stranger-rep", originalRequestId: "stranger", phase: "admitted", caseId: "approved", originalRunId: "r-x", adapter: "fake", policy: { mode: "exact" } }));
+    appendFileSync(join(w.state, "replays.jsonl"), row({ requestId: "stranger-rep", originalRequestId: "stranger", phase: "finished", originalRunId: "r-x", replayRunId: "r-y", replayState: "completed", verdict: "reproduced", differences: [], studyRecord: { appended: 1 } }));
+    rmSync(w.record);
+    reconcileStudyRecord(w.adminFile, {});
+    expect(w.rows().some((x) => /stranger/.test(String(x.reason)))).toBe(false);
+    expect(w.rows().filter((x) => x.action === "compare")).toHaveLength(2);
+  }, 300000);
+
   it("a replay that never finished (no finished row) writes no step", async () => {
     const w = await world();
     const logFile = join(w.state, "replays.jsonl");
