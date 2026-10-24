@@ -762,6 +762,12 @@ function lockFence(dir: string): (after?: boolean) => TypedError | null {
   return fence;
 }
 
+/** Throws when the callback that calls it no longer holds the writer lock of `dir` (it was taken over, removed, or this code does not run under it). For a holder that writes in several steps and must stop before the next irreversible one. */
+export function assertLockHeld(dir: string): void {
+  const e = lockFence(dir)(false);
+  if (e) throw new Error(e.message);
+}
+
 /** Saves while the caller already holds the writer lock (inside withProjectLock or withProjectLockAsync): one critical section for a file change and its revision. */
 export function saveProjectHeld(
   dir: string,

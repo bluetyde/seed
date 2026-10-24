@@ -124,3 +124,56 @@ describe("a pointer that can not be read", () => {
     expect(fs.existsSync(w.versionDir("fakeapp-core", "1.3.0"))).toBe(true); // nothing was deleted on a guess
   });
 });
+
+describe("the install root's lock", () => {
+  it("a holder that lost the lock writes nothing more: no version, no pointer", async () => {
+    const w = makeWorld();
+    const lost: NonNullable<InstallEnv["hooks"]> = { step: (s) => { if (s === "staging") fs.writeFileSync(path.join(w.root, ".seed", "lock", "owner.json"), JSON.stringify({ token: "somebody-else" })); } };
+    const r = await run(w, [CORE()], [], w.with({ hooks: lost })).then((x) => x.r, () => null);
+    expect(r === null || r.ok === false).toBe(true);
+    expect(w.pointer("fakeapp-core")).toBeNull();
+    expect(fs.existsSync(w.versionDir("fakeapp-core", "1.2.0"))).toBe(false);
+  });
+});
+
+describe("a cache file changed after it was checked", () => {
+  it("is not unpacked: the bytes that are unpacked are a copy that was hashed after it was made", async () => {
+    const w = makeWorld();
+    const swap: NonNullable<InstallEnv["hooks"]> = { step: (s) => {
+      if (s.startsWith("obtained:")) for (const n of fs.readdirSync(path.join(w.root, ".seed", "cache"))) fs.writeFileSync(path.join(w.root, ".seed", "cache", n), "not the artifact");
+    } };
+    const { r } = await run(w, [CORE()], [], w.with({ hooks: swap }));
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.errors[0]!.code).toBe("E_HASH_MISMATCH");
+    expect(w.pointer("fakeapp-core")).toBeNull();
+    expect(fs.existsSync(w.versionDir("fakeapp-core", "1.2.0"))).toBe(false);
+  });
+});
+
+describe("a link among the parents of the store", () => {
+  it("an app folder that is a junction to somewhere else: nothing is written there", async () => {
+    const w = makeWorld();
+    fs.mkdirSync(w.root, { recursive: true });
+    const outside = path.join(w.base, "outside");
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(w.root, "fakeapp"), process.platform === "win32" ? "junction" : "dir");
+    const { r } = await run(w, [CORE()]);
+    expect(r.ok).toBe(false);
+    expect(fs.readdirSync(outside)).toEqual([]);
+  });
+});
+
+describe("a version folder that no record refers to", () => {
+  it("is removed at the next settle; the active and the previous version stay", async () => {
+    const w = makeWorld();
+    await run(w, [CORE("1.2.0")]);
+    await run(w, [CORE("1.3.0")]);
+    const stray = w.versionDir("fakeapp-core", "0.9.0");
+    fs.mkdirSync(stray, { recursive: true });
+    fs.writeFileSync(path.join(stray, "x"), "x");
+    expect((await recoverInstalls(w.with(dead))).ok).toBe(true);
+    expect(fs.existsSync(stray)).toBe(false);
+    expect(fs.existsSync(w.versionDir("fakeapp-core", "1.3.0"))).toBe(true);
+    expect(fs.existsSync(w.versionDir("fakeapp-core", "1.2.0"))).toBe(true);
+  });
+});

@@ -7,10 +7,10 @@ import {
   type Artifact, type Component, type ComponentError, type InstallState, type Installed, type Manifest, type ProcessIdentity, type Platform, type Transaction, type TxState
 } from "./components";
 import {
-  cachedShas, clearPointer, freeBytesAt, moveDir, readInstallState, readPointer, removeEmptyParents, removeTree, sha256File, storeLayout, writeInstallState, writePointer
+  assertUnderRoot, cachedShas, clearPointer, freeBytesAt, moveDir, readInstallState, readPointer, removeEmptyParents, removeTree, sha256File, storeLayout, writeInstallState, writePointer
 } from "./installStore";
 import { identityOf } from "./processIdentity";
-import { withProjectLockAsync, type LockOptions } from "./projectStore";
+import { assertLockHeld, withProjectLockAsync, type LockOptions } from "./projectStore";
 
 /**
  * The staged install (W4, docs/runtime-contract.md, acceptance R1-R3 and R6). Every change to an install root is a **transaction** on
@@ -87,7 +87,16 @@ class Ctx {
     this.store = storeLayout(env.root);
     this.now = env.now ?? (() => new Date());
   }
+  /** Stops before an irreversible step when the install root's lock was taken over: a holder that lost it must not write over the new holder's work. */
+  fence() {
+    assertLockHeld(this.env.root);
+  }
+  /** Stops when `p` is not really under the install root (a link among its parents). */
+  inside(p: string) {
+    assertUnderRoot(this.env.root, p);
+  }
   save() {
+    this.fence();
     writeInstallState(this.env.root, this.state);
   }
   find(app: string, component: string): Installed | undefined {
@@ -238,6 +247,18 @@ async function settle(c: Ctx, report?: RecoveryReport): Promise<{ errors?: Compo
     try { names = fs.readdirSync(dir); } catch { /* none yet */ }
     for (const n of names) removeTree(path.join(dir, n));
   }
+  // version folders that no record refers to (a prune that failed after an update): the record names the active and the previous version, nothing else is kept
+  for (const rec of c.state.installs) {
+    if (rec.origin !== "managed") continue;
+    const dir = c.store.component(rec.app, rec.component);
+    let versions: string[] = [];
+    try { versions = fs.readdirSync(dir); } catch { continue; }
+    for (const n of versions) {
+      if (!/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/.test(n)) continue;
+      if (n === rec.version || n === rec.previous?.version) continue;
+      removeTree(path.join(dir, n));
+    }
+  }
   return {};
 }
 
@@ -274,6 +295,7 @@ async function obtain(c: Ctx, tx: Transaction, comp: Component, a: Artifact, sig
   if (size !== a.downloadBytes) throw failure("E_HASH_MISMATCH", `${label} is ${size} bytes; the manifest says ${a.downloadBytes}`, comp.id);
   const got = await sha256File(part);
   if (got !== a.sha256) throw failure("E_HASH_MISMATCH", `${label} has the hash ${got}; the manifest pins ${a.sha256}`, comp.id);
+  c.inside(c.store.cacheDir);
   fs.mkdirSync(c.store.cacheDir, { recursive: true });
   moveDir(part, file);
   return file;
@@ -281,10 +303,18 @@ async function obtain(c: Ctx, tx: Transaction, comp: Component, a: Artifact, sig
 
 async function stage(c: Ctx, tx: Transaction, comp: Component, signal?: AbortSignal): Promise<string> {
   const staged = path.join(c.store.staging(tx.id), "version");
+  c.inside(staged);
   fs.mkdirSync(staged, { recursive: true });
   for (const a of comp.artifacts) {
     if (signal?.aborted) throw failure("E_INSTALL_CANCELLED", "cancelled", comp.id);
-    const cached = await obtain(c, tx, comp, a, signal);
+    const inCache = await obtain(c, tx, comp, a, signal);
+    await c.env.hooks?.step?.(`obtained:${a.id}`, tx);
+    // the bytes that are unpacked are a copy the transaction owns, hashed after it was copied: a cache file swapped after its check changes nothing
+    const cached = path.join(c.store.staging(tx.id), "verified", a.id);
+    fs.mkdirSync(path.dirname(cached), { recursive: true });
+    fs.copyFileSync(inCache, cached, fs.constants.COPYFILE_EXCL);
+    const got = await sha256File(cached);
+    if (got !== a.sha256) throw failure("E_HASH_MISMATCH", `${comp.id}/${a.id} changed in the cache after it was checked (hash ${got}, pinned ${a.sha256})`, comp.id);
     const into = path.join(staged, a.id);
     if (a.archive === "none") {
       if (fs.statSync(cached).size > a.expandedBytes) throw failure("E_ARCHIVE_TOO_LARGE", `${comp.id}/${a.id} is larger than the ${a.expandedBytes} bytes the manifest declares`, comp.id);
@@ -315,11 +345,15 @@ async function activate(c: Ctx, tx: Transaction, app: string, comp: string, to: 
   try {
     if (staged) {
       // a changed pin under the same version number: the old folder is the active one until the switch, so it is set aside, never deleted first
+      c.fence();
+      c.inside(final);
       if (fs.existsSync(final)) { aside = replacedDir(c, tx); moveDir(final, aside); }
       moveDir(staged, final);
       moved = true;
     }
     await c.env.hooks?.step?.("activating:moved", tx);
+    c.fence();
+    c.inside(c.store.pointer(app, comp));
     writePointer(c.env.root, app, comp, to);
     flipped = true;
     await c.env.hooks?.step?.("activating:pointer", tx);
@@ -498,8 +532,12 @@ export async function removeComponent(env: InstallEnv, manifests: Manifest | rea
         await c.phase(tx, "removing");
         if (s.action === "remove" && have.origin === "managed") {
           const dir = c.store.component(app, s.component);
+          c.fence();
+          c.inside(dir);
+          c.inside(c.store.trash(tx.id));
           if (fs.existsSync(dir)) { moveDir(dir, c.store.trash(tx.id)); trashed = true; }
           await env.hooks?.step?.("removing:moved", tx);
+          c.fence();
           clearPointer(env.root, app, s.component);
         }
         c.drop(app, s.component);

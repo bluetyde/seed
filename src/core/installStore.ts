@@ -64,6 +64,22 @@ export function retrySync<T>(fn: () => T, attempts = 40): T {
   }
 }
 
+/**
+ * Throws when `p`, or the nearest folder of it that exists, is not where the install root says it is: a link or junction among its parents
+ * (an app folder made a junction to somewhere else) would send a write or a delete outside the root. Checked by real path, so every kind of link counts.
+ */
+export function assertUnderRoot(root: string, p: string): void {
+  const same = (a: string, b: string) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const base = path.resolve(root);
+  const target = path.resolve(p);
+  const rel = path.relative(base, target);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) throw new Error(`${target} is not inside the install root`);
+  let q = target;
+  while (!fs.existsSync(q)) { const up = path.dirname(q); if (up === q) break; q = up; }
+  const expected = path.join(fs.realpathSync(base), path.relative(base, q));
+  if (!same(fs.realpathSync(q), expected)) throw new Error(`${q} is a link or leads out of the install root; nothing is written through it`);
+}
+
 export function removeTree(p: string): void {
   retrySync(() => fs.rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }));
 }
