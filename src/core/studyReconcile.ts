@@ -7,15 +7,19 @@
  * appended; a step already in the record is skipped (the same keys as the live append, so a request is written once whichever way); every step
  * written says it was backfilled and takes the time of the audit row, not the time of the backfill; a request with no decision, or an allowed
  * one with no outcome yet, is reported and not written; a dry run writes nothing.
+ *
+ * The `compare` step of a replay and the summary step of a sampling are rebuilt from `replays.jsonl` and `samplings.jsonl` of the state folder, which
+ * hold every fact the step says. They are written only for requests this study's audit log shows (a replay's own request, a sampling's cases), and a
+ * log line that cannot be read as a finished replay or a sampling summary is counted and left alone.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { validateHostConfiguration } from "./fileRunHost";
 import { inside, readAdmissions, readHostJson, regularFile, safeChild } from "./hostFiles";
 import { openProject } from "./projectStore";
 import { appendStudySteps, readStudyRecord, refMarker, studyRecordFile, type StepDraft } from "./studyRecord";
-import { loadLiveHeader, stepDrafts } from "./studyRecordHost";
+import { loadLiveHeader, replayStepDraft, samplingStepDraft, stepDrafts, type ReplayFacts, type SamplingFacts } from "./studyRecordHost";
 
 type Outcome = { ok: true; [k: string]: unknown } | { ok: false; errors: { code: string; field: string; message: string; source: "seed" }[] };
 const fail = (message: string, code = "E_NOT_PERMITTED"): Outcome => ({ ok: false, errors: [{ code, field: "", message, source: "seed" }] });
@@ -45,6 +49,7 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
     const rows = readAdmissions(engine);
 
     const drafts: StepDraft[] = [];
+    const included = new Set<string>();
     const unfinished: { requestId: string; why: string }[] = [];
     const otherPolicy: string[] = [];
     const policyOf = (s: { tier?: unknown; budget?: unknown; parameters?: unknown } | undefined) => canonicalJson({ tier: s?.tier, budget: s?.budget, parameters: s?.parameters });
@@ -65,6 +70,7 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
         continue;
       }
       requests++;
+      included.add(requestId);
       const next = requestRows[i + 1]?.seq ?? Infinity;
       const attempt = rows.filter((r) => r.seq >= row.seq && r.seq < next && (r.event as { configHash?: unknown }).configHash === ev.configHash);
       const decisionRow = attempt.find((r) => {
@@ -95,13 +101,17 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
       );
     }
 
+    // the steps of replays and samplings, from their own logs
+    const fromLogs = logSteps(state, included, c.actor);
+    drafts.push(...fromLogs.drafts);
+
     const recordFile = studyRecordFile(projectRoot, (project.value.manifest.folders as { studies: string }).studies, c.study.studyId, !dryRun);
     const existing = readStudyRecord(recordFile);
     if (!existing.ok) return fail(existing.errors.map((e) => e.message).join("; "));
     // one request can be audited twice (a replay): its steps are counted once
     const seen = new Set<string>();
     const missing = drafts.filter((d) => !existing.rows.some((r) => typeof r.reason === "string" && r.reason.endsWith(refMarker(d.key))) && !seen.has(d.key) && !!seen.add(d.key));
-    const summary = { requestsScanned: requests, stepsFromLog: drafts.length, stepsMissing: missing.length, unfinished, ...(otherPolicy.length ? { skippedOtherPolicy: otherPolicy } : {}) };
+    const summary = { requestsScanned: requests, stepsFromLog: drafts.length, stepsMissing: missing.length, unfinished, ...(otherPolicy.length ? { skippedOtherPolicy: otherPolicy } : {}), ...(fromLogs.unreadable ? { unreadableLogLines: fromLogs.unreadable } : {}) };
     if (dryRun) return { ok: true, state: "dry-run", ...summary, would: missing.map((d) => ({ key: d.key, action: d.action, runs: d.runs ?? [] })) };
     if (missing.length === 0) return { ok: true, state: "nothing-to-do", ...summary, appended: 0 };
     const r = appendStudySteps(recordFile, header, missing, projectRoot);
@@ -111,4 +121,62 @@ export function reconcileStudyRecord(file: string, request: unknown): Outcome {
     const code = (e as { code?: unknown })?.code;
     return fail(e instanceof Error ? e.message : "reconciliation failed", typeof code === "string" && /^E_[A-Z_]+$/.test(code) ? code : "E_NOT_PERMITTED");
   }
+}
+
+/** Reads a state-folder log of `{time, event}` lines. A line that is not JSON of that shape is counted, not trusted. */
+function logLines(file: string): { lines: { time: string; event: Record<string, unknown> }[]; unreadable: number } {
+  if (!existsSync(file)) return { lines: [], unreadable: 0 };
+  regularFile(file);
+  const lines: { time: string; event: Record<string, unknown> }[] = [];
+  let unreadable = 0;
+  for (const text of readFileSync(file, "utf8").split("\n")) {
+    if (text.trim() === "") continue;
+    try {
+      const row = JSON.parse(text) as { time?: unknown; event?: unknown };
+      if (typeof row.time === "string" && Number.isFinite(Date.parse(row.time)) && row.event !== null && typeof row.event === "object" && !Array.isArray(row.event)) lines.push({ time: row.time, event: row.event as Record<string, unknown> });
+      else unreadable++;
+    } catch {
+      unreadable++;
+    }
+  }
+  return { lines, unreadable };
+}
+const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+
+/** The replay and sampling steps that the logs of the state folder describe, for requests that are part of this study's audit. */
+function logSteps(state: string, included: ReadonlySet<string>, actor: any): { drafts: StepDraft[]; unreadable: number } {
+  const drafts: StepDraft[] = [];
+  let unreadable = 0;
+
+  const replays = logLines(join(state, "replays.jsonl"));
+  unreadable += replays.unreadable;
+  const admitted = new Map<string, Record<string, unknown>>();
+  for (const l of replays.lines) if (l.event.phase === "admitted" && isStr(l.event.requestId)) admitted.set(l.event.requestId, l.event);
+  for (const l of replays.lines) {
+    const e = l.event;
+    if (e.phase !== "finished" || !isStr(e.requestId) || !included.has(e.requestId)) continue;
+    const a = admitted.get(e.requestId);
+    const policy = a?.policy as ReplayFacts["policy"] | undefined;
+    const differences = e.differences;
+    if (!a || !isStr(a.adapter) || !policy || typeof policy !== "object" || !isStr(policy.mode) || !isStr(e.originalRequestId) || !isStr(e.originalRunId) || !isStr(e.replayRunId) || !isStr(e.replayState) || !isStr(e.verdict) || !Array.isArray(differences) || differences.some((d) => !d || typeof d.kind !== "string" || typeof d.field !== "string")) {
+      unreadable++;
+      continue;
+    }
+    drafts.push(replayStepDraft({ actor, time: l.time, prefix: BACKFILL_PREFIX, facts: { requestId: e.requestId, originalRequestId: e.originalRequestId, originalRunId: e.originalRunId, replayRunId: e.replayRunId, replayState: e.replayState, adapter: a.adapter, policy, verdict: e.verdict, differences: differences as ReplayFacts["differences"] } }));
+  }
+
+  const samplings = logLines(join(state, "samplings.jsonl"));
+  unreadable += samplings.unreadable;
+  for (const l of samplings.lines) {
+    const e = l.event;
+    if (e.phase !== "summary") continue;
+    const f = e.facts as SamplingFacts | undefined;
+    // the sampling's own request id is not a run request: its cases are `<requestId>.<caseId>`, and a sampling whose cases the audit does not show is not this study's
+    const mine = f !== undefined && isStr(f.requestId) && [...included].some((r) => r.startsWith(f.requestId + "."));
+    if (f === undefined) { unreadable++; continue; }
+    if (!mine) continue;
+    if (!isStr(f.samplingId) || !f.design || !Array.isArray(f.parameters) || !Array.isArray(f.runIds) || !Array.isArray(f.outputs) || !Number.isInteger(f.planned) || !Number.isInteger(f.completed)) { unreadable++; continue; }
+    drafts.push(samplingStepDraft({ actor, time: l.time, prefix: BACKFILL_PREFIX, facts: f }));
+  }
+  return { drafts, unreadable };
 }

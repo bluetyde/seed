@@ -3,7 +3,7 @@ import { sha256Hex } from "./canonical";
 import { validateHostConfiguration, type HostConfiguration } from "./fileRunHost";
 import { appendSamplingRecord, inside, readHostJson, safeChild } from "./hostFiles";
 import { loadRunEvidence } from "./runEvidence";
-import { recordSamplingInStudy } from "./studyRecordHost";
+import { recordSamplingInStudy, type SamplingFacts } from "./studyRecordHost";
 import { openProject } from "./projectStore";
 import type { Budget } from "./policy";
 import { expandSampling, outputKey, reduceQuantity, summarizeSampling, SAMPLING_CAVEATS, type OutputSummary, type SampleRun, type SamplingDefinition } from "./sampling";
@@ -78,7 +78,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
   }
   let logged: string | undefined;
   try {
-    appendSamplingRecord(realpathSync(c.stateRoot), { samplingId: id, requestId: rest.requestId, phase: "summary", planned: summary.planned, completed: summary.completed, outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: o.noise })), unread: summary.unread.length });
+    appendSamplingRecord(realpathSync(c.stateRoot), { samplingId: id, requestId: rest.requestId, phase: "summary", planned: summary.planned, completed: summary.completed, outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: o.noise })), unread: summary.unread.length, facts: factsOf(id, rest.requestId, def, summary, rest.results) });
   } catch (e) {
     logged = "the sampling ran but its summary row could not be written to the sampling log: " + (e instanceof Error ? e.message : "write failed");
   }
@@ -93,12 +93,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
     const engine = safeChild(safeChild(realpathSync(c.stateRoot), "engines", true), sha256Hex(realpathSync(c.runtime.path)), true);
     const studied = recordSamplingInStudy({
       c, projectRoot, studiesFolder: folders.studies, projectId: project.value.manifest.projectId as string, engineRoot: engine,
-      facts: {
-        samplingId: id, requestId: rest.requestId, design: def.design, parameters: def.parameters,
-        planned: summary.planned, completed: summary.completed,
-        runIds: rest.results.filter((r) => r.state === "completed" && typeof r.runId === "string").map((r) => r.runId as string),
-        outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: { rms: o.noise.rms, reportedRuns: o.noise.reportedRuns }, quantiles: o.quantiles ? { p05: o.quantiles.p05, p50: o.quantiles.p50, p95: o.quantiles.p95 } : null }))
-      }
+      facts: factsOf(id, rest.requestId, def, summary, rest.results)
     });
     studyRecord = studied.ok ? { appended: studied.appended ?? 0 } : { failed: studied.reason ?? "the study record could not be written" };
   } catch (e) {
@@ -109,6 +104,16 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
     design: def.design, parameters: def.parameters,
     results: rest.results, complete: rest.complete, ...(rest.stoppedAt ? { stoppedAt: rest.stoppedAt } : {}),
     summary, studyRecord, ...(recordingError ? { recordingError } : {})
+  };
+}
+
+/** What the study-record step says about a sampling; also kept in the sampling log, so that `reconcile-study` can write the step from it. */
+function factsOf(id: string, requestId: string, def: SamplingDefinition, summary: SamplingSummary, results: SweepCaseResult[]): SamplingFacts {
+  return {
+    samplingId: id, requestId, design: def.design, parameters: def.parameters,
+    planned: summary.planned, completed: summary.completed,
+    runIds: results.filter((r) => r.state === "completed" && typeof r.runId === "string").map((r) => r.runId as string).slice(0, 100),
+    outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: { rms: o.noise.rms, reportedRuns: o.noise.reportedRuns }, quantiles: o.quantiles ? { p05: o.quantiles.p05, p50: o.quantiles.p50, p95: o.quantiles.p95 } : null }))
   };
 }
 
