@@ -5,12 +5,12 @@ import { allCases, runFromHostFile, validateHostConfiguration, type HostConfigur
 import { appendReplayRecord, inside, readAdmissions, readHostJson, regularFile, safeChild } from "./hostFiles";
 import type { Budget } from "./policy";
 import { openProject } from "./projectStore";
-import { readQuantityData } from "./quantityData";
 import { compareReplay, type ReplayPolicy, type ReplayResult, type ReplayRun } from "./replay";
+import { loadRunEvidence } from "./runEvidence";
 import { loadReplayPolicy } from "./replayPolicy";
 import { recordReplayInStudy } from "./studyRecordHost";
 import type { RunOutcome } from "./runManager";
-import { RESULTS_INDEX_SCHEMAS, validate, type TypedError } from "./validate";
+import { validate, type TypedError } from "./validate";
 
 /**
  * The replay verb (docs/replay.md): run a recorded case again and say whether the new run reproduces the old one.
@@ -38,53 +38,6 @@ const KEYS = ["maxCores", "maxDiskMB", "maxMemoryMB", "maxWallSeconds"];
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const RUN_ID = /^r-[A-Za-z0-9_-]+$/;
 const refusal = (message: string, code: string, field = ""): ReplayOutcome => ({ ok: false, errors: [{ code, field, message, source: "seed" }] });
-
-/**
- * Everything the comparison needs about one run, proven from the saved files: each output is read and checked against the hash in the run record,
- * the results index is validated and bound to the record, and each quantity's data is read with the shared reader. A completed run only.
- */
-function loadEvidence(projectRoot: string, runRoot: string, record: any): ReplayRun {
-  const checked = (path: string, hash: string): Buffer => {
-    const abs = safeChild(projectRoot, path);
-    if (!inside(runRoot, realpathSync(abs))) throw Error("an output leaves its run folder");
-    regularFile(abs);
-    const bytes = readFileSync(abs);
-    if (sha256Hex(bytes) !== hash) throw Error("a saved output no longer matches its hash");
-    return bytes;
-  };
-  const run: ReplayRun = {
-    runId: record.runId,
-    state: record.state,
-    adapter: record.adapter,
-    ...(record.engine ? { engine: record.engine } : {}),
-    ...(record.dataLibrary ? { dataLibrary: record.dataLibrary } : {}),
-    ...(record.seed !== undefined ? { seed: record.seed } : {}),
-    inputs: record.inputs.map((i: any) => ({ path: i.path, sha256: i.sha256 })),
-    settings: record.settings,
-    quantities: [],
-  };
-  if (record.state !== "completed") return run;
-  const indexes: any[] = [];
-  for (const output of record.outputs) {
-    const bytes = checked(output.path, output.sha256);
-    try {
-      const doc = JSON.parse(bytes.toString());
-      if (RESULTS_INDEX_SCHEMAS.includes(doc.schema)) indexes.push(doc);
-    } catch {
-      /* a quantity file in another format */
-    }
-  }
-  if (indexes.length !== 1) throw Error("a completed run must hold exactly one results index");
-  const index = indexes[0];
-  if (!validate("results-index", index).ok || canonicalJson(index.adapter) !== canonicalJson(record.adapter)) throw Error("the results index does not belong to this run");
-  for (const q of index.quantities) {
-    if (!record.outputs.some((o: any) => o.path === q.data.path && o.sha256 === q.data.sha256)) throw Error("a quantity is not bound to the run's outputs");
-    const read = readQuantityData(JSON.parse(checked(q.data.path, q.data.sha256).toString()), { name: q.name, unit: q.unit, ...(q.dimension ? { dimension: q.dimension } : {}), ...(q.coordinates ? { coordinates: q.coordinates } : {}) });
-    if (!read.ok) throw Error(`the data of ${q.name} cannot be read: ${read.errors.map((e) => e.message).join("; ")}`);
-    run.quantities.push({ name: q.name, unit: q.unit, normalization: q.normalization, data: read.data });
-  }
-  return run;
-}
 
 /**
  * Re-runs the registered case of an earlier request through the guarded run path and compares the two runs. Nothing runs unless the original is
@@ -144,7 +97,7 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     const caseId = admitted.request?.caseId;
     if (typeof caseId !== "string") throw Error("the original admission names no case");
     // the configuration the original ran under may differ from today's only in other cases and in the sweeps
-    const strip = (x: any) => { const { sweeps: _s, cases, ...rest } = x; return { ...rest, cases: { [caseId]: cases?.[caseId] ?? null } }; };
+    const strip = (x: any) => { const { sweeps: _s, samplings: _m, cases, ...rest } = x; return { ...rest, cases: { [caseId]: cases?.[caseId] ?? null } }; };
     if (canonicalJson(strip(admitted.configuration)) !== canonicalJson(strip(c))) {
       return deny("the host configuration is not the one the original run was admitted under (the runtime, adapter, study rules, oracle evidence or the case changed): a replay across that change would not test reproduction", "E_REQUEST_CONFLICT", "/originalRequestId");
     }
@@ -170,7 +123,7 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     const stale = record.inputs.some((i: any) => { try { regularFile(join(projectRoot, i.path)); return sha256Hex(readFileSync(join(projectRoot, i.path))) !== i.sha256; } catch { return true; } });
     if (stale) return deny("the original run is stale: an input has changed since it ran", "E_STALE_REVISION", "/originalRequestId");
     if (!Object.hasOwn(allCases(c), caseId)) return deny(`the case ${caseId} of the original run is no longer registered`, "E_NOT_FOUND", "/originalRequestId");
-    const original = loadEvidence(projectRoot, runRoot, record);
+    const original = loadRunEvidence(projectRoot, runRoot, record);
     note({ phase: "admitted", caseId, originalRunId, adapter: c.adapter.id, policy: policy.policy });
 
     // 3. the replay: the same registered case through the guarded run path (policy, pins, oracles, lease and audit all apply)
@@ -185,7 +138,7 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     if (replayRecord.runId !== ran.runId || canonicalJson(replayRecord) !== canonicalJson(ran.record)) throw Error("the replay's saved record differs from its outcome");
 
     // 4. the comparison
-    const replay = loadEvidence(projectRoot, replayRunRoot, replayRecord);
+    const replay = loadRunEvidence(projectRoot, replayRunRoot, replayRecord);
     const result = compareReplay({ original, replay, policy: policy.policy });
     if (!result.ok) return { ok: false, errors: result.errors, replay: { requestId, runId: ran.runId, state: ran.state } };
     // the verdict becomes a step of the live study record (when the host has a human header); a failure never changes the replay's answer

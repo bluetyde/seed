@@ -14,6 +14,7 @@ import {
 import { evaluateGate, issueGrant, type Actor, type Decision, type Grant, type PolicyStudy } from "./policy";
 import { controlBinding } from "./hostControl";
 import { loadOracleAuthority } from "./oracleAuthority";
+import { expandSampling, type SamplingDefinition } from "./sampling";
 import { expandSweep, type SweepDefinition } from "./sweep";
 import { recordRequestInStudy, type LiveContext } from "./studyRecordHost";
 import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runDispatcher";
@@ -41,6 +42,8 @@ export type HostConfiguration = {
   cases: Record<string, RegisteredCase>;
   /** Registered sweeps: each one expands to cases of its own (see sweep.ts), ids `<sweepId>-001` and on. */
   sweeps?: Record<string, SweepDefinition>;
+  /** Registered sampling studies (see sampling.ts): each point is a case, ids `<samplingId>-001` and on. */
+  samplings?: Record<string, SamplingDefinition>;
   runtime: { path: string; sha256: string };
   oracles: {
     repository: string;
@@ -101,6 +104,19 @@ export function validateHostConfiguration(value: unknown): HostConfiguration {
       if (Object.hasOwn(c.cases, x.caseId))
         throw Error("sweep " + sweepId + " would reuse the registered case id " + x.caseId);
   }
+  const taken = new Set<string>(Object.keys(c.cases));
+  for (const [sweepId, def] of Object.entries(c.sweeps ?? {})) {
+    const expanded = expandSweep(sweepId, def, c.cases, c.study);
+    if (expanded.ok) for (const x of expanded.cases) taken.add(x.caseId);
+  }
+  for (const [samplingId, def] of Object.entries(c.samplings ?? {})) {
+    const expanded = expandSampling(samplingId, def, c.cases, c.study);
+    if (!expanded.ok) throw Error("invalid sampling " + samplingId + ": " + expanded.errors.map(e => e.message).join("; "));
+    for (const x of expanded.cases) {
+      if (taken.has(x.caseId)) throw Error("sampling " + samplingId + " would reuse the case id " + x.caseId);
+      taken.add(x.caseId);
+    }
+  }
   return c;
 }
 /** Every case a client may name: the registered ones and those of the registered sweeps. */
@@ -109,6 +125,11 @@ export function allCases(c: HostConfiguration): Record<string, RegisteredCase> {
   for (const [sweepId, def] of Object.entries(c.sweeps ?? {})) {
     const expanded = expandSweep(sweepId, def, c.cases, c.study);
     if (!expanded.ok) throw Error("invalid sweep " + sweepId);
+    for (const x of expanded.cases) all[x.caseId] = x.registered;
+  }
+  for (const [samplingId, def] of Object.entries(c.samplings ?? {})) {
+    const expanded = expandSampling(samplingId, def, c.cases, c.study);
+    if (!expanded.ok) throw Error("invalid sampling " + samplingId);
     for (const x of expanded.cases) all[x.caseId] = x.registered;
   }
   return all;

@@ -84,7 +84,7 @@ export async function exportStudyReport(file: string, headerFile: string | undef
       const comparable = (audited: any, caseId: unknown): boolean => {
         if (audited === null || typeof audited !== "object" || typeof caseId !== "string") return false;
         const strip = (x: any) => {
-          const { sweeps: _s, cases, ...rest } = x;
+          const { sweeps: _s, samplings: _m, cases, ...rest } = x;
           return { ...rest, cases: { [caseId]: cases?.[caseId] ?? null } };
         };
         return canonicalJson(strip(audited)) === canonicalJson(strip(c));
