@@ -78,6 +78,10 @@ After the points have run, each completed run's results are read from its saved,
 - **The coupling driver** (the other E5 item) is not started; its prerequisites are in plan 09.
 - **A person writes the distributions.** An agent cannot add a sampling or change a seed; nothing checks that a declared distribution is a reasonable description of a real uncertainty. That is the person's responsibility, and the summary says so in its caveats.
 
+## Breakage checks (2026-10-24)
+
+About seventy one-line changes to the sampler, the definition, the statistics and the host were each run against the tests. All are caught, after three first survived: a point that did not complete was skipped without a word, a quantity missing from the runs was ignored without a word, and the exit code for a stopped sampling was untested. Now every planned point either gives a number or is listed in `unread` with the reason ("the run ended terminated-by-trip, not completed", "the point did not start", "the run has no quantity X").
+
 ## Tests
 
 `tests/sampler.test.ts` (the generator, the normal distribution against known values, the inverse distributions, the Latin hypercube property), `tests/sampling.test.ts` (the definition, what is refused, the reduction and the statistics against a known linear response and pure noise), `tests/sampling-host.test.ts` (the real host with a fake adapter whose answer is `5 + 0.1 * delayMs`), `tests/sampling-wiring.test.ts` (the CLI verb).
