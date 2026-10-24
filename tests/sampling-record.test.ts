@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeHostJson } from "../src/core/hostFiles";
 import { buildReport, samplingSummaryProblem } from "../src/core/report";
-import { runSamplingFromHostFile } from "../src/core/samplingHost";
+import { factsOf, runSamplingFromHostFile, type SamplingSummary } from "../src/core/samplingHost";
+import { BACKFILL_PREFIX } from "../src/core/studyReconcile";
 import { readStudyRecord, studyRecordFile } from "../src/core/studyRecord";
 import { samplingStepDraft, type SamplingFacts } from "../src/core/studyRecordHost";
 import { verifyStudyLog } from "../src/core/semantic";
@@ -117,6 +118,30 @@ describe("the report builder's rule", () => {
   });
   it("a summary that lists no output is refused", () => {
     expect(samplingSummaryProblem("Sampling summary uq (request s1): nothing.")).toContain("lists no output");
+  });
+});
+
+describe("the report rule also applies to a backfilled summary", () => {
+  it("a backfilled summary that lacks the noise or the spread is refused like a live one, and a complete one passes", () => {
+    const good = BACKFILL_PREFIX + draft(facts()).reason;
+    expect(samplingSummaryProblem(good)).toBeNull();
+    const noNoise = BACKFILL_PREFIX + "Sampling summary uq (request s1): 20 of 20 points ran to the end. Output out:last (n 20): mean 1; input spread 2.";
+    expect(samplingSummaryProblem(noNoise)).toContain("no sampling noise for out:last");
+    const noSpread = BACKFILL_PREFIX + "Sampling summary uq (request s1): 20 of 20 points ran to the end. Output out:last (n 20): mean 1; sampling noise 0.1 rms over 5 runs.";
+    expect(samplingSummaryProblem(noSpread)).toContain("no input spread for out:last");
+  });
+});
+
+describe("the facts kept in the sampling log", () => {
+  it("cite at most 100 runs, and only the completed ones", () => {
+    const results = Array.from({ length: 150 }, (_, i) => ({ caseId: `uq-${i + 1}`, requestId: `r.uq-${i + 1}`, values: [], state: i === 3 ? "terminated-by-trip" : "completed", runId: `run-${i + 1}` }));
+    const summary: SamplingSummary = { planned: 150, completed: 149, outputs: [], unread: [], caveats: "" };
+    const f = factsOf("uq", "s1", { base: "approved", design: { method: "lhs", n: 150, seed: 1 }, parameters: [], outputs: [] }, summary, results);
+    expect(f.runIds).toHaveLength(100);
+    expect(f.runIds).not.toContain("run-4");
+    expect(f.runIds[0]).toBe("run-1");
+    expect(f.planned).toBe(150);
+    expect(f.completed).toBe(149);
   });
 });
 

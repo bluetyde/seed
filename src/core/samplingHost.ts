@@ -108,7 +108,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
 }
 
 /** What the study-record step says about a sampling; also kept in the sampling log, so that `reconcile-study` can write the step from it. */
-function factsOf(id: string, requestId: string, def: SamplingDefinition, summary: SamplingSummary, results: SweepCaseResult[]): SamplingFacts {
+export function factsOf(id: string, requestId: string, def: SamplingDefinition, summary: SamplingSummary, results: SweepCaseResult[]): SamplingFacts {
   return {
     samplingId: id, requestId, design: def.design, parameters: def.parameters,
     planned: summary.planned, completed: summary.completed,
