@@ -2,11 +2,12 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { allCases, validateHostConfiguration } from "../src/core/fileRunHost";
+import { allCases, runFromHostFile, saveHostConfiguration, validateHostConfiguration } from "../src/core/fileRunHost";
 import { writeHostJson } from "../src/core/hostFiles";
+import { replayFromHostFile } from "../src/core/replayHost";
 import { runSamplingFromHostFile } from "../src/core/samplingHost";
 import { readStudyRecord, studyRecordFile } from "../src/core/studyRecord";
-import { budget, fixture, fixtureDirs, lines } from "./helpers/replayFixture";
+import { budget, fixture, fixtureDirs, lines, policyDir } from "./helpers/replayFixture";
 import { FIXTURE_HUMAN, makeHeader } from "./helpers/studyFixtures";
 
 // A sampling through the real host, with the fake adapter whose last value is 5 + 0.1 * delayMs (so the answer is known): the cases run through the
@@ -192,4 +193,15 @@ describe("the host configuration with samplings", () => {
   it("an unknown key in a sampling is refused by the schema", async () => {
     await expect(host({ sampling: { ...def(), antithetic: true } as never })).rejects.toThrow(/invalid seed.host/);
   });
+});
+
+describe("registering a sampling later does not unprove the runs that came before it", () => {
+  it("a run made before the sampling was added can still be replayed (the sampling is not part of what the original ran under)", async () => {
+    const f = await fixture({ scenario: "series", maxCases: 20 });
+    const first = await runFromHostFile(f.file, { requestId: "orig", caseId: "approved", budget });
+    expect(first.ok).toBe(true);
+    saveHostConfiguration(f.file, { ...f.config, samplings: { uq: def() } });
+    const r = await replayFromHostFile(f.file, { requestId: "rep1", originalRequestId: "orig", budget }, { adaptersDir: policyDir({ mode: "exact" }) });
+    expect(r.ok && r.result.verdict).toBe("reproduced");
+  }, 120000);
 });
