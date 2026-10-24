@@ -5,6 +5,8 @@
  *
  * Pass k calls `pass(iterate, k)`. The pass returns `calc`, the value of each exchanged quantity the apps compute when started from `iterate`.
  *   change_i = |calc_i - iterate_i| / max(|calc_i|, floor_i)          (relative change, with an absolute scale for tiny values)
+ *   growth (diverged) is measured on the absolute residual, scale_i = max(|calc_i of pass 1|, floor_i) fixed once, because the denominator of
+ *   the relative change moves with the iterate and hides a growing residual.
  *   next_i   = iterate_i + relaxation * (calc_i - iterate_i)          (under-relaxation; relaxation 1 means next = calc)
  * Checks after each pass, in this order: engine-failure, conservation, finite and range (diverged), converged, stalled, diverged (growth),
  * oscillating; then the next pass, or `not-converged` when the maximum is reached. Only a `converged` outcome has a `result`.
@@ -123,7 +125,8 @@ export async function runCoupling(def: LoopDefinition, initial: Record<string, n
   if (problems.length > 0) return refused("the initial iterate is refused: " + problems.join("; "));
 
   const passes: PassRecord[] = [];
-  const norms: number[] = []; // largest change over quantities, each divided by its tolerance
+  const norms: number[] = []; // R_k: largest |residual| / (tolerance * scale) over quantities, the scale fixed at pass 1
+  const scales: Record<string, number> = {};
   const residuals: Record<string, number>[] = []; // calc - iterate, per pass
   let iterate = start;
   let convergedRun = 0;
@@ -175,7 +178,8 @@ export async function runCoupling(def: LoopDefinition, initial: Record<string, n
       resid[q.id] = c - x;
       change[q.id] = Math.abs(c - x) / Math.max(Math.abs(c), q.floor ?? DEFAULT_FLOOR);
       next[q.id] = x + loop.relaxation * (c - x);
-      norm = Math.max(norm, (change[q.id] as number) / q.tolerance);
+      if (k === 1) scales[q.id] = Math.max(Math.abs(c), q.floor ?? DEFAULT_FLOOR);
+      norm = Math.max(norm, Math.abs(c - x) / (q.tolerance * (scales[q.id] as number)));
     }
     const record: PassRecord = { index: k, iterate: { ...iterate }, calc, change, relaxation: loop.relaxation, next };
     if (noise !== undefined) record.noise = noise;
@@ -219,7 +223,7 @@ export async function runCoupling(def: LoopDefinition, initial: Record<string, n
     if (norms.length > GROWTH_PASSES) {
       let grew = true;
       for (let j = norms.length - GROWTH_PASSES; j < norms.length; j++) if (!((norms[j] as number) > (norms[j - 1] as number))) grew = false;
-      if (grew) return end("diverged", `the largest change (in tolerances) grew on ${GROWTH_PASSES} passes in a row, up to pass ${k}`);
+      if (grew) return end("diverged", `the largest residual (in tolerances, on the scale of pass 1) grew on ${GROWTH_PASSES} passes in a row, up to pass ${k}`);
     }
     // 7. oscillating (not when this pass is inside every tolerance)
     if (convergedRun === 0 && residuals.length >= OSCILLATION_WINDOW) {
