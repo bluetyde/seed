@@ -22,6 +22,8 @@ Sensitivity, sampling, uncertainty and feedback coupling. Milestone E5. Nothing 
 
 ## Feedback coupling prerequisites (write these down before any code)
 
+**Written down 2026-10-24 for the first loops: [coupling-prerequisites.md](../coupling-prerequisites.md) (a proposal; its decisions wait for the user). The list below is the plan's own.**
+
 - Which quantities are exchanged, units and normalization each way.
 - Time or iteration synchronization and what happens on a mismatch.
 - Convergence criterion, maximum iterations and the action on non-convergence (stop and record, never ship the last iterate as a result).
