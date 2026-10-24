@@ -264,6 +264,7 @@ class TarSink {
     this.paxSize = undefined;
     const slash = name.endsWith("/");
     if (type === "5" || ((type === "0" || type === "\0") && slash)) {
+      if (size > 0) throw new ArchiveError("E_ARCHIVE_UNSUPPORTED", `the directory entry ${JSON.stringify(name)} has a body of ${size} bytes`, name);
       this.tree.directory(name);
       this.remaining = size;
       this.pad = (512 - (size % 512)) % 512;
