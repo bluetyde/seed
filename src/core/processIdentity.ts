@@ -46,6 +46,38 @@ export async function startIdentityOf(pid: number, platform: NodeJS.Platform = p
   return r.code === 0 && text ? `ps:${text}` : null;
 }
 
+/**
+ * Like `identityOf`, but a lookup that FAILED (the tool timed out or errored, /proc or the boot id could not be read) throws instead of answering null:
+ * "no such process" and "could not find out" are different answers, and only the first may authorize treating a process as gone.
+ */
+export async function identityOfStrict(pid: number, platform: NodeJS.Platform = process.platform): Promise<ProcessIdentity | null> {
+  if (!Number.isInteger(pid) || pid < 1) return null;
+  let text: string | null;
+  if (platform === "win32") {
+    const r = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().ToString('o') }; exit 0`]);
+    if (r.code !== 0) throw new Error(`the process lookup for pid ${pid} failed (exit ${r.code})`);
+    const t = r.stdout.trim();
+    text = t ? `win:${t}` : null;
+  } else if (platform === "linux") {
+    let stat: string;
+    try { stat = await readFile(`/proc/${pid}/stat`, "utf8"); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT" || (e as NodeJS.ErrnoException).code === "ESRCH") return null;
+      throw new Error(`/proc/${pid}/stat could not be read: ${(e as Error).message}`);
+    }
+    const id = linuxIdentity(stat, await readFile("/proc/sys/kernel/random/boot_id", "utf8"));
+    if (!id) throw new Error(`/proc/${pid}/stat could not be read as a process line`);
+    text = id;
+  } else {
+    const r = await run("ps", ["-o", "lstart=", "-p", String(pid)]);
+    const t = r.stdout.trim().replace(/\s+/g, " ");
+    if (r.code === 0 && t) text = `ps:${t}`;
+    else if (r.code === 1 && !t) text = null;
+    else throw new Error(`the process lookup for pid ${pid} failed (exit ${r.code})`);
+  }
+  return text ? { pid, startIdentity: text } : null;
+}
+
 /** The pid with its start identity, or null when the process is gone. */
 export async function identityOf(pid: number): Promise<ProcessIdentity | null> {
   const startIdentity = await startIdentityOf(pid);

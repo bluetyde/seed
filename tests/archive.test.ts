@@ -161,6 +161,8 @@ describe("links and special files are refused", () => {
   });
   it("tar: an unknown entry type is unsupported, not unsafe", async () => {
     await refusal(tgz([{ name: "odd", type: "Z" }]), "E_ARCHIVE_UNSUPPORTED");
+    // a directory entry with a body would be inflated and skipped outside the byte budget
+    await refusal(tgz([{ name: "dir", type: "5", data: "x".repeat(2000) }], "d.tar.gz", 0), "E_ARCHIVE_UNSUPPORTED");
   });
   it("zip: a symlink and a device", async () => {
     await refusal(zip([{ name: "link", data: "/etc/passwd", unixMode: 0o120777 }]), "E_ARCHIVE_UNSAFE");

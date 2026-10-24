@@ -23,10 +23,19 @@ export function readGrantLog(stateRoot: string): GrantRow[] {
   if (text && !text.endsWith("\n")) throw Error("the install grant log has a partial final line");
   let seq = 0;
   let prev: string | null = null;
+  const issued = new Set<string>();
   for (const line of text ? text.slice(0, -1).split("\n") : []) {
     const row = JSON.parse(line) as GrantRow;
     const { hash, ...body } = row;
     if (row.schema !== "seed.install-grant-log/0.1" || row.seq !== seq + 1 || row.prev !== prev || sha256Hex(canonicalJson(body)) !== hash) throw Error("the install grant log hash chain is invalid");
+    // a log whose hashes agree can still be wrong: a use or a revocation of a grant nobody issued, or one grant issued twice (which would reset its spending)
+    const e = row.event as { type?: unknown; grant?: { grantId?: unknown }; grantId?: unknown };
+    if (e.type === "issued") {
+      if (typeof e.grant?.grantId !== "string" || issued.has(e.grant.grantId)) throw Error("the install grant log issues a grant twice or without an id");
+      issued.add(e.grant.grantId);
+    } else if (e.type === "used" || e.type === "revoked") {
+      if (typeof e.grantId !== "string" || !issued.has(e.grantId)) throw Error(`the install grant log has a ${e.type} event for a grant that was not issued before`);
+    } else throw Error("the install grant log has an event of an unknown type");
     seq = row.seq;
     prev = row.hash;
     rows.push(row);

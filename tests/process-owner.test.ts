@@ -3,14 +3,14 @@
 // restarted host runs. The rules are tested with fake identities; the two acceptance cases run real processes: a fake host that is killed from outside, and a
 // server it only attached to. These tests start dist/ code: run `npm run build` first.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { recoverOwners, type RecoveryDeps, type Worker } from "../src/core/ownerRecovery";
 import { OwnerStore, type OwnerRecord } from "../src/core/ownerStore";
-import { identityOf, linuxIdentity } from "../src/core/processIdentity";
+import { identityOf, identityOfStrict, linuxIdentity } from "../src/core/processIdentity";
 import { freePort } from "../src/main/processes";
 import type { ProcessIdentity } from "../src/core/components";
 
@@ -83,6 +83,13 @@ describe("the start identity of a process", () => {
     expect(await identityOf(0)).toBeNull();
   });
 
+  it("the strict lookup agrees with the plain one for a running process, answers null for one that is not there", async () => {
+    const mine = await identityOf(process.pid);
+    expect(await identityOfStrict(process.pid)).toEqual(mine);
+    expect(await identityOfStrict(0)).toBeNull();
+    const gone = spawnSync(process.execPath, ["-e", "0"]);
+    expect(await identityOfStrict(gone.pid ?? 0)).toBeNull();
+  });
   it("reads field 22 of a Linux stat line even when the command name holds spaces and parentheses", () => {
     const tail = (n: string) => `S 1 1 1 0 -1 4194560 100 0 0 0 1 1 0 0 20 0 1 0 ${n} 12345678 100 18446744073709551615`;
     expect(linuxIdentity(`42 (node) ${tail("987654")}`, "boot-a\n")).toBe("linux:boot-a:987654");
@@ -174,6 +181,54 @@ describe("recovery rules (fake identities)", () => {
     expect(report.results.map((r) => r.outcome)).toEqual(["kill-failed", "terminated"]);
     expect(report.results[0]!.detail).toMatch(/boom/);
     expect(s.list().records.map((r) => r.launchId)).toEqual([hex(1)]);
+  });
+
+  it("a lookup that fails is not an answer: the record stays, nothing is stopped, and it is reported", async () => {
+    const killed: number[] = [];
+    const deps: RecoveryDeps = { workerIdentity: async () => ident(2001), hostIdentity: async () => { throw new Error("powershell timed out"); }, killWorker: async (x) => { killed.push(x.identity.pid); } };
+    const s = new OwnerStore(tmp());
+    s.write(record(1));
+    const report = await recoverOwners(s, deps, { settleMs: 1 });
+    expect(report.results[0]).toMatchObject({ outcome: "kill-failed" });
+    expect(report.results[0]!.detail).toMatch(/powershell timed out/);
+    expect(killed).toEqual([]);
+    expect(s.read(hex(1))?.state).toBe("running");
+  });
+
+  it("a stop that throws after the record was marked stopping leaves it orphaned, not stopping", async () => {
+    const deps: RecoveryDeps = { workerIdentity: async (x) => ident(x.identity.pid), hostIdentity: async () => null, killWorker: async () => { throw new Error("taskkill failed"); } };
+    const s = new OwnerStore(tmp());
+    s.write(record(1));
+    const report = await recoverOwners(s, deps, { settleMs: 1 });
+    expect(report.results[0]).toMatchObject({ outcome: "kill-failed" });
+    expect(s.read(hex(1))?.state).toBe("orphaned");
+  });
+
+  it("a worker that ended between the first look and the stop is not signalled", async () => {
+    const killed: number[] = [];
+    let looks = 0;
+    const deps: RecoveryDeps = { workerIdentity: async (x) => (++looks === 1 ? ident(x.identity.pid) : null), hostIdentity: async () => null, killWorker: async (x) => { killed.push(x.identity.pid); } };
+    const s = new OwnerStore(tmp());
+    s.write(record(1));
+    const report = await recoverOwners(s, deps, { settleMs: 1 });
+    expect(report.results[0]).toMatchObject({ outcome: "already-gone" });
+    expect(killed).toEqual([]);
+    expect(s.list().records).toEqual([]);
+  });
+
+  it("a WSL worker record without a distro is not a valid record (it would have been looked up and stopped as a native process)", () => {
+    const s = new OwnerStore(tmp());
+    expect(() => s.write(record(1, { worker: { via: "wsl", identity: ident(2001) } }))).toThrow(/refused/);
+    expect(() => s.write(record(1, { worker: { via: "wsl", distro: "Ubuntu", identity: ident(2001) } }))).not.toThrow();
+  });
+
+  it("a record file that can not be removed is an error, not a removed record", () => {
+    const dir = tmp();
+    const s = new OwnerStore(dir);
+    s.write(record(1));
+    rmSync(join(dir, `${hex(1)}.json`));
+    mkdirSync(join(dir, `${hex(1)}.json`)); // a folder stands where the file was: unlink fails with EPERM or EISDIR, not ENOENT
+    expect(() => s.remove(hex(1))).toThrow();
   });
 
   it("a startIdentity that is empty authorizes nothing", async () => {
