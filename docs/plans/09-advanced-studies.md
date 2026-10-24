@@ -2,6 +2,8 @@
 
 Sensitivity, sampling, uncertainty and feedback coupling. Milestone E5. Nothing here starts until the single-app, sweep and transfer gates (plans 04 to 08) are verified.
 
+**Built 2026-10-24 (first slice):** the sampling study, with an in-house sampler: [sampling.md](../sampling.md). The coupling driver is not started.
+
 ## Rules that carry over
 
 - Sweeps and samples draw parameters from each adapter's typed catalog, not from string edits.
