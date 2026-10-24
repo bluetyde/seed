@@ -116,7 +116,7 @@ export async function runCli(
     code: !outcome.ok
       ? 2
       : argv[0] === "sweep" || argv[0] === "sample"
-        ? (outcome as { complete?: boolean }).complete === true
+        ? (outcome as { complete?: boolean }).complete === true && (outcome as { summaryAvailable?: boolean }).summaryAvailable !== false
           ? 0
           : 1
         : argv[0] === "replay"

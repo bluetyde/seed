@@ -32,7 +32,7 @@ const draft = (f: SamplingFacts) => samplingStepDraft({ actor: FIXTURE_HUMAN, ti
 describe("samplingStepDraft", () => {
   it("is a compare step citing the runs read, keyed by the request, with the two figures apart", () => {
     const d = draft(facts());
-    expect(d).toMatchObject({ action: "compare", key: "sampling:s1", time: "2026-10-24T12:00:00.000Z" });
+    expect(d).toMatchObject({ action: "compare", key: "sampling:uq:s1", time: "2026-10-24T12:00:00.000Z" });
     expect(d.runs).toEqual(Array.from({ length: 20 }, (_, i) => `r-${i + 1}`));
     expect(d.reason).toContain("Sampling summary uq (request s1): 20 of 20 points ran to the end; design lhs, n 20, seed 7; delayMs uniform 10 to 90.");
     expect(d.reason).toContain("Output out:last (n 20): mean 9.12346; input spread 2.34568; sampling noise 0.25 rms over 20 runs; p05, p50, p95 5.4, 9.1, 12.7.");

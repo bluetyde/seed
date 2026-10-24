@@ -195,7 +195,7 @@ export function samplingStepDraft(a: { actor: Actor; time: string; facts: Sampli
   }
   const more = left > 0 ? ` ${left} more outputs are in the sampling log.` : "";
   const reason = prefix + first + body + more + tail;
-  return { action: "compare", actor: a.actor, time: a.time, runs: f.runIds.slice(0, MAX_CITED_RUNS), reason: reason.slice(0, 2000), key: `sampling:${f.requestId}` };
+  return { action: "compare", actor: a.actor, time: a.time, runs: f.runIds.slice(0, MAX_CITED_RUNS), reason: reason.slice(0, 2000), key: `sampling:${f.samplingId}:${f.requestId}` };
 }
 
 /** Appends a sampling's step. Never throws: a failure is written to the host diagnostics and returned, and the sampling's answer is not changed by it. */
