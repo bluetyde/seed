@@ -184,6 +184,21 @@ describe("what is refused before anything runs", () => {
     await nothingRan(f, before);
   });
 
+  it("refuses a sweep case whose sweep now gives that case id another value: nothing is launched", async () => {
+    const f = await fx();
+    const sw = await runSweepFromHostFile(f.file, { requestId: "s1", sweepId: "t", budget });
+    expect(sw.ok && sw.complete).toBe(true);
+    const before = runCount(f.project);
+    writeHostJson(f.file, { ...f.config, sweeps: { t: { base: "approved", axes: [{ id: "delayMs", values: [10, 25, 30] }] } } });
+    const r = await replayFromHostFile(f.file, replayRequest({ originalRequestId: "s1.t-002" }), policies(EXACT));
+    expect(r.ok === false && r.errors[0]!.code).toBe("E_REQUEST_CONFLICT");
+    await nothingRan(f, before);
+    // the same sweep as when it ran still replays
+    writeHostJson(f.file, f.config);
+    const same = await replayFromHostFile(f.file, replayRequest({ requestId: "rep9", originalRequestId: "s1.t-002" }), policies(EXACT));
+    expect(same.ok && same.result.verdict).toBe("reproduced");
+  });
+
   it("refuses a stale original: an input changed since it ran", async () => {
     const f = await fx();
     await run(f);

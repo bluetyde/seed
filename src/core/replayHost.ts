@@ -97,7 +97,11 @@ export async function replayFromHostFile(file: string, request: unknown, opts: {
     const caseId = admitted.request?.caseId;
     if (typeof caseId !== "string") throw Error("the original admission names no case");
     // the configuration the original ran under may differ from today's only in other cases and in the sweeps
-    const strip = (x: any) => { const { sweeps: _s, samplings: _m, cases, ...rest } = x; return { ...rest, cases: { [caseId]: cases?.[caseId] ?? null } }; };
+    // a case made by a sweep is compared by what it is now (its values), never by its name alone
+    const registered = (x: any) => { try { return allCases(x)[caseId] ?? null; } catch { return null; } };
+    // a case that is gone today is refused below with its own words (not registered), not as a changed configuration
+    const gone = registered(c) === null;
+    const strip = (x: any) => { const { sweeps: _s, samplings: _m, cases: _c, ...rest } = x; return { ...rest, cases: { [caseId]: gone ? null : registered(x) } }; };
     if (canonicalJson(strip(admitted.configuration)) !== canonicalJson(strip(c))) {
       return deny("the host configuration is not the one the original run was admitted under (the runtime, adapter, study rules, oracle evidence or the case changed): a replay across that change would not test reproduction", "E_REQUEST_CONFLICT", "/originalRequestId");
     }
