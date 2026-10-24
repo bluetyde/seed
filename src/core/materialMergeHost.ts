@@ -16,6 +16,8 @@ export type MaterialMergeOutcome =
       changes: MaterialChange[];
       revisionBefore: string;
       revisionAfter: string;
+      /** Set when the merge was written but its line in materials.jsonl could not be: the merge stands, and this says what to repair. */
+      recordingError?: string;
     }
   | { ok: false; errors: TypedError[] };
 
@@ -61,8 +63,10 @@ export function mergeMaterialsFromHost(file: string, request: unknown): Material
       note({ phase: "refused", errors: saved.errors.map((e) => ({ code: e.code, field: e.field })), revisionBefore: before });
       return { ok: false, errors: saved.errors };
     }
-    note({ phase: "merged", changes: plan.changes, revisionBefore: before, revisionAfter: saved.value.revision });
-    return { ok: true, dryRun: false, written: true, changes: plan.changes, revisionBefore: before, revisionAfter: saved.value.revision };
+    // the project is written: from here on a failure of the log is said, but never turns the merge into a refusal
+    let recordingError: string | undefined;
+    try { note({ phase: "merged", changes: plan.changes, revisionBefore: before, revisionAfter: saved.value.revision }); } catch (e) { recordingError = "the merge was written, but its line in materials.jsonl could not be: " + (e instanceof Error ? e.message : "write failed"); }
+    return { ok: true, dryRun: false, written: true, changes: plan.changes, revisionBefore: before, revisionAfter: saved.value.revision, ...(recordingError ? { recordingError } : {}) };
   } catch (e) {
     const message = e instanceof Error ? e.message : "material merge failed";
     try { note({ phase: "refused", reason: message }); } catch { /* the log cannot be written: the refusal still goes back */ }

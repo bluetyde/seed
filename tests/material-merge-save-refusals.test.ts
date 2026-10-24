@@ -1,5 +1,5 @@
 // @covers R-MAT-01
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runAdminCli } from "../src/cli/admin";
@@ -20,6 +20,19 @@ vi.mock("../src/core/projectStore", async (importOriginal) => {
   };
 });
 afterEach(() => { refusal.code = ""; for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+describe("a log that can not be written after the project was", () => {
+  it("is said in the answer; the merge stays a success and the project keeps it", async () => {
+    const f = await fixture();
+    writeHostJson(f.file, { ...f.config, actor: { kind: "human", name: "FIXTURE, not a person" } });
+    mkdirSync(join(f.state, "materials.jsonl")); // a folder where the log should be
+    const entry = { id: "fuel", revision: 1, name: "Fuel", sets: { "openmc.composition": { schema: "openmc.composition/0.1", density: 10 } } };
+    const r = await runAdminCli(["import-materials"], Readable.from([JSON.stringify({ ownedSets: ["openmc.composition"], entries: [entry] })]), f.file);
+    expect(r).toMatchObject({ code: 0, reply: { ok: true, written: true } });
+    expect((r.reply as { recordingError?: string }).recordingError).toMatch(/materials\.jsonl could not be/);
+    expect(readFileSync(join(f.project, "seed.project.json"), "utf8")).toContain("Fuel");
+  });
+});
 
 describe("a refusal of the project store itself", () => {
   it.each(["E_STALE_REVISION", "E_PROJECT_LOCKED"])("%s is passed on as it is; the file is unchanged and the log says refused", async (code) => {
