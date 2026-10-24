@@ -141,6 +141,15 @@ export function cachedShas(root: string): Set<string> {
   }
 }
 
+/** The cache entries whose content really has the digest they are named by (a name alone is not proof; a bad file is paid for again when it is replaced). */
+export async function verifiedCachedShas(root: string): Promise<Set<string>> {
+  const ok = new Set<string>();
+  for (const n of cachedShas(root)) {
+    try { if ((await sha256File(storeLayout(root).cacheFile(n))) === n) ok.add(n); } catch { /* unreadable: not a hit */ }
+  }
+  return ok;
+}
+
 /** Free bytes on the volume that holds `p` (or its nearest existing parent). */
 export function freeBytesAt(p: string): number {
   let dir = path.resolve(p);

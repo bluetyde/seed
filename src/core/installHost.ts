@@ -8,7 +8,7 @@ import { appendInstallRecord, inside, readHostJson, regularFile } from "./hostFi
 import { httpsSource, type HttpsSourceOptions } from "./httpsSource";
 import { evaluateInstallGate, foldGrants, issueInstallGrant, type Cost, type InstallDecision, type InstallGrant } from "./installGrant";
 import { appendGrantEvent, readGrantLog } from "./installGrantStore";
-import { cachedShas, readInstallState } from "./installStore";
+import { readInstallState, verifiedCachedShas } from "./installStore";
 import { OwnerStore } from "./ownerStore";
 import type { Actor } from "./policy";
 import type { TypedError } from "./validate";
@@ -158,7 +158,7 @@ export async function installFromHost(file: string, request: unknown, opts: Inst
     // what the request would do, without doing it
     const installed = readInstallState(env.root);
     if (!installed.ok) { log({ phase: "refused", errors: installed.errors.map((e) => e.code) }); return refuse(installed.errors.map(fromComponent)); }
-    const plan = resolveSelection({ manifest, installed: installed.state.installs, select, platform: env.platform, appVersion: env.appVersion, cache: cachedShas(env.root), offline: !env.source });
+    const plan = resolveSelection({ manifest, installed: installed.state.installs, select, platform: env.platform, appVersion: env.appVersion, cache: await verifiedCachedShas(env.root), offline: !env.source });
     if (!plan.ok) { log({ phase: "refused", errors: plan.errors.map((e) => e.code) }); return refuse(plan.errors.map(fromComponent)); }
     const steps = plan.steps.map((s) => ({ component: s.component, action: s.action as string, version: s.to }));
     if (plan.steps.every((s) => s.action === "keep")) {
