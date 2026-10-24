@@ -155,7 +155,7 @@ Depends on Fuel Performance Studio F3 and an OpenMC result adapter (those apps' 
 
 ## E5: advanced studies ([plan 09](docs/plans/09-advanced-studies.md))
 
-- [ ] Sensitivity and sampling studies an agent can drive; noise, input uncertainty and deterministic sensitivity reported separately (the report builder rejects a result without them).
+- [~] {R-STUDY-06} 2026-10-24 Sampling studies (plan 09, first slice; the user chose an in-house sampler): `src/core/sampler.ts` (seeded xoshiro128**, Latin hypercube and random designs, bounded uniform, triangular, truncated normal and lognormal distributions, the normal distribution function and its inverse), `sampling.ts` (a registered sampling expands to cases like a sweep; the statistics: spread over the inputs, the adapter-reported noise as a separate line, quantiles, convergence, correlations), `samplingHost.ts` (runs through the sweep runner, which `sweepHost.ts` now shares, and reads each completed run's outputs from hash-checked files), the CLI verb `sample`, `samplings` in the host configuration; [sampling.md](docs/sampling.md). Not done: an MCP tool, a report table and the report builder refusing a sampling result without the noise line, sensitivity indices, correlated inputs, nuclear-data uncertainty (needs app support). The feedback coupling driver below is not started.
 - [ ] Feedback coupling: write the exchange list, synchronization, convergence and failure criteria and the oracle plan **before** any code; coupling stays an A3 human-approved action.
 
 ## Installer/updater, still open ([plan 01](docs/plans/01-shell-and-installer.md))
