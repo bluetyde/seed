@@ -163,6 +163,19 @@ function dropVersion(c: Ctx, app: string, component: string, v: string) {
   removeEmptyParents(path.dirname(dir), c.store.root);
 }
 
+/** Where a same-version update sets the replaced folder aside (inside the transaction's staging folder). */
+const replacedDir = (c: Ctx, tx: Transaction) => path.join(c.store.staging(tx.id), "replaced");
+
+/** Puts a folder set aside by an interrupted same-version update back in place, over whatever the switch left there. */
+function restoreReplaced(c: Ctx, tx: Transaction) {
+  if (!tx.to) return;
+  const aside = replacedDir(c, tx);
+  if (!fs.existsSync(aside)) return;
+  const final = c.store.version(tx.app, tx.component, tx.to);
+  removeTree(final);
+  moveDir(aside, final);
+}
+
 function referenced(c: Ctx, app: string, component: string, v: string) {
   const r = c.find(app, component);
   return r?.version === v || r?.previous?.version === v;
@@ -197,8 +210,10 @@ async function settle(c: Ctx, report?: RecoveryReport): Promise<{ errors?: Compo
         c.save();
       } else {
         // the switch happened but what to record about it is lost: put the previous version back, never leave a record that disagrees with the pointer
-        c.end(tx, "interrupted", "the host stopped while a version was switched on, and its record was lost; the previous version was kept");
+        // the pointer first: a failure or a crash here leaves the transaction open, so the next start tries again
         if (tx.from) writePointer(c.env.root, tx.app, tx.component, tx.from); else clearPointer(c.env.root, tx.app, tx.component);
+        restoreReplaced(c, tx);
+        c.end(tx, "interrupted", "the host stopped while a version was switched on, and its record was lost; the previous version was kept");
         if (tx.to && !referenced(c, tx.app, tx.component, tx.to)) dropVersion(c, tx.app, tx.component, tx.to);
       }
     } else if (r.action === "mark-removed") {
@@ -207,6 +222,7 @@ async function settle(c: Ctx, report?: RecoveryReport): Promise<{ errors?: Compo
       tx.state = "removed";
       c.save();
     } else if (r.action === "discard-staging" || r.action === "none" || r.action === "keep-installed") {
+      restoreReplaced(c, tx);
       c.end(tx, "interrupted", `the host stopped while the ${tx.operation} was ${tx.state}; the active version is unchanged`);
       if (tx.operation !== "remove" && tx.to && active !== tx.to && !referenced(c, tx.app, tx.component, tx.to)) {
         dropVersion(c, tx.app, tx.component, tx.to);
@@ -292,10 +308,11 @@ function newRecord(c: Ctx, comp: Component, manifest: Manifest, manifestSha256: 
 async function activate(c: Ctx, tx: Transaction, app: string, comp: string, to: string, staged: string | null, rec: Installed, old: Installed | undefined) {
   const final = c.store.version(app, comp, to);
   const oldPointer = readPointer(c.env.root, app, comp);
-  let moved = false, flipped = false;
+  let moved = false, flipped = false, aside: string | null = null;
   try {
     if (staged) {
-      if (fs.existsSync(final)) removeTree(final);
+      // a changed pin under the same version number: the old folder is the active one until the switch, so it is set aside, never deleted first
+      if (fs.existsSync(final)) { aside = replacedDir(c, tx); moveDir(final, aside); }
       moveDir(staged, final);
       moved = true;
     }
@@ -314,13 +331,14 @@ async function activate(c: Ctx, tx: Transaction, app: string, comp: string, to: 
     if (old) c.put(old); else c.drop(app, comp);
     if (flipped) { if (oldPointer) writePointer(c.env.root, app, comp, oldPointer); else clearPointer(c.env.root, app, comp); }
     if (moved) dropVersion(c, app, comp, to);
+    if (aside) moveDir(aside, final);
     throw e;
   }
 }
 
 function pruneOlder(c: Ctx, old: Installed | undefined, keep: Installed) {
   const dead = old?.previous;
-  if (dead && dead.version !== keep.version && dead.version !== keep.previous?.version && dead.location.startsWith(c.store.root)) removeTree(dead.location);
+  if (dead && old && dead.version !== keep.version && dead.version !== keep.previous?.version) removeTree(c.store.version(old.app, old.component, dead.version));
 }
 
 async function installOne(c: Ctx, manifest: Manifest, manifestSha256: string, comp: Component, action: "install" | "update", selectedByUser: boolean, signal?: AbortSignal): Promise<void> {
@@ -471,12 +489,13 @@ export async function removeComponent(env: InstallEnv, manifests: Manifest | rea
       const have = c.find(app, s.component);
       if (!have) continue;
       const tx = await c.newTx("remove", app, s.component, have.version);
+      let trashed = false, saved = false;
       try {
         await c.phase(tx, "preflight");
         await c.phase(tx, "removing");
         if (s.action === "remove" && have.origin === "managed") {
           const dir = c.store.component(app, s.component);
-          if (fs.existsSync(dir)) moveDir(dir, c.store.trash(tx.id));
+          if (fs.existsSync(dir)) { moveDir(dir, c.store.trash(tx.id)); trashed = true; }
           await env.hooks?.step?.("removing:moved", tx);
           clearPointer(env.root, app, s.component);
         }
@@ -484,11 +503,21 @@ export async function removeComponent(env: InstallEnv, manifests: Manifest | rea
         tx.state = "removed";
         await env.hooks?.step?.("removing:record", tx);
         c.save();
+        saved = true;
         removeTree(c.store.trash(tx.id));
         (s.action === "remove" && have.origin === "managed" ? removed : unregistered).push(s.component);
       } catch (e) {
         if (e instanceof SimulatedCrash) throw e;
-        if (!isTerminal(tx.state)) c.end(tx, "failed", (e as Error).message);
+        let restored = "";
+        if (!saved) {
+          // the removal did not reach the state file: the files, the pointer and the record go back as they were
+          c.put(have);
+          try {
+            if (trashed && fs.existsSync(c.store.trash(tx.id))) moveDir(c.store.trash(tx.id), c.store.component(app, s.component));
+            if (have.origin === "managed") writePointer(env.root, app, s.component, have.version);
+          } catch (r) { restored = `; putting it back also failed (${(r as Error).message}), the files are in ${c.store.trash(tx.id)}`; }
+        }
+        if (!isTerminal(tx.state) || (tx.state === "removed" && !saved)) { tx.state = "removing"; c.end(tx, "failed", (e as Error).message + restored); }
         throw new Failure({ code: "E_INSTALL_FAILED", component: s.component, message: `removing ${s.component}: ${(e as Error).message}` });
       }
     }
