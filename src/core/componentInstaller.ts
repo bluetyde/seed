@@ -194,7 +194,10 @@ async function settle(c: Ctx, report?: RecoveryReport): Promise<{ errors?: Compo
   const tx = c.state.transaction;
   if (tx && !isTerminal(tx.state)) {
     const alive = await (c.env.ownerAlive ?? ownerAliveDefault)(tx.owner);
-    const active = readPointer(c.env.root, tx.app, tx.component) ?? undefined;
+    let active: string | undefined;
+    try { active = readPointer(c.env.root, tx.app, tx.component) ?? undefined; } catch (e) {
+      return { errors: [{ code: "E_INSTALL_FAILED", component: tx.component, message: `${(e as Error).message}; the unfinished ${tx.operation} is left as it is until the pointer can be read` }] };
+    }
     const rec = c.find(tx.app, tx.component);
     const present = tx.operation === "remove" ? rec !== undefined && fs.existsSync(rec.location) : undefined;
     const r = recoverTransaction(tx, { ownerAlive: alive, ...(active ? { activeVersion: active } : {}), ...(present !== undefined ? { present } : {}) });
