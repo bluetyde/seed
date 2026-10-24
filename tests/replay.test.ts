@@ -210,9 +210,17 @@ describe("policy statistical", () => {
     expect(ok(compareReplay({ original: run("a", emptySeries), replay: run("b", emptySeries), policy: tol })).verdict).toBe("not-comparable");
   });
 
-  it("a table is not compared statistically", () => {
-    const t: QuantityData = { kind: "table", quantity: "t", unit: "W", columns: [{ name: "c", unit: "W", role: "value" }], rows: [[1]] };
-    expect(ok(compareReplay({ original: run("a", t), replay: run("b", t), policy: stat })).quantities[0]).toMatchObject({ verdict: "not-comparable", code: "table-unsupported" });
+  it("a table is compared statistically by the std column of each value column; a table with none is not comparable", () => {
+    const cols = [{ name: "c", unit: "W", role: "value" as const }, { name: "s", unit: "W", role: "std" as const, of: "c" }];
+    const t = (v: number, s: number): QuantityData => ({ kind: "table", quantity: "t", unit: "W", columns: cols, rows: [[v, s], [10, 1]] });
+    // 1.0 against 2.0 with deviations 0.5 and 0.5: 1.41 sigmas, inside 3
+    expect(ok(compareReplay({ original: run("a", t(1, 0.5)), replay: run("b", t(2, 0.5)), policy: stat })).quantities[0]).toMatchObject({ verdict: "reproduced-within-tolerance" });
+    // 1.0 against 5.0: 5.6 sigmas
+    const far = ok(compareReplay({ original: run("a", t(1, 0.5)), replay: run("b", t(5, 0.5)), policy: stat }));
+    expect(far.quantities[0]).toMatchObject({ verdict: "differs" });
+    expect(far.quantities[0]!.worstSigmas).toBeGreaterThan(5);
+    const bare: QuantityData = { kind: "table", quantity: "t", unit: "W", columns: [{ name: "c", unit: "W", role: "value" }], rows: [[1]] };
+    expect(ok(compareReplay({ original: run("a", bare), replay: run("b", bare), policy: stat })).quantities[0]).toMatchObject({ verdict: "not-comparable", code: "no-uncertainty" });
   });
 });
 

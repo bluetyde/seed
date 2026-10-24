@@ -186,7 +186,17 @@ function compareData(name: string, unit: string, a: QuantityData, b: QuantityDat
     return judge(name, unit, acc, policy);
   }
   if (a.kind === "table" && b.kind === "table") {
-    if (policy.mode === "statistical") return notComparable(name, unit, "table-unsupported", "a table is not compared statistically");
+    // statistical: each value column is compared with the deviation of its own std column, from both runs; a value column with none declares no uncertainty
+    let stdOf: (number | undefined)[] | undefined;
+    if (policy.mode === "statistical") {
+      const names = a.columns.map((c) => c.name);
+      stdOf = a.columns.map((c, j) => {
+        if (c.role !== "value") return undefined;
+        const k = a.columns.findIndex((d) => d.role === "std" && d.of === c.name);
+        return k >= 0 && a.columns[k]!.name !== names[j] ? k : -1;
+      });
+      if (stdOf.some((k) => k === -1)) return notComparable(name, unit, "no-uncertainty", "a statistical policy needs a std column for every value column of a table, from both runs");
+    }
     if (a.rows.length !== b.rows.length || a.columns.length !== b.columns.length || canonicalJson(a.columns) !== canonicalJson(b.columns)) return notComparable(name, unit, "shape-mismatch", "the columns or the number of rows differ");
     let index = 0;
     for (let i = 0; i < a.rows.length; i += 1) {
@@ -194,7 +204,12 @@ function compareData(name: string, unit: string, a: QuantityData, b: QuantityDat
       if (ra.length !== rb.length) return notComparable(name, unit, "shape-mismatch", `row ${i} has a different length`);
       for (let j = 0; j < ra.length; j += 1) {
         const x = ra[j], y = rb[j];
-        if (typeof x === "number" && typeof y === "number") numeric(acc, x, y, undefined, undefined, policy, index);
+        if (stdOf !== undefined && a.columns[j]!.role === "std") { index += 1; continue; } // a deviation is the uncertainty of its value column, not a value
+        if (typeof x === "number" && typeof y === "number") {
+          const k = stdOf?.[j];
+          const sx = k !== undefined && k >= 0 ? ra[k] : undefined, sy = k !== undefined && k >= 0 ? rb[k] : undefined;
+          numeric(acc, x, y, typeof sx === "number" ? sx : undefined, typeof sy === "number" ? sy : undefined, policy, index);
+        }
         else { acc.points += 1; if (canonicalJson(x) !== canonicalJson(y)) { acc.allIdentical = false; acc.within = false; } }
         index += 1;
       }
