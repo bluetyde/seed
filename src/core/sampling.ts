@@ -139,9 +139,10 @@ export function reduceQuantity(data: QuantityData, reduce: OutputReduction): Red
   switch (reduce) {
     case "last": return at(v.length - 1);
     case "first": return at(0);
-    case "min": return at(v.indexOf(Math.min(...v)));
-    case "max": return at(v.indexOf(Math.max(...v)));
-    case "mean": return { ok: true, value: v.reduce((s, x) => s + x, 0) / v.length, std: null };
+    // loops, not Math.min(...v): a long series must not fail on the engine's limit for arguments
+    case "min": { let k = 0; for (let i = 1; i < v.length; i++) if ((v[i] as number) < (v[k] as number)) k = i; return at(k); }
+    case "max": { let k = 0; for (let i = 1; i < v.length; i++) if ((v[i] as number) > (v[k] as number)) k = i; return at(k); }
+    case "mean": { const m = v.reduce((s, x) => s + x, 0) / v.length; return Number.isFinite(m) ? { ok: true, value: m, std: null } : { ok: false, reason: "the mean of the series is too large to be a finite number" }; }
   }
 }
 
@@ -239,6 +240,10 @@ export function summarizeSampling(parameters: readonly string[], outputs: readon
       return { n: k, mean: meanOf(head), standardError: s === null ? null : s / Math.sqrt(k) };
     });
     const rms = stds.length > 0 ? Math.sqrt(stds.reduce((s, v) => s + v * v, 0) / stds.length) : null;
+    // finite numbers can still overflow when squared or summed: that is said, never reported as an unknown spread
+    if (n > 0 && !Number.isFinite(meanOf(values))) throw new Error(`the numbers of ${key} are too large to average without overflow`);
+    if (n >= 2 && (sd === null || !Number.isFinite(sd))) throw new Error(`the numbers of ${key} are too large to take a spread of without overflow`);
+    if (rms !== null && !Number.isFinite(rms)) throw new Error(`the reported noise of ${key} is too large to combine without overflow`);
     let note: string | null = null;
     if (n < runs.length) note = `${runs.length - n} of ${runs.length} planned points gave no number for this output and are left out`;
     if (n < 2) note = (note ? note + "; " : "") + "fewer than two numbers: no spread can be given";

@@ -152,6 +152,13 @@ const fin = (v: unknown): v is number => typeof v === "number" && Number.isFinit
 
 /** Null when the distribution is usable, otherwise what is wrong with it. */
 export function distributionProblem(d: unknown): string | null {
+  const p = distributionProblemOf(d);
+  if (p !== null) return p;
+  // the arithmetic of the sampler works on the width of the window: a width that overflows is a window it can not sample
+  const w = d as { min: number; max: number };
+  return Number.isFinite(w.max - w.min) ? null : "the window min to max is so wide that its width is not a finite number; use a narrower window";
+}
+function distributionProblemOf(d: unknown): string | null {
   if (d === null || typeof d !== "object") return "a distribution is an object with a kind";
   const x = d as Record<string, unknown>;
   const only = (keys: string[]) => Object.keys(x).find((k) => k !== "kind" && !keys.includes(k));
@@ -241,5 +248,10 @@ export function unitDesign(design: Design, dims: number): number[][] {
 
 /** The sample: row i holds the value of each distribution for point i. */
 export function samplePoints(design: Design, distributions: readonly Distribution[]): number[][] {
-  return unitDesign(design, distributions.length).map((row) => row.map((u, j) => roundValue(quantile(distributions[j]!, u))));
+  // rounding to twelve digits must not take a value out of its own window (a very narrow window rounds to a point outside it): then the edge itself is the value
+  return unitDesign(design, distributions.length).map((row) => row.map((u, j) => {
+    const d = distributions[j]!;
+    const v = roundValue(quantile(d, u));
+    return v < d.min ? d.min : v > d.max ? d.max : v;
+  }));
 }

@@ -60,7 +60,7 @@ describe("reconcile rebuilds the replay step and the sampling summary from their
     expect(dry).toMatchObject({ ok: true, state: "dry-run" });
     const keys = ((dry as { would: { key: string }[] }).would).map((x) => x.key);
     expect(keys).toContain("replay:rep1");
-    expect(keys).toContain("sampling:s1");
+    expect(keys).toContain("sampling:uq:s1");
 
     const done = reconcileStudyRecord(w.adminFile, {});
     expect(done).toMatchObject({ ok: true, state: "reconciled" });

@@ -19,6 +19,8 @@ export type SamplingSummary = {
   outputs: OutputSummary[];
   /** Why a run that completed gave no number for an output (the file could not be proven, the quantity is absent, the data is not a number). */
   unread: { caseId: string; output: string; reason: string }[];
+  /** The points that gave at least one number: the runs the statistics stand on (and the only ones the study step cites). */
+  used?: string[];
   caveats: string;
 };
 export type SamplingOutcome =
@@ -36,6 +38,8 @@ export type SamplingOutcome =
       /** The summary's step in the live study record: how many rows were appended (0 when the host has no human header, or the step was already there), or why it could not be. */
       studyRecord: { appended: number } | { failed: string };
       recordingError?: string;
+      /** False when every point ran but the summary could not be made: `summary.outputs` is then empty because nothing was computed, not because nothing was found. */
+      summaryAvailable?: false;
     }
   | { ok: false; errors: TypedError[] };
 
@@ -74,7 +78,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
     const message = "the runs finished but their summary could not be made: " + (e instanceof Error ? e.message : "read failed");
     recordingError = recordingError ? recordingError + "; " + message : message;
     summary = { planned: rest.results.length, completed: rest.results.filter((r) => r.state === "completed" || r.state === "terminated-by-trip").length, outputs: [], unread: [], caveats: SAMPLING_CAVEATS };
-    return { ok: true, samplingId: id, requestId: rest.requestId, results: rest.results, complete: rest.complete, ...(rest.stoppedAt ? { stoppedAt: rest.stoppedAt } : {}), summary, studyRecord: { failed: "no summary was made, so no step was written" }, recordingError };
+    return { ok: true, samplingId: id, requestId: rest.requestId, results: rest.results, complete: rest.complete, ...(rest.stoppedAt ? { stoppedAt: rest.stoppedAt } : {}), summary, studyRecord: { failed: "no summary was made, so no step was written" }, recordingError, summaryAvailable: false };
   }
   let logged: string | undefined;
   try {
@@ -112,7 +116,8 @@ export function factsOf(id: string, requestId: string, def: SamplingDefinition, 
   return {
     samplingId: id, requestId, design: def.design, parameters: def.parameters,
     planned: summary.planned, completed: summary.completed,
-    runIds: results.filter((r) => r.state === "completed" && typeof r.runId === "string").map((r) => r.runId as string).slice(0, 100),
+    // only runs that gave a number are cited: a completed run whose files could not be read is not evidence for these figures
+    runIds: results.filter((r) => r.state === "completed" && typeof r.runId === "string" && (summary.used === undefined || summary.used.includes(r.caseId))).map((r) => r.runId as string).slice(0, 100),
     outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: { rms: o.noise.rms, reportedRuns: o.noise.reportedRuns }, quantiles: o.quantiles ? { p05: o.quantiles.p05, p50: o.quantiles.p50, p95: o.quantiles.p95 } : null }))
   };
 }
@@ -144,15 +149,22 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
       if (!validate("run-record", record).ok || record.runId !== row.runId) throw Error("the saved run record does not belong to this run");
       const evidence = loadRunEvidence(projectRoot, runRoot, record);
       for (const o of def.outputs) {
-        const q = evidence.quantities.find((x) => x.name === o.quantity);
-        if (!q) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: `the run has no quantity ${o.quantity}` }); continue; }
-        const reduced = reduceQuantity(q.data, o.reduce);
-        if (!reduced.ok) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: reduced.reason }); continue; }
-        outputs[outputKey(o)] = { value: reduced.value, std: reduced.std };
+        // one output at a time: a failure of one never marks another unread, and never leaves a number counted that was also listed as unread
+        try {
+          const q = evidence.quantities.find((x) => x.name === o.quantity);
+          if (!q) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: `the run has no quantity ${o.quantity}` }); continue; }
+          const reduced = reduceQuantity(q.data, o.reduce);
+          if (!reduced.ok) { unread.push({ caseId: row.caseId, output: outputKey(o), reason: reduced.reason }); continue; }
+          outputs[outputKey(o)] = { value: reduced.value, std: reduced.std };
+        } catch (e) {
+          outputs[outputKey(o)] = null;
+          unread.push({ caseId: row.caseId, output: outputKey(o), reason: e instanceof Error ? e.message : "the output could not be reduced" });
+        }
       }
     } catch (e) {
-      for (const o of def.outputs) unread.push({ caseId: row.caseId, output: outputKey(o), reason: e instanceof Error ? e.message : "the run could not be read" });
+      for (const o of def.outputs) { outputs[outputKey(o)] = null; unread.push({ caseId: row.caseId, output: outputKey(o), reason: e instanceof Error ? e.message : "the run could not be read" }); }
     }
   }
-  return { planned: results.length, completed, outputs: summarizeSampling(def.parameters.map((p) => p.id), def.outputs, runs), unread, caveats: SAMPLING_CAVEATS };
+  const used = runs.filter((r) => Object.values(r.outputs).some((x) => x !== null)).map((r) => r.caseId);
+  return { planned: results.length, completed, outputs: summarizeSampling(def.parameters.map((p) => p.id), def.outputs, runs), unread, used, caveats: SAMPLING_CAVEATS };
 }
