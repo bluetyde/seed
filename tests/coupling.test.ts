@@ -582,3 +582,19 @@ describe("determinism", () => {
     expect(calls[0]).toBe(1);
   });
 });
+
+// ---- found by the dispatcher's breakage checks ----------------------------------------------------------------------------------------------
+
+describe("records share no object with each other", () => {
+  it("a pass's recorded iterate is its own copy, not the previous record's next", async () => {
+    const out = await runCoupling(loop({ maxPasses: 4 }, 1e-9), { x: 0 }, linear(0.5, 1));
+    expect(out.passes.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < out.passes.length; i++) {
+      expect(out.passes[i]!.iterate).toEqual(out.passes[i - 1]!.next);
+      expect(out.passes[i]!.iterate).not.toBe(out.passes[i - 1]!.next);
+    }
+    out.passes[1]!.iterate.x = 12345; // changing one record must not change another
+    expect(out.passes[0]!.next.x).not.toBe(12345);
+  });
+});
+
