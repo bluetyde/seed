@@ -113,8 +113,10 @@ export function readPointer(root: string, app: string, component: string): strin
   try {
     const v = retrySync(() => fs.readFileSync(storeLayout(root).pointer(app, component), "utf8")).trim();
     return VERSION.test(v) ? v : null;
-  } catch {
-    return null;
+  } catch (e) {
+    // no pointer is an answer; a pointer that can not be read is not (it may well name the version being decided about)
+    if ((e as NodeJS.ErrnoException).code === "ENOENT" || (e as NodeJS.ErrnoException).code === "ENOTDIR") return null;
+    throw new Error(`the pointer of ${component} could not be read: ${(e as Error).message}`);
   }
 }
 /** The one atomic step of an install: the pointer is written to a temporary file and renamed over the old one. */

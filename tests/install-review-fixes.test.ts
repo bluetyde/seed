@@ -109,3 +109,18 @@ describe("the offline cache is counted by what is in it", () => {
     expect((await verifiedCachedShas(w.root)).has(a.sha256)).toBe(true);
   });
 });
+
+describe("a pointer that can not be read", () => {
+  it("stops recovery of an unfinished install instead of being taken for 'no pointer'", async () => {
+    const w = makeWorld();
+    await run(w, [CORE("1.2.0")]);
+    await expect(run(w, [CORE("1.3.0")], [], w.with({ hooks: at("activating:pointer", () => new SimulatedCrash("x")) }))).rejects.toBeInstanceOf(SimulatedCrash);
+    const pointer = path.join(w.root, ".seed", "active", "fakeapp", "fakeapp-core");
+    fs.rmSync(pointer);
+    fs.mkdirSync(pointer); // reading a folder as a file fails with EISDIR, not ENOENT
+    const r = await recoverInstalls(w.with(dead));
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.errors[0]!.message).toMatch(/pointer of fakeapp-core could not be read/);
+    expect(fs.existsSync(w.versionDir("fakeapp-core", "1.3.0"))).toBe(true); // nothing was deleted on a guess
+  });
+});
