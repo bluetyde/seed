@@ -5,7 +5,7 @@ import { allCases, runFromHostFile, validateHostConfiguration } from "./fileRunH
 import { appendSweepRecord, regularFile } from "./hostFiles";
 import { evaluateGate, type Budget } from "./policy";
 import type { RunOutcome } from "./runManager";
-import { expandSweep } from "./sweep";
+import { expandSweep, type ExpandedCase } from "./sweep";
 import type { TypedError } from "./validate";
 
 /** Client input: a registered sweep and a per-case budget. No values, paths, actor or policy. */
@@ -32,7 +32,7 @@ export type SweepOutcome =
   | { ok: false; errors: TypedError[] };
 
 const KEYS = ["maxCores", "maxDiskMB", "maxMemoryMB", "maxWallSeconds"];
-const refusal = (message: string, code: string, field = ""): SweepOutcome => ({
+const refusal = (message: string, code: string, field = ""): { ok: false; errors: TypedError[] } => ({
   ok: false,
   errors: [{ code, field, message, source: "seed" }]
 });
@@ -48,6 +48,27 @@ export const sweepCaseRequestId = (requestId: string, caseId: string) => `${requ
 /** A run's request id is an id (64 characters at most), so the sweep's request id plus a case id must be one too. */
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+/** What differs between a sweep and a sampling: the key of its id in the request, where its decisions are logged, and how it expands. */
+export type ListMode = {
+  kind: "sweep" | "sampling";
+  idKey: "sweepId" | "samplingId";
+  log: (state: string, event: Record<string, unknown>) => void;
+  find: (c: ReturnType<typeof validateHostConfiguration>, id: string) => { base: string; expand: () => { ok: true; cases: ExpandedCase[] } | { ok: false; errors: TypedError[] }; admitted?: Record<string, unknown> } | undefined;
+};
+export type ListOutcome =
+  | { ok: true; id: string; requestId: string; results: SweepCaseResult[]; complete: boolean; stoppedAt?: { caseId: string; reason: string }; recordingError?: string }
+  | { ok: false; errors: TypedError[] };
+
+export const SWEEP_MODE: ListMode = {
+  kind: "sweep",
+  idKey: "sweepId",
+  log: (state, event) => appendSweepRecord(state, event),
+  find: (c, id) => {
+    const def = c.sweeps !== undefined && Object.hasOwn(c.sweeps, id) ? c.sweeps[id] : undefined;
+    return def === undefined ? undefined : { base: def.base, expand: () => expandSweep(id, def, c.cases, c.study) };
+  }
+};
+
 /**
  * Runs a registered sweep one case after another, each through the guarded run path (policy, pins, oracles, the
  * one-active-case-per-engine limit and the admission record apply to every case). Bounds and budget are checked for
@@ -55,23 +76,32 @@ const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
  * case, or a changed host configuration stops the sweep; the cases not started stay in the table as `not-started`.
  */
 export async function runSweepFromHostFile(file: string, request: unknown): Promise<SweepOutcome> {
-  const r = request as Partial<SweepRequest> | null;
+  const out = await runCaseList(file, request, SWEEP_MODE);
+  if (!out.ok) return out;
+  const { id, ...rest } = out;
+  return { ...rest, sweepId: id };
+}
+
+/** The one runner of a registered list of cases: a sweep's, or a sampling's. */
+export async function runCaseList(file: string, request: unknown, mode: ListMode): Promise<ListOutcome> {
+  const idKey = mode.idKey;
+  const r = request as Record<string, unknown> | null;
   if (
     r === null ||
     typeof r !== "object" ||
-    Object.keys(r).some((k) => !["requestId", "sweepId", "budget"].includes(k)) ||
+    Object.keys(r).some((k) => !["requestId", idKey, "budget"].includes(k)) ||
     typeof r.requestId !== "string" ||
     r.requestId.length < 1 ||
     r.requestId.length > 64 ||
-    typeof r.sweepId !== "string" ||
+    typeof r[idKey] !== "string" ||
     typeof r.budget !== "object" ||
     r.budget === null ||
     Object.keys(r.budget).sort().join() !== KEYS.join() ||
     Object.values(r.budget).some((v) => !Number.isSafeInteger(v) || (v as number) < 1)
   ) {
-    return refusal("invalid sweep request; only requestId, a registered sweepId and budget are accepted", "E_SCHEMA_INVALID");
+    return refusal(`invalid ${mode.kind} request; only requestId, a registered ${idKey} and budget are accepted`, "E_SCHEMA_INVALID");
   }
-  const { requestId, sweepId, budget } = r as SweepRequest;
+  const requestId = r.requestId as string, id = r[idKey] as string, budget = r.budget as Budget;
   try {
     if (!isAbsolute(file)) return refusal("SEED_HOST_CONFIG must be an absolute path", "E_SETUP_REQUIRED");
     regularFile(file);
@@ -80,16 +110,16 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
     const c = validateHostConfiguration(JSON.parse(bytes.toString("utf8")));
     const state = realpathSync(c.stateRoot);
     const note = (event: Record<string, unknown>) =>
-      appendSweepRecord(state, { sweepId, requestId, configHash, actor: c.actor, ...event });
+      mode.log(state, { [idKey]: id, requestId, configHash, actor: c.actor, ...event });
 
-    const def = c.sweeps !== undefined && Object.hasOwn(c.sweeps, sweepId) ? c.sweeps[sweepId] : undefined;
-    if (def === undefined) {
-      note({ phase: "refused", reason: "sweep is not registered" });
-      return refusal("sweep is not registered", "E_NOT_PERMITTED", "/sweepId");
+    const found = mode.find(c, id);
+    if (found === undefined) {
+      note({ phase: "refused", reason: `${mode.kind} is not registered` });
+      return refusal(`${mode.kind} is not registered`, "E_NOT_PERMITTED", `/${idKey}`);
     }
-    const expanded = expandSweep(sweepId, def, c.cases, c.study);
+    const expanded = found.expand();
     if (!expanded.ok) return { ok: false, errors: expanded.errors };
-    const base = allCases(c)[def.base];
+    const base = allCases(c)[found.base];
     const tooLong = expanded.cases.find((x) => !REQUEST_ID.test(sweepCaseRequestId(requestId, x.caseId)));
     if (tooLong !== undefined) {
       note({ phase: "refused", reason: "request id cannot be extended to a case request id" });
@@ -114,7 +144,7 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
       note({ phase: "refused", cases: expanded.cases.length, gateStop: decision.gateStop, errors: decision.errors });
       return { ok: false, errors: decision.errors };
     }
-    note({ phase: "admitted", cases: expanded.cases.length, budget, via: decision.via });
+    note({ phase: "admitted", cases: expanded.cases.length, budget, via: decision.via, ...(found.admitted ?? {}) });
 
     const results: SweepCaseResult[] = expanded.cases.map((x) => ({
       caseId: x.caseId,
@@ -138,7 +168,7 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
       const outcome: RunOutcome = await runFromHostFile(
         file,
         { requestId: row.requestId, caseId: row.caseId, budget },
-        { sweep: { sweepId, index: results.indexOf(row) + 1, count: results.length, values: row.values } }
+        { sweep: { sweepId: id, index: results.indexOf(row) + 1, count: results.length, values: row.values, kind: mode.kind } }
       );
       if (!outcome.ok) {
         // an error that carries a run id is a calculation that ran and whose record could not be completed: it is not a refusal
@@ -163,9 +193,9 @@ export async function runSweepFromHostFile(file: string, request: unknown): Prom
     } catch (e) {
       recordingError = "the sweep ran but its closing row could not be written to the sweep log: " + (e instanceof Error ? e.message : "write failed");
     }
-    return { ok: true, sweepId, requestId, results, complete, ...(stoppedAt ? { stoppedAt } : {}), ...(recordingError ? { recordingError } : {}) };
+    return { ok: true, id, requestId, results, complete, ...(stoppedAt ? { stoppedAt } : {}), ...(recordingError ? { recordingError } : {}) };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "sweep setup failed";
+    const message = e instanceof Error ? e.message : `${mode.kind} setup failed`;
     return refusal(message, "E_SETUP_REQUIRED");
   }
 }
