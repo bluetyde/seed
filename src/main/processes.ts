@@ -52,10 +52,14 @@ async function fetchStatus(url: string): Promise<number> {
 export function killTree(child: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
     if (child.exitCode !== null || child.pid === undefined) return resolve();
-    child.once("exit", () => resolve());
-    if (process.platform === "win32") nodeSpawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-    else { try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); } }
-    setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); resolve(); }, 5000).unref();
+    const pid = child.pid;
+    // done when the child has exited AND, off Windows, nothing is left in its process group (a child that outlives its parent is still the host's to stop)
+    const groupAlive = () => { if (process.platform === "win32") return false; try { process.kill(-pid, 0); return true; } catch { return false; } };
+    const finish = () => { if (groupAlive()) { try { process.kill(-pid, "SIGKILL"); } catch { /* gone meanwhile */ } } resolve(); };
+    child.once("exit", finish);
+    if (process.platform === "win32") nodeSpawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    else { try { process.kill(-pid, "SIGTERM"); } catch { child.kill("SIGTERM"); } }
+    setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); finish(); }, 5000).unref();
   });
 }
 
@@ -97,6 +101,8 @@ class OwnerHandle {
 
   running(): void { this.later(() => { if (this.record) this.store.mark(this.launchId, "running"); }); }
   end(): Promise<void> { this.later(() => { this.store.remove(this.launchId); this.record = undefined; }); return this.chain; }
+  /** The process could not be shown to be stopped: the record stays, marked orphaned, so the next start and a person can see it. */
+  orphan(): Promise<void> { this.later(() => { if (this.record) this.store.mark(this.launchId, "orphaned"); }); return this.chain; }
 }
 
 const fill = (s: string, vars: Record<string, string>) => s.replace(/\{(port|token)\}/g, (_, k: string) => vars[k] ?? "");
@@ -121,13 +127,20 @@ export class ProcessManager {
     return (this.entries.get(appId)?.output ?? []).join("");
   }
 
+  /** Held by the host while it settles the records of an earlier run: no app is opened (or attached to) until it is done, so recovery can not stop a server a new window just attached to. */
+  gate?: Promise<unknown>;
+
   /** The server for an app: the one already running, an attachable one, or a new one. Concurrent calls for one app share one start. */
   ensure(app: AppEntry): Promise<Running> {
+    return this.gate ? this.gate.then(() => this.ensureNow(app)) : this.ensureNow(app);
+  }
+
+  private ensureNow(app: AppEntry): Promise<Running> {
     const pending = this.pending.get(app.id);
     if (pending) {
       // A reopen waits for cancellation cleanup, never shares the cancelled launch.
       if (pending.controller.signal.aborted) return pending.promise.then(
-        () => this.ensure(app), () => this.ensure(app),
+        () => this.ensureNow(app), () => this.ensureNow(app),
       );
       return pending.promise;
     }
@@ -156,6 +169,12 @@ export class ProcessManager {
     if (e?.child && e.running.owned && !e.exited) {
       e.exited = true;
       await this.deps.kill(e.child);
+      // the record is dropped only for a process that is shown to be gone; a kill that returned and left it running keeps the record (orphaned)
+      if (e.child.exitCode === null && e.child.signalCode === null) {
+        e.output.push("(the server could not be shown to have stopped; its process record is kept as orphaned)\n");
+        await e.owner?.orphan();
+        return;
+      }
     }
     await e?.owner?.end();
   }

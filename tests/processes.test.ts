@@ -1,8 +1,12 @@
 // @covers R-SHELL-07
+import { spawn } from "node:child_process";
 import * as http from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AppEntry } from "../src/main/apps";
+import { OwnerStore } from "../src/core/ownerStore";
 import { freePort, ProcessManager } from "../src/main/processes";
 
 const fake = join(__dirname, "fixtures", "fake-app.cjs");
@@ -120,5 +124,55 @@ describe("ProcessManager", () => {
     await m.stop("fake");
     await new Promise((r) => setTimeout(r, 500));
     expect(exits).toEqual([]);
+  });
+});
+
+describe("stopping a server the host started", () => {
+  const deps = (kill: () => Promise<void>) => ({
+    spawn, freePort, kill, sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+    fetchStatus: async (url: string) => (await fetch(url, { signal: AbortSignal.timeout(2000) })).status,
+  });
+  it("a stop that returns while the process still runs keeps its record, marked orphaned", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
+    const owners = new OwnerStore(dir);
+    const m = new ProcessManager(deps(async () => undefined) as never, owners);
+    let pid = 0;
+    try {
+      await m.ensure(app());
+      await new Promise((r) => setTimeout(r, 400));
+      pid = owners.list().records[0]!.worker!.identity.pid;
+      await m.stop("fake");
+      const rec = owners.list().records;
+      expect(rec).toHaveLength(1);
+      expect(rec[0]!.state).toBe("orphaned");
+      expect(m.output("fake")).toBe("");
+    } finally {
+      try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("a stop that did stop it removes the record", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
+    const owners = new OwnerStore(dir);
+    const m = new ProcessManager(undefined, owners);
+    managers.push(m);
+    try {
+      await m.ensure(app());
+      await new Promise((r) => setTimeout(r, 400));
+      expect(owners.list().records).toHaveLength(1);
+      await m.stop("fake");
+      expect(owners.list().records).toHaveLength(0);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it("no app is opened while the host is still settling the records of an earlier run", async () => {
+    const m = manager();
+    let release: () => void = () => undefined;
+    m.gate = new Promise<void>((r) => { release = r; });
+    let opened = false;
+    const p = m.ensure(app()).then((x) => { opened = true; return x; });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(opened).toBe(false);
+    release();
+    expect((await p).owned).toBe(true);
   });
 });

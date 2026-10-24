@@ -72,7 +72,8 @@ export const defaultRecoveryDeps: RecoveryDeps = {
   hostIdentity: (pid) => identityOfStrict(pid),
   killWorker: async (w) => {
     if (w.via === "wsl" && !w.distro) throw new Error("a WSL worker record names no distro");
-    if (w.via === "wsl" && w.distro) { await exec("wsl.exe", ["-d", w.distro, "--exec", "kill", "-9", String(w.identity.pid)]); return; }
+    // the worker's process group first (a worker started by the host leads one, so its children go with it), then the process itself
+    if (w.via === "wsl" && w.distro) { await exec("wsl.exe", ["-d", w.distro, "--exec", "sh", "-c", `kill -9 -- -${w.identity.pid} 2>/dev/null; kill -9 ${w.identity.pid} 2>/dev/null; true`]); return; }
     await killNativeTree(w.identity.pid);
   },
 };
