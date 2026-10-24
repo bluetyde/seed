@@ -385,3 +385,65 @@ describe("Morris effects against analytic answers", () => {
     for (const bad of [Number.NaN, Infinity]) expect(() => morrisEffects([bad, ...ok.slice(1)], design)).toThrow(/not a finite number/);
   });
 });
+
+// ---- found by the dispatcher's breakage checks (4 changes the first 33 tests did not catch) ----------------------------------------------------
+
+describe("the bootstrap resamples every row, with the right tails, and survives resamples of no variance", () => {
+  const n = 64, d = 2;
+  const data = () => {
+    const design = sobolUnitDesign({ n, d, seed: 5, method: "lhs" });
+    return sobolSplit(sobolRows(design).map((u) => u[0]! + 0.5 * u[1]!), n, d);
+  };
+
+  it("every row can be drawn: changing only the last row changes the interval (a draw that never reached the last row would not)", () => {
+    const a = data();
+    const b = data();
+    b.fA[n - 1] = b.fA[n - 1]! + 25;
+    b.fB[n - 1] = b.fB[n - 1]! - 25;
+    b.fAB.forEach((f) => { f[n - 1] = f[n - 1]! + 40; });
+    const ra = sobolIndices(a.fA, a.fB, a.fAB, { bootstrap: { seed: 9, resamples: 200 } });
+    const rb = sobolIndices(b.fA, b.fB, b.fAB, { bootstrap: { seed: 9, resamples: 200 } });
+    const lastRowOnlyMatters = ra.parameters.some((p, i) => p.firstInterval![0] !== rb.parameters[i]!.firstInterval![0] || p.totalInterval![1] !== rb.parameters[i]!.totalInterval![1]);
+    expect(lastRowOnlyMatters).toBe(true);
+  });
+
+  it("the 95% interval is wider than the 50% interval by about the ratio of a normal curve (1.96 / 0.674 = 2.9), and both are centred on the estimate", () => {
+    const m = 4096;
+    const design = sobolUnitDesign({ n: m, d: 3, seed: 21, method: "lhs" });
+    const { fA, fB, fAB } = sobolSplit(sobolRows(design).map(ishigamiUnit), m, 3);
+    const wide = sobolIndices(fA, fB, fAB, { bootstrap: { seed: 4, resamples: 400, level: 0.95 } });
+    const narrow = sobolIndices(fA, fB, fAB, { bootstrap: { seed: 4, resamples: 400, level: 0.5 } });
+    wide.parameters.forEach((p, i) => {
+      const w = p.totalInterval![1] - p.totalInterval![0];
+      const q = narrow.parameters[i]!.totalInterval![1] - narrow.parameters[i]!.totalInterval![0];
+      expect(q).toBeGreaterThan(0);
+      expect(w / q).toBeGreaterThan(2.2);
+      expect(w / q).toBeLessThan(3.8);
+      expect(p.totalInterval![0]).toBeLessThan(p.total);
+      expect(p.totalInterval![1]).toBeGreaterThan(p.total);
+    });
+  });
+
+  it("resamples with no variance are skipped and counted, and never turn an interval into NaN", () => {
+    // 8 rows where one row differs: a resample that misses it is constant, so it has no variance (probability (7/8)^8, about one in three)
+    const fA = [1, 1, 1, 1, 1, 1, 1, 9], fB = [1, 1, 1, 1, 1, 1, 1, 1], fAB = [[1, 1, 1, 1, 1, 1, 1, 5]];
+    const r = sobolIndices(fA, fB, fAB, { bootstrap: { seed: 3, resamples: 300 } });
+    expect(r.bootstrap!.skipped).toBeGreaterThan(30);
+    expect(r.bootstrap!.skipped).toBeLessThan(250);
+    const p = r.parameters[0]!;
+    for (const v of [...p.firstInterval!, ...p.totalInterval!]) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe("a Morris trajectory moves the parameters in a random order", () => {
+  it("over 40 trajectories of 3 parameters all 6 orders occur", () => {
+    const design = morrisUnitDesign({ r: 40, d: 3, seed: 17 });
+    const orders = new Set(design.steps.map((t) => t.map((s) => s.parameter).join(",")));
+    expect(orders.size).toBe(6);
+  });
+});
+
+function ishigamiUnit(u: readonly number[]): number {
+  const x = u.map((v) => -Math.PI + 2 * Math.PI * v);
+  return Math.sin(x[0]!) + 7 * Math.sin(x[1]!) ** 2 + 0.1 * x[2]! ** 4 * Math.sin(x[0]!);
+}
