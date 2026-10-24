@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { distributionProblem, samplePoints } from "../src/core/sampler";
 import { reduceQuantity, summarizeSampling, type SampleRun } from "../src/core/sampling";
-import { factsOf, type SamplingSummary } from "../src/core/samplingHost";
+import { basisProblem, factsOf, type SamplingSummary } from "../src/core/samplingHost";
 import { samplingStepDraft, type SamplingFacts } from "../src/core/studyRecordHost";
 import type { QuantityData } from "../src/core/quantityData";
 import { FIXTURE_HUMAN } from "./helpers/studyFixtures";
@@ -53,6 +53,17 @@ describe("the windows the sampler accepts", () => {
     expect(distributionProblem(d)).toBeNull();
     const pts = samplePoints({ method: "lhs", n: 50, seed: 3 }, [d]);
     for (const [v] of pts) { expect(v).toBeGreaterThanOrEqual(d.min); expect(v).toBeLessThanOrEqual(d.max); }
+  });
+});
+
+describe("one output in one unit", () => {
+  it("the first run read sets the unit and normalization; a run in kW after a run in W is left out with the reason", () => {
+    const basis = new Map<string, string>();
+    expect(basisProblem(basis, "p:last", { unit: "W", normalization: "per-run" })).toBeNull();
+    expect(basisProblem(basis, "p:last", { unit: "W", normalization: "per-run" })).toBeNull();
+    expect(basisProblem(basis, "p:last", { unit: "kW", normalization: "per-run" })).toMatch(/not combined/);
+    expect(basisProblem(basis, "p:last", { unit: "W", normalization: "per-kg" })).toMatch(/not combined/);
+    expect(basisProblem(basis, "q:last", { unit: "kW", normalization: "per-run" })).toBeNull();
   });
 });
 
