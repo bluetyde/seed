@@ -126,7 +126,7 @@ describe("Sobol indices against analytic answers", () => {
     const n = 8;
     const fA = Array.from({ length: n }, (_, i) => (i % 2 ? 1e155 : 0));
     const zero = new Array<number>(n).fill(0);
-    expect(() => sobolIndices(fA, fA.slice(), [zero])).toThrow(/too large/);
+    expect(() => sobolIndices(fA, fA.slice(), [zero])).toThrow(/mean or variance overflows/);
   });
   it("a constant output has no variance: refused, not NaN", () => {
     const n = 16;

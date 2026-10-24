@@ -111,10 +111,8 @@ function estimate(fA: readonly number[], fB: readonly number[], fAB: readonly (r
       s1 += (fB[j]! - mean) * (f[j]! - fA[j]!);
       s2 += (fA[j]! - f[j]!) ** 2;
     }
-    const fi = s1 / m / variance, ti = s2 / (2 * m) / variance;
-    if (!Number.isFinite(fi) || !Number.isFinite(ti)) throw new Error("the model outputs are too large: an index overflows");
-    first.push(fi);
-    total.push(ti);
+    first.push(s1 / m / variance);
+    total.push(s2 / (2 * m) / variance);
   }
   return { mean, variance, first, total };
 }
