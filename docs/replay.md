@@ -18,7 +18,7 @@ Replay means: run a recorded case a second time and say whether the second run *
 | `tolerance` (`abs`, `rel`) | the difference is at most `abs + rel * max(|a|, |b|)` | deterministic apps with platform noise |
 | `statistical` (`sigmas`) | the difference is at most `sigmas` combined standard deviations, `sqrt(sa² + sb²)` | Monte Carlo (OpenMC); both runs must declare an uncertainty |
 
-Never invented: a statistical policy with a run that declares no uncertainty is `not-comparable` (`no-uncertainty`). Tables are compared cell by cell under `exact` and `tolerance`, and not at all under `statistical`. A series needs the same grid and axis. Units and normalization must match.
+Never invented: a statistical policy with a run that declares no uncertainty is `not-comparable` (`no-uncertainty`). Tables are compared cell by cell under `exact` and `tolerance`. Under `statistical` each value column is compared with the deviation in its own std column (`of` names the value column), taken from both runs; a table with a value column that has no std column is `not-comparable` (`no-uncertainty`), and the std columns themselves are not compared as values. A series needs the same grid and axis. Units and normalization must match.
 
 **Verdicts per quantity:** `reproduced` (every number identical), `reproduced-within-tolerance`, `differs`, `not-comparable` (with a code: `kind-mismatch`, `unit-mismatch`, `normalization-mismatch`, `grid-mismatch`, `shape-mismatch`, `table-unsupported`, `no-uncertainty`). **The whole replay takes the worst:** `differs`, then `not-comparable`, then `reproduced-within-tolerance`, then `reproduced`. A quantity in only one run is a difference.
 
