@@ -32,21 +32,27 @@ export function readHostJson(file: string): any {
   regularFile(file);
   return JSON.parse(readFileSync(file, "utf8"));
 }
+function lstatOrNull(path: string): import("node:fs").Stats | null {
+  try {
+    return lstatSync(path);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+}
 export function safeChild(root: string, name: string, directory = false): string {
   const parent = realpathSync(root);
   const child = join(parent, name);
   if (!inside(parent, child) || child === parent) throw Error("host state path leaves its root");
   let ancestor = parent;
+  // lstat, not existsSync: a link whose target is missing does not "exist" to existsSync, and writing through it would leave the root
   for (const component of relative(parent, child).split(sep)) {
     ancestor = join(ancestor, component);
-    if (existsSync(ancestor) && lstatSync(ancestor).isSymbolicLink())
-      throw Error("host state path must not contain linked ancestors");
+    if (lstatOrNull(ancestor)?.isSymbolicLink()) throw Error("host state path must not contain linked ancestors");
   }
-  if (existsSync(child)) {
-    const s = lstatSync(child);
-    if (s.isSymbolicLink() || (directory ? !s.isDirectory() : !s.isFile()))
-      throw Error("host state path must not be a link or have the wrong type");
-  }
+  const s = lstatOrNull(child);
+  if (s !== null && (s.isSymbolicLink() || (directory ? !s.isDirectory() : !s.isFile())))
+    throw Error("host state path must not be a link or have the wrong type");
   return child;
 }
 /** Flush the contents before rename. Local filesystem; directory metadata durability is OS-dependent. */
@@ -191,12 +197,14 @@ export async function withEngineLease<T>(
     mkdirSync(lease);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      let recordingFailure = "";
       try {
         onBusy?.();
-      } catch {
-        // recording a refusal must never change the refusal
+      } catch (recordError) {
+        // recording a refusal never changes the refusal, but a refusal nobody can find in the journal is said
+        recordingFailure = " (the refusal could not be recorded: " + (recordError instanceof Error ? recordError.message : String(recordError)).slice(0, 200) + ")";
       }
-      throw Error("E_ENGINE_BUSY: engine lease exists; it may be running or need human recovery");
+      throw Error("E_ENGINE_BUSY: engine lease exists; it may be running or need human recovery" + recordingFailure);
     }
     throw e;
   }
