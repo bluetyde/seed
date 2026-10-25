@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export function writeFileAtomic(absPath: string, data: string): void {
@@ -7,7 +7,14 @@ export function writeFileAtomic(absPath: string, data: string): void {
   mkdirSync(dir, { recursive: true });
   const tmpPath = `${absPath}.tmp-${randomBytes(6).toString("hex")}`;
   try {
-    writeFileSync(tmpPath, data, "utf8");
+    // the contents reach the disk before the rename makes them the file: a power failure leaves the old file or the new one, not a hole
+    const fd = openSync(tmpPath, "wx");
+    try {
+      writeFileSync(fd, data, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(tmpPath, absPath);
   } catch (err) {
     try {

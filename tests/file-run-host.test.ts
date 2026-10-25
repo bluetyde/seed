@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { Readable, PassThrough } from "node:stream";
 import { afterEach, expect, it } from "vitest";
 import { canonicalJson, sha256Hex } from "../src/core/canonical";
-import { appendAdmission, readHostJson, withEngineLease, writeHostJson } from "../src/core/hostFiles";
+import { appendAdmission, readHostJson, safeChild, withEngineLease, writeHostJson } from "../src/core/hostFiles";
 import { runFromHostFile, saveHostConfiguration, validateHostConfiguration, type HostConfiguration } from "../src/core/fileRunHost";
 import { createProject, openProject, saveProject } from "../src/core/projectStore";
 import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/oracle";
@@ -389,6 +389,22 @@ it("linked engine directories cannot redirect writes outside host state", async 
   symlinkSync(target, join(root, "state/engines"), process.platform === "win32" ? "junction" : "dir");
   await expect(withEngineLease(join(root, "state"), "runtime", async engine => appendAdmission(engine, { data: "bad" }))).rejects.toThrow();
   expect(readdirSync(target)).toEqual(["sentinel"]); expect(readFileSync(join(target, "sentinel"), "utf8")).toBe("untouched");
+});
+
+it("a link whose target is missing is still a link: the host state path refuses it", () => {
+  const root = mkdtempSync(join(tmpdir(), "seed-dangling-")); dirs.push(root);
+  mkdirSync(join(root, "state"));
+  symlinkSync(join(root, "nowhere"), join(root, "state/engines"), process.platform === "win32" ? "junction" : "dir");
+  expect(existsSync(join(root, "state/engines"))).toBe(false); // existsSync follows the link, finds nothing, and says so
+  expect(() => safeChild(join(root, "state"), "engines", true)).toThrow(/link/);
+});
+
+it("a busy refusal that could not be recorded says so, and is still a busy refusal", async () => {
+  const root = mkdtempSync(join(tmpdir(), "seed-busy-")); dirs.push(root);
+  mkdirSync(join(root, "state"));
+  await withEngineLease(join(root, "state"), "runtime", async () => {
+    await expect(withEngineLease(join(root, "state"), "runtime", async () => 1, () => { throw new Error("journal disk full"); })).rejects.toThrow(/E_ENGINE_BUSY.*could not be recorded: journal disk full/);
+  });
 });
 
 it("separate command-line processes share the engine lease", async () => {

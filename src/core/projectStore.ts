@@ -53,6 +53,11 @@ export type LockOptions = {
 
 export const MANIFEST_FILE = "seed.project.json";
 
+/** When the callback threw and the lock could not be released either, the caller must see both: the lock may still stand and block the next writer. */
+function keepReleaseFailure(thrown: unknown, releaseError: TypedError | null): void {
+  if (releaseError !== null && thrown instanceof Error) thrown.message += ` (and the lock could not be released: ${releaseError.message})`;
+}
+
 function toInternalError(e: unknown): TypedError {
   const nodeErr = e as NodeJS.ErrnoException;
   const code = nodeErr?.code ?? "UNKNOWN";
@@ -669,7 +674,7 @@ export function withProjectLock<T>(dir: string, fn: () => T, opts?: LockOptions)
   try {
     val = lockScope.run(acq.scope, fn);
   } catch (err: unknown) {
-    acq.release();
+    keepReleaseFailure(err, acq.release());
     throw err;
   }
   const releaseError = acq.release();
@@ -702,7 +707,7 @@ export async function withProjectLockAsync<T>(dir: string, fn: () => Promise<T>,
     val = await lockScope.run(acq.scope, fn);
   } catch (err: unknown) {
     if (timer) clearInterval(timer);
-    acq.release();
+    keepReleaseFailure(err, acq.release());
     throw err;
   }
   if (timer) clearInterval(timer);
@@ -727,7 +732,7 @@ export function saveProject(
   try {
     result = lockScope.run(acq.scope, () => saveLocked(dir, manifest, expectedRevision, opts, lockFence(dir)));
   } catch (err: unknown) {
-    acq.release();
+    keepReleaseFailure(err, acq.release());
     throw err;
   }
   const releaseError = acq.release();
@@ -985,7 +990,7 @@ export function recoverProject(dir: string, opts?: LockOptions): StoreResult<str
   try {
     result = recoverLocked(dir);
   } catch (err: unknown) {
-    acq.release();
+    keepReleaseFailure(err, acq.release());
     throw err;
   }
   const releaseError = acq.release();
