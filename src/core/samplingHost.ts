@@ -71,7 +71,9 @@ function withoutCollisions(c: HostConfiguration, id: string, expanded: ReturnTyp
 function baseMismatch(c: HostConfiguration, id: string, def: SamplingDefinition): string | undefined {
   if (c.samplings !== undefined && Object.hasOwn(c.samplings, id)) return undefined;
   const approved = approvedBaseDigest(realpathSync(c.stateRoot), id);
-  if (approved === undefined || approved === caseDigest(c.cases[def.base])) return undefined;
+  if (approved === undefined) return undefined;
+  if (approved === null) return `the approved proposal ${id} was made before proposals were bound to their base case; propose and approve it again. Nothing was run`;
+  if (approved === caseDigest(c.cases[def.base])) return undefined;
   return `the base case ${def.base} of this host is not the one the approved proposal ${id} was made against; nothing was run`;
 }
 

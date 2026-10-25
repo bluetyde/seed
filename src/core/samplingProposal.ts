@@ -82,10 +82,10 @@ export function approvedSampling(stateRoot: string, id: string): SamplingDefinit
   return s?.state === "approved" ? s.definition : undefined;
 }
 
-/** The digest of the base case an approved proposal was made against, or undefined (not approved, or a proposal from before the digest was kept). */
-export function approvedBaseDigest(stateRoot: string, id: string): string | undefined {
+/** The digest of the base case an approved proposal was made against; `null` for an approved proposal from before the digest was kept; undefined when it is not approved. */
+export function approvedBaseDigest(stateRoot: string, id: string): string | null | undefined {
   const s = foldProposals(readProposalLog(stateRoot)).find((p) => p.proposalId === id);
-  return s?.state === "approved" ? s.baseCaseSha256 : undefined;
+  return s?.state === "approved" ? (s.baseCaseSha256 ?? null) : undefined;
 }
 
 /** The digest that stands for a registered case: the same case under the same id in another host configuration has the same digest. */

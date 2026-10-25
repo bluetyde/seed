@@ -203,8 +203,23 @@ export async function runCouplingFromHostFile(file: string, request: unknown, bu
       }
       const pins = [...flatInputs(loop), couplingRegistrationPin(loopId, loop)];
 
-      /** Everything that must hold now: the inputs as granted (manifest and bytes), every app's oracle set and pins, and the gate. */
+      const registered = pins.at(-1) as Revision;
+      /**
+       * Everything that must hold now: the configuration as it is on disk now (grants, accepted pins and the loop's registration are read again, so a
+       * revoked grant or an edited registration stops the loop at the next pass), the inputs as granted (manifest and bytes), every app's oracle set
+       * and pins, and the gate.
+       */
       const admit = (): { ok: true; via: "tier" | "grant"; grantId?: string } | { ok: false; reason: string; errors: TypedError[]; gateStop?: unknown } => {
+        let now: CouplingHostConfig;
+        try {
+          now = validateCouplingHostConfig(JSON.parse(readFileSync(file, "utf8")));
+        } catch (e) {
+          return { ok: false, reason: "configuration unreadable", errors: [err("E_SETUP_REQUIRED", "", "the coupling host configuration cannot be read or is no longer valid: " + (e instanceof Error ? e.message : String(e)))] };
+        }
+        const nowLoop = Object.hasOwn(now.loops, loopId) ? (now.loops[loopId] as CouplingLoopRegistration) : undefined;
+        if (!nowLoop || couplingRegistrationPin(loopId, nowLoop).revision !== registered.revision) {
+          return { ok: false, reason: "registration changed", errors: [err("E_STALE_REVISION", "/loopId", `the registration of the loop ${loopId} is not the one this request started with`)] };
+        }
         const opened = openProject(project);
         if (!opened.ok) return { ok: false, reason: "the project cannot be opened", errors: opened.errors };
         const artifacts = opened.value.manifest.artifacts as { id: string; path: string; revision: { hash: string } }[];
@@ -216,7 +231,7 @@ export async function runCouplingFromHostFile(file: string, request: unknown, bu
         }
         let pinsChanged = false, oracleBlocked = false;
         for (const id of loop.apps) {
-          const app = config.apps[id] as CouplingHostConfig["apps"][string];
+          const app = now.apps[id] as CouplingHostConfig["apps"][string];
           const auth = loadOracleAuthority(app.oracles, app.adapter, state);
           const flags = oracleFlags({ acceptedPins: app.acceptedPins, ...auth }, app.adapter);
           pinsChanged ||= flags.pinsChanged;
@@ -224,7 +239,7 @@ export async function runCouplingFromHostFile(file: string, request: unknown, bu
         }
         const decision = evaluateGate(
           { operation: "enable_coupling", actor: config.actor, studyId: config.study.studyId, inputRevisions: pins, cases: def.maxPasses * loop.apps.length },
-          { study: config.study, grants: config.grants ?? [], pinsChanged, oracleBlocked }
+          { study: now.study, grants: now.grants ?? [], pinsChanged, oracleBlocked }
         );
         if (!decision.allow) return { ok: false, reason: "gate", errors: decision.errors, gateStop: decision.gateStop };
         return { ok: true, via: decision.via, ...(decision.grantId ? { grantId: decision.grantId } : {}) };
@@ -258,7 +273,7 @@ export async function runCouplingFromHostFile(file: string, request: unknown, bu
         let res: Awaited<ReturnType<PassFunction>>;
         try {
           // The project, the apps and the grant are checked again before every pass: a loop does not go on over inputs nobody approved.
-          const again = index === 1 ? first : admit();
+          const again = admit();
           res = again.ok ? await made(iterate, index) : { ok: false, reason: `before pass ${index} the loop was no longer admissible: ${again.errors.map((e) => e.message).join("; ")}` };
         } catch (e) {
           res = { ok: false, reason: "the pass threw: " + (e instanceof Error ? e.message : String(e)) };

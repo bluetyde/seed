@@ -235,7 +235,7 @@ function fuelTemperatureOf(ft) {
   for (const s of ft.slices) {
     if (!s || !finite(s.zMin) || !finite(s.zMax) || !(s.zMax > s.zMin) || s.zMin < last - 1e-12 || !finite(s.volumeMean) || !(s.volumeMean > 0)) return "a slice of the fuel temperature has no usable bounds or volume mean";
     // the slices are one stack: each starts where the one before ends, so a slice that is missing is a gap, not a shorter pin
-    if (last !== -Infinity && s.zMin > last + 1e-9 * Math.max(1, Math.abs(last))) return "the slices of the fuel temperature leave a gap: a slice is missing";
+    if (last !== -Infinity && s.zMin > last + 1e-9) return "the slices of the fuel temperature leave a gap: a slice is missing";
     last = s.zMax;
   }
   const values = ft.slices.map((s) => s.volumeMean), lengths = ft.slices.map((s) => s.zMax - s.zMin);
