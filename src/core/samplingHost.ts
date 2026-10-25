@@ -6,7 +6,7 @@ import { loadRunEvidence } from "./runEvidence";
 import { recordSamplingInStudy, type SamplingFacts } from "./studyRecordHost";
 import { openProject } from "./projectStore";
 import type { Budget } from "./policy";
-import { expandSampling, outputKey, reduceQuantity, summarizeSampling, SAMPLING_CAVEATS, type OutputSummary, type SampleRun, type SamplingDefinition } from "./sampling";
+import { expandSampling, outputKey, reduceQuantity, sensitivityOf, summarizeSampling, summaryRunsOf, SAMPLING_CAVEATS, type OutputSummary, type SampleRun, type SamplingDefinition, type SensitivityResult } from "./sampling";
 import { runCaseList, type ListMode, type SweepCaseResult } from "./sweepHost";
 import { validate, type TypedError } from "./validate";
 
@@ -19,6 +19,8 @@ export type SamplingSummary = {
   outputs: OutputSummary[];
   /** Why a run that completed gave no number for an output (the file could not be proven, the quantity is absent, the data is not a number). */
   unread: { caseId: string; output: string; reason: string }[];
+  /** For a `sobol` or `morris` design: per output, the indices or effects of each parameter (or why there are none). Absent for `lhs` and `random`. */
+  sensitivity?: Record<string, SensitivityResult>;
   /** The points that gave at least one number: the runs the statistics stand on (and the only ones the study step cites). */
   used?: string[];
   caveats: string;
@@ -122,7 +124,7 @@ export function factsOf(id: string, requestId: string, def: SamplingDefinition, 
     planned: summary.planned, completed: summary.completed,
     // only runs that gave a number are cited: a completed run whose files could not be read is not evidence for these figures
     runIds: results.filter((r) => r.state === "completed" && typeof r.runId === "string" && (summary.used === undefined || summary.used.includes(r.caseId))).map((r) => r.runId as string).slice(0, 100),
-    outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: { rms: o.noise.rms, reportedRuns: o.noise.reportedRuns }, quantiles: o.quantiles ? { p05: o.quantiles.p05, p50: o.quantiles.p50, p95: o.quantiles.p95 } : null }))
+    outputs: summary.outputs.map((o) => ({ key: o.key, n: o.n, mean: o.mean, inputSpread: o.inputSpread, noise: { rms: o.noise.rms, reportedRuns: o.noise.reportedRuns }, quantiles: o.quantiles ? { p05: o.quantiles.p05, p50: o.quantiles.p50, p95: o.quantiles.p95 } : null, ...(summary.sensitivity?.[o.key] ? { sensitivity: summary.sensitivity[o.key] } : {}) }))
   };
 }
 
@@ -199,5 +201,8 @@ function readSummary(c: HostConfiguration, def: SamplingDefinition, results: Swe
     }
   }
   const used = runs.filter((r) => Object.values(r.outputs).some((x) => x !== null)).map((r) => r.caseId);
-  return { planned: results.length, completed, outputs: summarizeSampling(def.parameters.map((p) => p.id), def.outputs, runs), unread, used, caveats: SAMPLING_CAVEATS };
+  const outputs = summarizeSampling(def.parameters.map((p) => p.id), def.outputs, summaryRunsOf(def.design, runs));
+  if (def.design.method === "morris") for (const o of outputs) o.note = (o.note ? o.note + "; " : "") + "the points are a walk on a grid, not a sample: this spread is over the grid, and the ranking is in the Morris effects";
+  const sensitivity = sensitivityOf(def, runs);
+  return { planned: results.length, completed, outputs, unread, ...(sensitivity ? { sensitivity } : {}), used, caveats: SAMPLING_CAVEATS };
 }
