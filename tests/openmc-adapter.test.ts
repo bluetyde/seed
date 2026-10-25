@@ -73,10 +73,10 @@ function generate(projectFile: string, outFile: string) {
 }
 
 /** A project holding the triso example (fixed source, 1000 particles x 10 batches), settings edited, model.py regenerated to match. */
-function openmcProject(edit: (p: Vec) => void = () => {}, requestSettings: Record<string, unknown> = {}) {
+function openmcProject(edit: (p: Vec) => void = () => {}, requestSettings: Record<string, unknown> = {}, source = join(triso, "triso-particle.openmc-studio.json")) {
   const root = tmpDir();
   for (const d of ["models", "runs", "studies", "oracles"]) mkdirSync(join(root, d));
-  const project = read(join(triso, "triso-particle.openmc-studio.json"));
+  const project = read(source);
   edit(project);
   const projectPath = "models/triso.openmc-studio.json";
   const modelPath = "models/model.py";
@@ -121,7 +121,7 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       expect(r.ok).toBe(true);
       expect(r.result.engine).toMatchObject({ name: "OpenMC" });
       expect(r.result.capabilities).toEqual(expect.arrayContaining(["validate", "run", "cancel", "collect", "fixed-source"]));
-      expect(r.result.quantities.every((q: { normalization: string }) => q.normalization === "per-source-particle")).toBe(true);
+      expect(r.result.quantities.filter((q: { name: string }) => q.name !== "keff").every((q: { normalization: string }) => q.normalization === "per-source-particle")).toBe(true);
     }, 180000);
 
     it("describe passes on the transfer the runner accepts as a receiving end (the fuel temperature from FEED)", async () => {
@@ -140,7 +140,8 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       const eig = openmcProject(p => { p.settings.runMode = "eigenvalue"; });
       const e = okReply(await ask(eig.root, { verb: "validate", artifact: eig.artifact }));
       expect(e.result.valid).toBe(false);
-      expect(e.result.problems.map((x: { code: string; field: string }) => x.code + x.field)).toContain("E_UNSUPPORTED/settings/runMode");
+      // an eigenvalue run is accepted since 2026-10-25; this one is too short (10 batches, the runner wants 30 active)
+      expect(e.result.problems.map((x: { code: string; field: string }) => x.code + x.field)).toContain("E_BOUNDS_EXCEEDED/settings/batches");
 
       const broken = openmcProject(p => { p.materials = []; });
       const b = okReply(await ask(broken.root, { verb: "validate", artifact: broken.artifact }));
@@ -250,13 +251,35 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       expect(read(join(p.root, "runs", withSeed.runId, "native", "job.json")).payloadHash).toMatch(/^[0-9a-f]{64}$/);
     }, 300000);
 
-    it("an eigenvalue project is refused by the runner's first-slice check before a job exists", async () => {
+    it("an eigenvalue project below the runner's minimum size is refused before a job exists", async () => {
       const p = openmcProject(x => { x.settings.runMode = "eigenvalue"; });
       const out = await start(p, "req-eig");
       // Refused before a run exists: the adapter's typed errors come straight back and nothing is reserved.
       expect(out.ok).toBe(false);
-      expect(JSON.stringify(!out.ok && out.errors)).toContain("E_UNSUPPORTED");
+      expect(JSON.stringify(!out.ok && out.errors)).toContain("E_BOUNDS_EXCEEDED");
       expect(readdirSync(join(p.root, "runs")).some(r => existsSync(join(p.root, "runs", r, "native", "job.json")))).toBe(false);
+    }, 300000);
+
+    // Studio's own eigenvalue fixture (a UO2 pin cell, 1000 x 40, 10 inactive; written by `node test/generate_fixtures.js` in Studio, so a clone without it skips)
+    const eigenvalueFixture = join(repo, "test", "generated", "eigenvalue_pin.project.json");
+    it.skipIf(!existsSync(eigenvalueFixture))("an eigenvalue run completes and its k-eff comes with a standard deviation, unverified, not per source particle", async () => {
+      const p = openmcProject(() => {}, {}, eigenvalueFixture);
+      expect(p.project.settings).toMatchObject({ runMode: "eigenvalue", batches: 40, inactive: 10, particles: 1000 });
+      const out = await start(p, "req-keff");
+      if (!out.ok) throw new Error(JSON.stringify(out.errors));
+      if (out.state !== "completed") throw new Error(JSON.stringify(out.record));
+      expect(out.state).toBe("completed");
+      const index = read(join(p.root, "runs", out.runId, "results.json"));
+      expect(validate("results-index", index)).toEqual({ ok: true });
+      expect(checkResultsIndex(index)).toEqual([]);
+      const q = index.quantities.find((x: { name: string }) => x.name === "keff");
+      expect(q).toMatchObject({ unit: "1", dimension: "dimensionless", normalization: "none", verification: "unverified" });
+      expect(q.uncertainty.value).toBeGreaterThan(0);
+      const data = read(join(p.root, q.data.path));
+      expect(data.rows[0][1]).toBeGreaterThan(0.1);
+      expect(data.rows[0][1]).toBeLessThan(3);
+      expect(data.rows[0][2]).toBe(q.uncertainty.value);
+      expect(index.nativeStatus.detail).toContain("eigenvalue");
     }, 300000);
 
     it("cancel stops OpenMC inside WSL as well as the Windows processes, and collects nothing", async () => {

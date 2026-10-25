@@ -36,7 +36,7 @@ OpenMC repo, branch `claude/seed-adapter` (merged into OpenMC Studio main on 202
 `studio/openmc_studio/headless.py`, the app-owned runner: `describe | validate | run | cancel`, one JSON line each. Runs `model.py`
 as a child in its own session; run folder with `manifest.json` written last and atomically (sha256 per file), `results.json`
 (Studio's own `results.load`, checked against the project's particles/batches/seed, no wall-clock values), `provenance.json`.
-Refuses outside the first slice (fixed source, no tracks, at most 1e6 particles and 1000 batches, a seed, at least one tally).
+Refuses outside the first slice (fixed source or steady eigenvalue, no tracks, at most 1e6 particles and 1000 batches, a seed; a fixed-source project needs at least one tally). An eigenvalue run (2026-10-25; Studio's `docs/seed-eigenvalue-runs.md`) needs at least 30 active batches of 1000 particles and fission neutrons on; its result is the quantity `keff` (unit `1`, dimension `dimensionless`, normalization `none`, `unverified`) with its standard error as the declared statistical uncertainty. At the minimum size the noise is about 534 pcm.
 Cancel proves the child by OS start time and process group, kills the group, and refuses a stranger (`E_NOT_OWNED`).
 Tests (`test/test_headless.py`, 11, real OpenMC 0.15.3 in WSL `Ubuntu` env `openmc-mcnp`, ~65 s): a mutation that removes the ownership
 check is caught. Finding: the same seed gives byte-identical results at one thread, but only equal to ~1e-12 relative at several
