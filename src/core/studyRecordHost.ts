@@ -161,9 +161,26 @@ export type SamplingFacts = {
   completed: number;
   /** The runs whose outputs were read (the first 100 are cited by the step). */
   runIds: string[];
-  outputs: { key: string; n: number; mean: number | null; inputSpread: number | null; noise: { rms: number | null; reportedRuns: number }; quantiles: { p05: number; p50: number; p95: number } | null }[];
+  outputs: { key: string; n: number; mean: number | null; inputSpread: number | null; noise: { rms: number | null; reportedRuns: number }; quantiles: { p05: number; p50: number; p95: number } | null; sensitivity?: SensitivityFacts }[];
 };
+/** The indices or effects of one output as the step and the log keep them (the same figures as the reply). */
+export type SensitivityFacts =
+  | { method: "sobol"; n: number; d: number; parameters: { id: string; first: number; total: number; firstInterval?: [number, number]; totalInterval?: [number, number] }[]; bootstrap?: { resamples: number; level: number; skipped: number } }
+  | { method: "morris"; r: number; d: number; parameters: { id: string; mu: number; muStar: number; sigma: number }[] }
+  | { method: "sobol" | "morris"; unavailable: string };
 const MAX_CITED_RUNS = 100;
+const range = (i: [number, number] | undefined) => (i ? ` [${num(i[0])}, ${num(i[1])}]` : "");
+/** One sentence on the indices or effects of an output; it never contains the word that starts the next output block. */
+function sensitivityText(s: SensitivityFacts): string {
+  if ("unavailable" in s) return ` ${s.method === "sobol" ? "Sobol indices" : "Morris effects"} are not available: ${s.unavailable}.`;
+  if (s.method === "sobol") {
+    const first = s.parameters.map((p) => `${p.id} ${num(p.first)}${range(p.firstInterval)}`).join(", ");
+    const total = s.parameters.map((p) => `${p.id} ${num(p.total)}${range(p.totalInterval)}`).join(", ");
+    return ` Sobol first-order: ${first}. Sobol total-order: ${total}${s.bootstrap ? ` (bootstrap ${Math.round(s.bootstrap.level * 100)}% intervals over ${s.bootstrap.resamples} resamples)` : ""}. Estimates, not exact shares; one can fall slightly outside 0 to 1.`;
+  }
+  const eff = s.parameters.map((p) => `${p.id} mu* ${num(p.muStar)} (mu ${num(p.mu)}, sigma ${num(p.sigma)})`).join(", ");
+  return ` Morris effects over ${s.r} trajectories: ${eff}. A ranking of the inputs, not a share of the variance.`;
+}
 const num = (x: number | null) => (x === null ? "none" : Number(x.toPrecision(6)).toString());
 const distText = (d: SamplingFacts["parameters"][number]["distribution"]) =>
   d.kind === "uniform" ? `uniform ${d.min} to ${d.max}` : d.kind === "triangular" ? `triangular ${d.min}, mode ${d.mode}, ${d.max}` : d.kind === "normal" ? `normal mean ${d.mean} sd ${d.sd} cut to ${d.min} to ${d.max}` : `lognormal mu ${d.mu} sigma ${d.sigma} cut to ${d.min} to ${d.max}`;
@@ -179,7 +196,7 @@ export function samplingStepDraft(a: { actor: Actor; time: string; facts: Sampli
   const block = (o: SamplingFacts["outputs"][number]) => {
     const noise = o.noise.rms === null ? "not reported by the adapter" : `${num(o.noise.rms)} rms over ${o.noise.reportedRuns} runs`;
     const q = o.quantiles ? `; p05, p50, p95 ${num(o.quantiles.p05)}, ${num(o.quantiles.p50)}, ${num(o.quantiles.p95)}` : "";
-    return ` Output ${o.key} (n ${o.n}): mean ${num(o.mean)}; input spread ${num(o.inputSpread)}; sampling noise ${noise}${q}.`;
+    return ` Output ${o.key} (n ${o.n}): mean ${num(o.mean)}; input spread ${num(o.inputSpread)}; sampling noise ${noise}${q}.${o.sensitivity ? sensitivityText(o.sensitivity) : ""}`;
   };
   const tail = " Input spread is the spread of the outputs over the sampled inputs and includes each run's noise; sampling noise is what the adapter reported and is never added to or taken from the spread. This describes the declared inputs only and is not a scientific conclusion.";
   const head = (params: string) => `Sampling summary ${f.samplingId} (request ${f.requestId}): ${f.completed} of ${f.planned} points ran to the end; design ${f.design.method}, n ${f.design.n}, seed ${f.design.seed}; ${params}.`;

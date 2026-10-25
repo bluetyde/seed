@@ -248,8 +248,13 @@ export function unitDesign(design: Design, dims: number): number[][] {
 
 /** The sample: row i holds the value of each distribution for point i. */
 export function samplePoints(design: Design, distributions: readonly Distribution[]): number[][] {
+  return pointsFromUnit(unitDesign(design, distributions.length), distributions);
+}
+
+/** The values of the distributions at the given unit points (row i, column j: probability for distribution j; strictly inside 0 and 1). */
+export function pointsFromUnit(unit: readonly (readonly number[])[], distributions: readonly Distribution[]): number[][] {
   // rounding to twelve digits must not take a value out of its own window (a very narrow window rounds to a point outside it): then the edge itself is the value
-  return unitDesign(design, distributions.length).map((row) => row.map((u, j) => {
+  return unit.map((row) => row.map((u, j) => {
     const d = distributions[j]!;
     const v = roundValue(quantile(d, u));
     return v < d.min ? d.min : v > d.max ? d.max : v;

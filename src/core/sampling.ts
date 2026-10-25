@@ -1,4 +1,5 @@
-import { DISTRIBUTION_KINDS, MAX_SEED, distributionProblem, samplePoints, type Design, type Distribution } from "./sampler";
+import { DISTRIBUTION_KINDS, MAX_SEED, distributionProblem, pointsFromUnit, unitDesign, type Design, type DesignMethod, type Distribution } from "./sampler";
+import { morrisEffects, morrisUnitDesign, openUnit, sobolIndices, sobolRows, sobolSplit, sobolUnitDesign, type MorrisDesign, type SobolDesign } from "./sensitivity";
 import { DEFAULT_MAX_CASES, type PolicyStudy } from "./policy";
 import type { QuantityData } from "./quantityData";
 import type { RegisteredCase } from "./runDispatcher";
@@ -15,9 +16,16 @@ import type { TypedError } from "./validate";
 export type OutputReduction = "last" | "first" | "min" | "max" | "mean";
 export const REDUCTIONS: readonly OutputReduction[] = ["last", "first", "min", "max", "mean"];
 export type SamplingOutput = { quantity: string; reduce: OutputReduction };
+/**
+ * `lhs` and `random` draw n points from the declared distributions. `sobol` (n is the base size: n*(d+2) runs, n at least 8) and `morris` (n is the
+ * number of trajectories: n*(d+1) runs, n at least 2) are the sensitivity designs of docs/sensitivity.md: they also give which parameter causes the spread.
+ */
+export type SamplingMethod = DesignMethod | "sobol" | "morris";
+export const SAMPLING_METHODS: readonly SamplingMethod[] = ["lhs", "random", "sobol", "morris"];
+export type SamplingDesign = { method: SamplingMethod; n: number; seed: number };
 export type SamplingDefinition = {
   base: string;
-  design: Design;
+  design: SamplingDesign;
   parameters: { id: string; distribution: Distribution }[];
   outputs: SamplingOutput[];
 };
@@ -31,6 +39,29 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const bad = (field: string, message: string): { ok: false; errors: TypedError[] } => ({ ok: false, errors: [{ code: "E_SCHEMA_INVALID", field, message, source: "seed" }] });
 const outputKey = (o: SamplingOutput) => `${o.quantity}:${o.reduce}`;
 export { outputKey };
+
+export const SOBOL_MIN_N = 8;
+export const MORRIS_MIN_R = 2;
+
+/** How many runs a design makes for `dims` parameters. */
+export function designRuns(design: SamplingDesign, dims: number): number {
+  if (design.method === "sobol") return design.n * (dims + 2);
+  if (design.method === "morris") return design.n * (dims + 1);
+  return design.n;
+}
+
+/** The design in the unit hypercube: its rows in run order, and for the two sensitivity methods the design object the estimators need. Pure. */
+export function unitPoints(design: SamplingDesign, dims: number): { rows: number[][]; sobol?: SobolDesign; morris?: MorrisDesign } {
+  if (design.method === "sobol") {
+    const sobol = sobolUnitDesign({ n: design.n, d: dims, seed: design.seed, method: "lhs" });
+    return { rows: sobolRows(sobol), sobol };
+  }
+  if (design.method === "morris") {
+    const morris = morrisUnitDesign({ r: design.n, d: dims, seed: design.seed });
+    return { rows: morris.points.map((row) => row.map(openUnit)), morris };
+  }
+  return { rows: unitDesign(design as Design, dims) };
+}
 
 /** The lowest and highest value a distribution can give. */
 export function support(d: Distribution): [number, number] {
@@ -55,18 +86,21 @@ export function expandSampling(
   if (typeof def.base !== "string" || !Object.hasOwn(cases, def.base)) return bad(`${at}/base`, `base case ${String(def.base)} is not registered`);
   const base = cases[def.base] as RegisteredCase;
 
-  const d = def.design as Partial<Design> | null;
+  const d = def.design as Partial<SamplingDesign> | null;
   if (d === null || typeof d !== "object") return bad(`${at}/design`, "the design has a method, n and a seed");
   const dExtra = Object.keys(d).find((k) => !["method", "n", "seed"].includes(k));
   if (dExtra !== undefined) return bad(`${at}/design/${dExtra}`, `the design has method, n and seed; not ${dExtra}`);
-  if (d.method !== "lhs" && d.method !== "random") return bad(`${at}/design/method`, "the design method is lhs (Latin hypercube) or random");
-  if (!Number.isSafeInteger(d.n) || (d.n as number) < MIN_POINTS) return bad(`${at}/design/n`, `n is a whole number of at least ${MIN_POINTS}`);
+  if (!SAMPLING_METHODS.includes(d.method as SamplingMethod)) return bad(`${at}/design/method`, "the design method is lhs (Latin hypercube), random, sobol or morris");
+  const least = d.method === "sobol" ? SOBOL_MIN_N : d.method === "morris" ? MORRIS_MIN_R : MIN_POINTS;
+  if (!Number.isSafeInteger(d.n) || (d.n as number) < least) return bad(`${at}/design/n`, `n is a whole number of at least ${least}${d.method === "sobol" ? " (the base size of a Sobol design)" : d.method === "morris" ? " (the number of Morris trajectories)" : ""}`);
   if (!Number.isInteger(d.seed) || (d.seed as number) < 0 || (d.seed as number) > MAX_SEED) return bad(`${at}/design/seed`, "the seed is a whole number from 0 to 4294967295");
+  const design = d as SamplingDesign;
+  const dims = Array.isArray(def.parameters) ? def.parameters.length : 0;
+  const runs = designRuns(design, dims);
   const limit = Math.min(study.budget.maxCases ?? DEFAULT_MAX_CASES, HARD_MAX_CASES);
-  if ((d.n as number) > limit) {
-    return { ok: false, errors: [{ code: "E_BUDGET_EXCEEDED", field: `${at}/design/n`, message: `the sampling has ${d.n} points, over the study limit of ${limit} cases (a person raises maxCases in the study budget)`, source: "seed", range: { max: limit } }] };
+  if (runs > limit) {
+    return { ok: false, errors: [{ code: "E_BUDGET_EXCEEDED", field: `${at}/design/n`, message: `the sampling has ${runs} points (${design.method} with n ${design.n} and ${dims} parameters), over the study limit of ${limit} cases (a person raises maxCases in the study budget)`, source: "seed", range: { max: limit } }] };
   }
-  const design = d as Design;
 
   if (!Array.isArray(def.parameters) || def.parameters.length < 1 || def.parameters.length > MAX_SAMPLING_PARAMETERS) return bad(`${at}/parameters`, `a sampling has 1 to ${MAX_SAMPLING_PARAMETERS} parameters`);
   const seen = new Set<string>();
@@ -102,7 +136,7 @@ export function expandSampling(
     outs.add(outputKey(o));
   }
 
-  const points = samplePoints(design, def.parameters.map((p) => p.distribution));
+  const points = pointsFromUnit(unitPoints(design, def.parameters.length).rows, def.parameters.map((p) => p.distribution));
   const out: ExpandedCase[] = points.map((row, i) => {
     const registered = structuredClone(base);
     const settings: Record<string, unknown> = { ...(registered.settings ?? {}) };
@@ -266,6 +300,65 @@ export function summarizeSampling(parameters: readonly string[], outputs: readon
       note
     };
   });
+}
+
+// ---- sensitivity ----------------------------------------------------------------------------------------------------------------------------
+
+export type SensitivityResult =
+  | {
+      method: "sobol"; n: number; d: number; mean: number; variance: number;
+      parameters: { id: string; first: number; total: number; firstInterval?: [number, number]; totalInterval?: [number, number] }[];
+      bootstrap?: { resamples: number; level: number; skipped: number };
+    }
+  | { method: "morris"; r: number; d: number; parameters: { id: string; mu: number; muStar: number; sigma: number }[] }
+  | { method: "sobol" | "morris"; unavailable: string };
+
+/**
+ * The runs the ordinary summary (mean, spread, noise, quantiles) stands on. A Sobol design's A and B matrices are each a plain sample of the declared
+ * distributions, so the summary uses those 2n runs; the AB runs are hybrids and are left to the indices. A Morris design is a walk on a grid, not a sample:
+ * all its runs are summarised, and the summary says what that spread is.
+ */
+export function summaryRunsOf(design: SamplingDesign, runs: readonly SampleRun[]): SampleRun[] {
+  return design.method === "sobol" ? runs.slice(0, 2 * design.n) : runs.slice();
+}
+
+/**
+ * Sobol indices or Morris effects of every output, from all the runs of the design in run order. An output with a run that gave no number has no
+ * indices (the estimators need every row): it says so, and names how many are missing. Never invents a number. Pure, seeded: the bootstrap of the
+ * Sobol intervals uses the design's seed.
+ */
+export function sensitivityOf(def: SamplingDefinition, runs: readonly SampleRun[]): Record<string, SensitivityResult> | undefined {
+  const method = def.design.method;
+  if (method !== "sobol" && method !== "morris") return undefined;
+  const ids = def.parameters.map((p) => p.id);
+  const design = unitPoints(def.design, ids.length);
+  const out: Record<string, SensitivityResult> = {};
+  for (const o of def.outputs) {
+    const key = outputKey(o);
+    const values = runs.map((r) => r.outputs[key]?.value);
+    const missing = values.filter((v) => v === undefined).length;
+    if (values.length !== design.rows.length || missing > 0) {
+      out[key] = { method, unavailable: `${missing > 0 ? missing : "some"} of the ${design.rows.length} runs gave no number for this output, and the ${method === "sobol" ? "Sobol" : "Morris"} estimators need every run of the design` };
+      continue;
+    }
+    try {
+      if (method === "sobol") {
+        const { fA, fB, fAB } = sobolSplit(values as number[], def.design.n, ids.length);
+        const r = sobolIndices(fA, fB, fAB, { bootstrap: { seed: def.design.seed } });
+        out[key] = {
+          method, n: r.n, d: r.d, mean: r.mean, variance: r.variance,
+          parameters: r.parameters.map((p, j) => ({ id: ids[j] as string, first: p.first, total: p.total, ...(p.firstInterval ? { firstInterval: p.firstInterval } : {}), ...(p.totalInterval ? { totalInterval: p.totalInterval } : {}) })),
+          ...(r.bootstrap ? { bootstrap: r.bootstrap } : {})
+        };
+      } else {
+        const eff = morrisEffects(values as number[], design.morris as MorrisDesign);
+        out[key] = { method, r: def.design.n, d: ids.length, parameters: eff.map((e, j) => ({ id: ids[j] as string, mu: e.mu, muStar: e.muStar, sigma: e.sigma })) };
+      }
+    } catch (e) {
+      out[key] = { method, unavailable: e instanceof Error ? e.message : "the estimators refused these numbers" };
+    }
+  }
+  return out;
 }
 
 export const SAMPLING_CAVEATS =

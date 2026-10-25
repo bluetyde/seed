@@ -150,7 +150,7 @@
             "additionalProperties": false,
             "required": ["method", "n", "seed"],
             "properties": {
-              "method": { "enum": ["lhs", "random"] },
+              "method": { "enum": ["lhs", "random", "sobol", "morris"] },
               "n": { "type": "integer", "minimum": 2 },
               "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
             }
