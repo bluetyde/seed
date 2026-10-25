@@ -3,6 +3,7 @@ import { runFromHostFile } from "../core/fileRunHost";
 import { runSweepFromHostFile } from "../core/sweepHost";
 import { replayFromHostFile } from "../core/replayHost";
 import { runSamplingFromHostFile } from "../core/samplingHost";
+import { proposeSamplingFromHost, samplingProposalStatus } from "../core/samplingProposalHost";
 import { addStudyNote } from "../core/studyNoteHost";
 import { queryFromHostFile } from "../core/queryHost";
 import { requestHostCancellation } from "../core/hostControl";
@@ -65,9 +66,9 @@ export async function runCli(
     },
   });
   const transferVerbs = ["transfer-propose", "transfer-status", "transfer-apply"];
-  if (argv.length !== 1 || !["run", "sweep", "sample", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", "list-components", ...transferVerbs].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "sweep", "sample", "sampling-propose", "sampling-status", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", "list-components", ...transferVerbs].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|sweep|sample|replay|note|query|cancel|report|draft-conclusion|install-component|list-components|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|sweep|sample|sampling-propose|sampling-status|replay|note|query|cancel|report|draft-conclusion|install-component|list-components|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   const isTransfer = transferVerbs.includes(argv[0]!);
@@ -105,6 +106,10 @@ export async function runCli(
             ? await runSweepFromHostFile(hostConfig!, request)
             : argv[0] === "sample"
             ? await runSamplingFromHostFile(hostConfig!, request)
+            : argv[0] === "sampling-propose"
+            ? proposeSamplingFromHost(hostConfig!, request)
+            : argv[0] === "sampling-status"
+            ? samplingProposalStatus(hostConfig!, request)
             : argv[0] === "replay"
               ? await replayFromHostFile(hostConfig!, request)
             : argv[0] === "note"

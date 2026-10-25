@@ -6,6 +6,7 @@ import { loadRunEvidence } from "./runEvidence";
 import { recordSamplingInStudy, type SamplingFacts } from "./studyRecordHost";
 import { openProject } from "./projectStore";
 import type { Budget } from "./policy";
+import { approvedSampling } from "./samplingProposal";
 import { expandSampling, outputKey, reduceQuantity, sensitivityOf, summarizeSampling, summaryRunsOf, SAMPLING_CAVEATS, type OutputSummary, type SampleRun, type SamplingDefinition, type SensitivityResult } from "./sampling";
 import { runCaseList, type ListMode, type SweepCaseResult } from "./sweepHost";
 import { validate, type TypedError } from "./validate";
@@ -45,12 +46,18 @@ export type SamplingOutcome =
     }
   | { ok: false; errors: TypedError[] };
 
+/** The sampling registered under `id`: one the host configuration holds, or else one a person approved from an agent's proposal (the state folder's proposal log). */
+function registeredSampling(c: HostConfiguration, id: string): SamplingDefinition | undefined {
+  if (c.samplings !== undefined && Object.hasOwn(c.samplings, id)) return c.samplings[id];
+  return approvedSampling(realpathSync(c.stateRoot), id);
+}
+
 const SAMPLING_MODE: ListMode = {
   kind: "sampling",
   idKey: "samplingId",
   log: (state, event) => appendSamplingRecord(state, event),
   find: (c: HostConfiguration, id: string) => {
-    const def = c.samplings !== undefined && Object.hasOwn(c.samplings, id) ? c.samplings[id] : undefined;
+    const def = registeredSampling(c, id);
     return def === undefined
       ? undefined
       : { base: def.base, expand: () => expandSampling(id, def, c.cases, c.study), admitted: { design: def.design, parameters: def.parameters.map((p) => p.id), outputs: def.outputs.map(outputKey) } };
@@ -77,7 +84,7 @@ export async function runSamplingFromHostFile(file: string, request: unknown): P
   try {
     if (hashBefore !== undefined && sha256Hex(readFileSync(file)) !== hashBefore) throw Error("the host configuration changed while the points ran, so their summary would describe them by another definition");
     c = validateHostConfiguration(readHostJson(file));
-    def = (c.samplings as Record<string, SamplingDefinition>)[id] as SamplingDefinition;
+    def = registeredSampling(c, id) as SamplingDefinition;
     summary = readSummary(c, def, rest.results);
   } catch (e) {
     // the cases ran; a summary that cannot be made is said, with nothing invented
