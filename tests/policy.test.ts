@@ -124,6 +124,13 @@ describe("human-only operations (A4: never grantable)", () => {
 });
 
 describe("grants (A3 and approval stops)", () => {
+  it("a transfer is held by the oracle and pin blocks like any run operation", () => {
+    const g = ctx("A3", { grants: [grantFor("enable_transfer")] });
+    expect(evaluateGate(req("enable_transfer", agent, { inputRevisions: REV }), { ...g, oracleBlocked: true }).allow).toBe(false);
+    expect(evaluateGate(req("enable_transfer", agent, { inputRevisions: REV }), { ...g, pinsChanged: true }).allow).toBe(false);
+    expect(evaluateGate(req("enable_transfer", agent, { inputRevisions: REV }), g).allow).toBe(true);
+  });
+
   it("enable_transfer needs a grant even at tier A3", () => {
     const d = evaluateGate(req("enable_transfer", agent, { inputRevisions: REV }), ctx("A3"));
     expect(d.allow).toBe(false);

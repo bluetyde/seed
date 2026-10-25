@@ -1,5 +1,5 @@
 // A fake target app's `transfer` command: heating bins (a table: bin label, mean in eV per source particle, std) onto axial slices.
-// The recipe's mapping.spatial.slices name the bins of each slice. FAKE_TRANSFER_MODE: good | lossy | exit | garbage | nochange | refuse.
+// The recipe's mapping.spatial.slices name the bins of each slice. FAKE_TRANSFER_MODE: good | lossy | exit | garbage | nochange | refuse | dishonest | dishonest-flag.
 const fs = require("fs");
 const mode = process.env.FAKE_TRANSFER_MODE || "good";
 const request = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -28,5 +28,6 @@ const total = [...mean.values()].reduce((a, b) => a + b, 0) * rate * EV_J;
 const mapped = Object.values(power).reduce((a, b) => a + b, 0);
 const rel = Math.abs(mapped - total) / total;
 if (rel > r.tolerance.conservation) { reply({ ok: false, errors: [{ code: "E_CONSERVATION", field: "/tolerance/conservation", message: "mapped " + mapped + " W, source " + total + " W" }] }); process.exit(0); }
+if (mode === "dishonest" || mode === "dishonest-flag") { reply({ ok: true, output: { content: JSON.stringify({ pin: "pin-1", powerW: 0 }) + String.fromCharCode(10) }, checks: { conservation: mode === "dishonest" ? { relativeDifference: 0.5, tolerance: r.tolerance.conservation } : { ok: false } } }); process.exit(0); }
 const content = mode === "nochange" ? request.target.content : JSON.stringify({ pin: "pin-1", powerW: power, from: request.recipeDigest }) + "\n";
 reply({ ok: true, output: { content }, checks: { conservation: { relativeDifference: rel, tolerance: r.tolerance.conservation } } });

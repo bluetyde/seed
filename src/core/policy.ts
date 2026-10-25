@@ -52,7 +52,7 @@ export const OPERATION_RULES = {
 export type Operation = keyof typeof OPERATION_RULES;
 
 const TIER_ORDER: Record<Tier, number> = { A0: 0, A1: 1, A2: 2, A3: 3 };
-const RUN_OPERATIONS: ReadonlySet<string> = new Set(["run_case", "run_sweep", "new_revision", "propose_transfer", "enable_coupling"]);
+const RUN_OPERATIONS: ReadonlySet<string> = new Set(["run_case", "run_sweep", "new_revision", "propose_transfer", "enable_transfer", "enable_coupling"]);
 /** Operations that occupy the engine: they obey the one-active-case-per-engine limit. Oracle runs do too. */
 const ENGINE_OPERATIONS: ReadonlySet<string> = new Set([...RUN_OPERATIONS, "run_oracles"]);
 const BUDGET_KEYS: (keyof Budget)[] = ["maxWallSeconds", "maxCores", "maxMemoryMB", "maxDiskMB"];
