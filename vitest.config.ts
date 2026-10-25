@@ -23,6 +23,8 @@ export default defineConfig({
   test: {
     environment: "node",
     testTimeout: 30_000,
+    // makes every child process a test starts hide its console window on Windows (a window takes the focus from whatever the person is doing)
+    setupFiles: ["tests/helpers/hideWindows.ts"],
     projects: [
       { extends: true, test: { name: "unit", include: ["tests/*.test.ts"], exclude: runtime } },
       { extends: true, test: { name: "runtime", include: runtime, fileParallelism: false } },

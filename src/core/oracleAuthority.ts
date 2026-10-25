@@ -24,7 +24,7 @@ export function loadOracleAuthority(o: OracleSource, adapter: string | { id: str
   if (entries.errors.length) throw Error("oracle entry could not be verified");
   const currentEntries = latestEntries(entries.entries, adapterId);
   for (const item of currentEntries) if (checkOracleInputs(item.entry, o.inputsRoot).length) throw Error("oracle inputs changed");
-  const git = spawnSync("git", ["-C", o.repository, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 10000 });
+  const git = spawnSync("git", ["-C", o.repository, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 10000, windowsHide: true });
   if (git.status !== 0 || !/^[0-9a-f]{40}$/.test(git.stdout.trim())) throw Error("could not determine app commit");
   const currentPins = pinsOf(currentEntries, git.stdout.trim());
   // The journal is consulted whenever the host says where its state is. Without a state folder nothing is recorded, so nothing blocks.
