@@ -5,7 +5,7 @@ import { allCases, validateHostConfiguration, type HostConfiguration } from "./f
 import { inside, readHostJson, regularFile } from "./hostFiles";
 import { expandSampling, type SamplingDefinition } from "./sampling";
 import {
-  MAX_PENDING_PER_ACTOR, MAX_PROPOSALS, PROPOSAL_ID, appendProposalEvent, definitionHash, foldProposals, readProposalLog, type ProposalActor, type ProposalState
+  MAX_PENDING_PER_ACTOR, MAX_PROPOSALS, PROPOSAL_ID, appendProposalEvent, caseDigest, definitionHash, foldProposals, readProposalLog, type ProposalActor, type ProposalState
 } from "./samplingProposal";
 import type { TypedError } from "./validate";
 
@@ -35,7 +35,7 @@ const actorOf = (c: HostConfiguration): ProposalActor => ({ kind: c.actor.kind, 
 
 /** What a reader needs to judge a proposal. */
 export function describe(p: ProposalState) {
-  return { proposalId: p.proposalId, state: p.state, proposedBy: p.proposedBy, definitionSha256: p.definitionSha256, definition: p.definition, ...(p.note ? { note: p.note } : {}), ...(p.decidedBy ? { decidedBy: p.decidedBy } : {}), ...(p.reason ? { reason: p.reason } : {}) };
+  return { proposalId: p.proposalId, state: p.state, proposedBy: p.proposedBy, definitionSha256: p.definitionSha256, definition: p.definition, ...(p.baseCaseSha256 ? { baseCaseSha256: p.baseCaseSha256 } : {}), ...(p.note ? { note: p.note } : {}), ...(p.decidedBy ? { decidedBy: p.decidedBy } : {}), ...(p.reason ? { reason: p.reason } : {}) };
 }
 
 /** Agent: proposes a sampling. The definition is checked exactly as a registered one is (bounds, distributions, budget), so a proposal that could not run is refused now. */
@@ -64,7 +64,7 @@ export function proposeSamplingFromHost(file: string, request: unknown): Proposa
       if (all.length >= MAX_PROPOSALS) return { refuse: "the sampling proposal log holds its limit of proposals; a person archives it" };
       if (all.filter((p) => p.state === "pending" && p.proposedBy.name === actor.name && p.proposedBy.kind === actor.kind).length >= MAX_PENDING_PER_ACTOR) return { refuse: `${actor.name} has ${MAX_PENDING_PER_ACTOR} proposals waiting for a person; wait for a decision` };
       const hash = definitionHash(def);
-      return { event: { type: "proposed" as const, proposalId: id, actor, definition: def, definitionSha256: hash, ...(typeof r.note === "string" ? { note: r.note } : {}) }, value: hash };
+      return { event: { type: "proposed" as const, proposalId: id, actor, definition: def, definitionSha256: hash, baseCaseSha256: caseDigest(c.cases[def.base]), ...(typeof r.note === "string" ? { note: r.note } : {}) }, value: hash };
     });
     if (!made.ok) return refuse(made.message, "E_REQUEST_CONFLICT");
     return { ok: true, proposalId: id, state: "pending", definitionSha256: made.value as string, runs: expanded.cases.length };
@@ -107,6 +107,8 @@ function decide(file: string, request: unknown, kind: "approved" | "rejected"): 
         // the definition must still be valid under today's host configuration (study bounds and budget can have changed since it was proposed)
         const again = expandSampling(id, p.definition, c.cases, c.study);
         if (!again.ok) return { refuse: "the proposal no longer fits this host: " + again.errors.map((e) => e.message).join("; ") };
+        // the base case must be the one the proposal was checked against: another host configuration can resolve the same id to another case
+        if (p.baseCaseSha256 !== undefined && p.baseCaseSha256 !== caseDigest(c.cases[p.definition.base])) return { refuse: `the base case ${p.definition.base} of this host is not the one the proposal was made against; nothing is approved` };
         // a case registered since the proposal may now hold the id of one of its points; allCases would keep that case and the sampling would run it
         const taken = allCases(c);
         const clash = again.cases.find((x) => Object.hasOwn(taken, x.caseId));

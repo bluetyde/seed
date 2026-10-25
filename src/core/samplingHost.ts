@@ -6,7 +6,7 @@ import { loadRunEvidence } from "./runEvidence";
 import { recordSamplingInStudy, type SamplingFacts } from "./studyRecordHost";
 import { openProject } from "./projectStore";
 import type { Budget } from "./policy";
-import { approvedSampling } from "./samplingProposal";
+import { approvedBaseDigest, approvedSampling, caseDigest } from "./samplingProposal";
 import { expandSampling, outputKey, reduceQuantity, sensitivityOf, summarizeSampling, summaryRunsOf, SAMPLING_CAVEATS, type OutputSummary, type SampleRun, type SamplingDefinition, type SensitivityResult } from "./sampling";
 import { runCaseList, type ListMode, type SweepCaseResult } from "./sweepHost";
 import { validate, type TypedError } from "./validate";
@@ -57,13 +57,22 @@ function registeredSampling(c: HostConfiguration, id: string): SamplingDefinitio
  * replaced by a proposal's point), so a point whose id is taken would run that other case and be reported under the sampling's planned values: the
  * whole sampling is refused instead, before anything runs.
  */
-function withoutCollisions(c: HostConfiguration, id: string, expanded: ReturnType<typeof expandSampling>): ReturnType<typeof expandSampling> {
+function withoutCollisions(c: HostConfiguration, id: string, expanded: ReturnType<typeof expandSampling>, baseProblem?: string): ReturnType<typeof expandSampling> {
   if (!expanded.ok) return expanded;
+  if (baseProblem) return { ok: false, errors: [{ code: "E_REQUEST_CONFLICT", field: "/samplingId", message: baseProblem, source: "seed" }] };
   const taken = allCases(c);
   const clash = expanded.cases.find((x) => !Object.hasOwn(taken, x.caseId) || canonicalJson(taken[x.caseId]) !== canonicalJson(x.registered));
   return clash
     ? { ok: false, errors: [{ code: "E_REQUEST_CONFLICT", field: "/samplingId", message: `the point ${clash.caseId} of the sampling ${id} is not the case registered under that id (another case holds it); nothing was run`, source: "seed" }] }
     : expanded;
+}
+
+/** For a sampling a person approved from a proposal: the base case this host holds must be the one the proposal was made against. A sampling of the host configuration itself has none to compare. */
+function baseMismatch(c: HostConfiguration, id: string, def: SamplingDefinition): string | undefined {
+  if (c.samplings !== undefined && Object.hasOwn(c.samplings, id)) return undefined;
+  const approved = approvedBaseDigest(realpathSync(c.stateRoot), id);
+  if (approved === undefined || approved === caseDigest(c.cases[def.base])) return undefined;
+  return `the base case ${def.base} of this host is not the one the approved proposal ${id} was made against; nothing was run`;
 }
 
 const SAMPLING_MODE: ListMode = {
@@ -74,7 +83,7 @@ const SAMPLING_MODE: ListMode = {
     const def = registeredSampling(c, id);
     return def === undefined
       ? undefined
-      : { base: def.base, expand: () => withoutCollisions(c, id, expandSampling(id, def, c.cases, c.study)), admitted: { design: def.design, parameters: def.parameters.map((p) => p.id), outputs: def.outputs.map(outputKey) } };
+      : { base: def.base, expand: () => withoutCollisions(c, id, expandSampling(id, def, c.cases, c.study), baseMismatch(c, id, def)), admitted: { design: def.design, parameters: def.parameters.map((p) => p.id), outputs: def.outputs.map(outputKey) } };
   }
 };
 
