@@ -27,8 +27,8 @@ export const NOISE_SIGMAS = 2;
 
 export type Exchanged = { id: string; tolerance: number; floor?: number; min?: number; max?: number };
 export type LoopDefinition = { exchanged: Exchanged[]; maxPasses: number; relaxation: number; consecutive: number };
-export type PassSuccess = { ok: true; calc: Record<string, number>; noise?: Record<string, number>; conservation?: { ok: boolean; message?: string } };
-export type PassFailure = { ok: false; reason: string };
+export type PassSuccess = { ok: true; calc: Record<string, number>; noise?: Record<string, number>; conservation?: { ok: boolean; message?: string }; /** run ids by app, for the host's records; the controller does not read them */ runs?: Record<string, string> };
+export type PassFailure = { ok: false; reason: string; runs?: Record<string, string> };
 export type PassFunction = (iterate: Record<string, number>, index: number) => Promise<PassSuccess | PassFailure>;
 export type CouplingState = "converged" | "not-converged" | "diverged" | "oscillating" | "stalled" | "engine-failure" | "conservation" | "refused";
 export type PassRecord = {
