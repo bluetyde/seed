@@ -110,9 +110,11 @@ describe.skipIf(!have)("FEED oracle set through the SEED adapter (real OFFBEAT s
   const KNOWN_SETS = [
     { total: 92, good: 59, badInput: 30, knownLimit: 3 },
     { total: 101, good: 63, badInput: 35, knownLimit: 3 },
+    // FEED main since 2026-10-25 (08e2213): the 125 before it plus 13 for the fuel temperature by slice (the return quantity of the power-temperature loop): 138 = 92 good, 43 bad-input, 3 known-limit
+    { total: 138, good: 92, badInput: 43, knownLimit: 3 },
   ];
   const MECHANICS_QUANTITIES = ["contact_pressure", "displacement_radial_clad_last_cell", "displacement_radial_fuel_last_cell", "gas_pressure", "stress_axial_fuel_min", "stress_hoop_clad_first_cell", "stress_limit_margin"];
-  it("loads a known set of FEED entries (its 92, or its 101 with the boundary-history entries), all pinned and valid", () => {
+  it("loads a known set of FEED entries (its 92, its 101 with the boundary-history entries, or its 138 with the fuel temperature by slice), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
     const count = (tag: string) => r.entries.filter((i) => i.entry.tag === tag).length;

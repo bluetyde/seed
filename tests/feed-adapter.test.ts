@@ -10,6 +10,7 @@ import { isAlive } from "../src/core/procTree";
 import { RunManager, type Budget } from "../src/core/runManager";
 import { checkResultsAgainstRecord, checkResultsIndex } from "../src/core/semantic";
 import { validate } from "../src/core/validate";
+import { readQuantityData } from "../src/core/quantityData";
 
 // These tests drive the FEED adapter against a scripted stand-in for FEED's headless runner (tests/fixtures/feed-stub), so
 // they need neither the FEED build nor its WSL solver. The real-runner checks live in feed-oracles.test.ts.
@@ -95,7 +96,7 @@ describe("FEED adapter: configuration", () => {
     expect(r.result.app.id).toBe("feed");
     expect(r.result.engine).toEqual({ name: "feed-headless", version: "9.9.9" });
     expect(r.result.formats).toEqual([{ id: "feed.case", version: "0.1" }]);
-    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap", "temperature_limit_margin", ...MECHANICS, "stress_limit_margin"]);
+    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual([...QUANTITIES, "temperature_fuel_mean_by_slice", "temperature_fuel_mean_slice_max", "temperature_fuel_mean_slice_min", "temperature_fuel_mean", "temperature_peak_history", "temperature_outer_wall_history", "temperature_peak_max", "time_of_peak", "energy_deposited", "energy_balance_gap", "temperature_limit_margin", ...MECHANICS, "stress_limit_margin"]);
     expect(r.result.capabilities).toContain("thermal-only");
     expect(r.result.capabilities).toContain("thermo-elastic");
     expect(r.result.oracleCoverage).toEqual([]);
@@ -772,5 +773,64 @@ describe("FEED adapter: review findings (Codex, 2026-10-05)", () => {
     expect(r.ok).toBe(false);
     expect(r.errors[0]?.message).toContain("series folder");
     expect(readFileSync(join(outside, "temperature_peak.json"), "utf8")).toBe("SENTINEL");
+  });
+});
+
+describe("FEED adapter: the fuel temperature by slice (feed.fuel-temperature/0.1, the return quantity of the power-temperature loop)", () => {
+  const FT = ["temperature_fuel_mean_by_slice", "temperature_fuel_mean_slice_max", "temperature_fuel_mean_slice_min", "temperature_fuel_mean"];
+  const collectedWith = async (mode: string) => {
+    useStub(mode);
+    const p = feedProject();
+    const out = await runStart(p.root, p, "req-" + mode);
+    return { p, out };
+  };
+  it("describe lists the four quantities", async () => {
+    useStub();
+    const r = okReply(await ask(feedProject().root, { verb: "describe" }));
+    expect(r.result.quantities.map((q: { name: string }) => q.name)).toEqual(expect.arrayContaining(FT));
+  });
+  it("a result with a fuel temperature gives the series against z and the three numbers, each with dimension temperature and the stated meaning", async () => {
+    const { p, out } = await collectedWith("fuel-temperature");
+    if (!out.ok) throw new Error(JSON.stringify(out.errors));
+    if (out.state !== "completed") throw new Error("the run did not complete: " + JSON.stringify((await collectError(p.root, out as any)).errors));
+    expect(out.state).toBe("completed");
+    const index = JSON.parse(readFileSync(join(p.root, "runs", out.runId, "results.json"), "utf8"));
+    expect(index.schema).toBe("seed.results-index/0.2");
+    expect(validate("results-index", index)).toEqual({ ok: true });
+    expect(checkResultsIndex(index)).toEqual([]);
+    expect(checkResultsAgainstRecord(index, out.record)).toEqual([]);
+    const byName = (n: string) => index.quantities.find((q: { name: string }) => q.name === n);
+    for (const n of FT) {
+      expect(byName(n)).toMatchObject({ unit: "K", normalization: "none", dimension: "temperature" });
+      expect(sha256Hex(readFileSync(join(p.root, byName(n).data.path)))).toBe(byName(n).data.sha256);
+    }
+    const data = (n: string) => JSON.parse(readFileSync(join(p.root, "runs", out.runId, "native", "series", `${n}.json`), "utf8"));
+    expect(data("temperature_fuel_mean_by_slice")).toMatchObject({ schema: "seed.quantity-data/0.2", kind: "series", unit: "K", axis: { name: "z", unit: "m" }, x: [0.05, 0.15000000000000002, 0.25], values: [800, 1000, 900] });
+    expect(data("temperature_fuel_mean_by_slice").meta.slices).toEqual([{ zMin: 0, zMax: 0.1 }, { zMin: 0.1, zMax: 0.2 }, { zMin: 0.2, zMax: 0.3 }]);
+    expect(data("temperature_fuel_mean_by_slice").meta.meaning).toMatch(/volume-mean/);
+    expect(data("temperature_fuel_mean")).toMatchObject({ kind: "scalar", unit: "K", value: 900 });
+    expect(data("temperature_fuel_mean_slice_max").value).toBe(1000);
+    expect(data("temperature_fuel_mean_slice_min").value).toBe(800);
+    expect(readQuantityData(data("temperature_fuel_mean_by_slice"), { name: "temperature_fuel_mean_by_slice", unit: "K", dimension: "temperature" }).ok).toBe(true);
+  });
+  it("a result without one gives none of the four", async () => {
+    const { p, out } = await collectedWith("ok");
+    if (!out.ok) throw new Error("refused");
+    const index = JSON.parse(readFileSync(join(p.root, "runs", out.runId, "results.json"), "utf8"));
+    expect(index.quantities.some((q: { name: string }) => FT.includes(q.name))).toBe(false);
+    expect(index.schema).toBe("seed.results-index/0.1");
+  });
+  it.each([
+    ["fuel-temperature-scalar-wrong", "temperature_fuel_mean does not agree with its slices"],
+    ["fuel-temperature-max-wrong", "temperature_fuel_mean_slice_max does not agree with its slices"],
+    ["fuel-temperature-unit", "not feed.fuel-temperature/0.1 in K"],
+    ["fuel-temperature-overlap", "no usable bounds"],
+    ["fuel-temperature-nan", "no usable bounds"],
+    ["fuel-temperature-no-meaning", "does not state its meaning"],
+    ["fuel-temperature-origin", "stated origin"],
+  ])("%s: the run is not collected, with the reason, and nothing is passed on", async (mode, reason) => {
+    const { p, out } = await collectedWith(mode);
+    expect(out.ok && out.state).toBe("failed");
+    expect(JSON.stringify((await collectError(p.root, out as any)).errors)).toContain(reason);
   });
 });
