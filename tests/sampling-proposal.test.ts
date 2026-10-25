@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { runAdminCli } from "../src/cli/admin";
 import { runCli } from "../src/cli/seed";
-import { saveHostConfiguration } from "../src/core/fileRunHost";
+import { allCases, saveHostConfiguration } from "../src/core/fileRunHost";
 import { runSamplingFromHostFile } from "../src/core/samplingHost";
 import { appendProposalEvent, approvedSampling, definitionHash, foldProposals, readProposalLog } from "../src/core/samplingProposal";
 import { approveSamplingFromHost, proposeSamplingFromHost, rejectSamplingFromHost, samplingProposalStatus } from "../src/core/samplingProposalHost";
@@ -133,6 +133,15 @@ describe("running", () => {
     }
     expect(readFileSync(join(w.state, "samplings.jsonl"), "utf8").includes("\"phase\":\"summary\"")).toBe(false);
   }, 60000);
+  it("a case the host registers later under the id of an approved point keeps its own definition", async () => {
+    const w = await world();
+    const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
+    must(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }));
+    const mine = { ...w.config.cases.approved!, settings: { ...(w.config.cases.approved!.settings as object), delayMs: 999 } };
+    const c = { ...w.config, cases: { ...w.config.cases, "p1-001": mine } };
+    expect(allCases(c as never)["p1-001"]).toEqual(mine);
+    expect(allCases(c as never)["p1-002"]).toBeDefined();
+  });
   it("a proposal log that was edited is refused as a whole: nothing runs under it", async () => {
     const w = await world();
     const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
