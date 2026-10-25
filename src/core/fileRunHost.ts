@@ -15,6 +15,7 @@ import { evaluateGate, issueGrant, type Actor, type Decision, type Grant, type P
 import { controlBinding } from "./hostControl";
 import { loadOracleAuthority } from "./oracleAuthority";
 import { expandSampling, type SamplingDefinition } from "./sampling";
+import { approvedSamplings } from "./samplingProposal";
 import { expandSweep, type SweepDefinition } from "./sweep";
 import { recordRequestInStudy, type LiveContext } from "./studyRecordHost";
 import { RunDispatcher, type DispatchRequest, type RegisteredCase } from "./runDispatcher";
@@ -132,6 +133,14 @@ export function allCases(c: HostConfiguration): Record<string, RegisteredCase> {
     if (!expanded.ok) throw Error("invalid sampling " + samplingId);
     for (const x of expanded.cases) all[x.caseId] = x.registered;
   }
+  // samplings a person approved from an agent's proposal are registered cases too (a damaged proposal log registers none)
+  try {
+    for (const [samplingId, def] of approvedSamplings(realpathSync(c.stateRoot))) {
+      if (Object.hasOwn(all, samplingId)) continue;
+      const expanded = expandSampling(samplingId, def, c.cases, c.study);
+      if (expanded.ok) for (const x of expanded.cases) if (!Object.hasOwn(all, x.caseId)) all[x.caseId] = x.registered; // never over a case that is already registered
+    }
+  } catch { /* no approved samplings are registered under a log that can not be read */ }
   return all;
 }
 /** Called by trusted setup code; the run CLI provides no configuration or approval writer. */

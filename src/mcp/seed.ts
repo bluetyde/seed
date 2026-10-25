@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { supervisedInstall, supervisedReplay, supervisedRun, supervisedSampling } from "./supervisor";
 import { listComponentsFromHost } from "../core/installHost";
+import { proposeSamplingFromHost, samplingProposalStatus } from "../core/samplingProposalHost";
 import { requestHostCancellation } from "../core/hostControl";
 import { exportStudyReport } from "../core/studyReportHost";
 import { addStudyNote } from "../core/studyNoteHost";
@@ -184,6 +185,46 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
         structuredContent: reply,
         isError: !reply.ok,
       };
+    },
+  );
+  server.registerTool(
+    "seed_propose_sampling",
+    {
+      title: "Propose a sampling study for a person to approve",
+      description:
+        "Propose a sampling or sensitivity study: a base case, a design (method lhs, random, sobol or morris; n; seed), the distribution of each study parameter and the outputs to summarise. The proposal is checked as a registered sampling is (study bounds, distributions, the case limit) and then waits: nothing runs until a person approves exactly this proposal. When it is approved, run it with seed_run_sampling and the proposalId as the samplingId. Read the decision with seed_sampling_status. You can not approve your own proposal.",
+      inputSchema: z
+        .object({
+          proposalId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,55}$/),
+          note: z.string().max(500).optional(),
+          definition: z
+            .object({
+              base: z.string().max(80),
+              design: z.object({ method: z.enum(["lhs", "random", "sobol", "morris"]), n: z.number().int(), seed: z.number().int() }).strict(),
+              parameters: z.array(z.object({ id: z.string().max(80), distribution: z.record(z.string(), z.union([z.string(), z.number()])) }).strict()).max(8),
+              outputs: z.array(z.object({ quantity: z.string().max(128), reduce: z.enum(["last", "first", "min", "max", "mean"]) }).strict()).max(8),
+            })
+            .strict(),
+        })
+        .strict(),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...proposeSamplingFromHost(hostConfig, request) };
+      return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
+    },
+  );
+  server.registerTool(
+    "seed_sampling_status",
+    {
+      title: "Status of sampling proposals",
+      description: "The state (pending, approved, rejected) of one sampling proposal or of all of them, with the definition, who proposed it and who decided. An approved proposal can be run with seed_run_sampling.",
+      inputSchema: z.object({ proposalId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,55}$/).optional() }).strict(),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async request => {
+      const reply = { schema: "seed.mcp-reply/0.1", ...samplingProposalStatus(hostConfig, request) };
+      return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
     },
   );
   server.registerTool(
