@@ -80,6 +80,8 @@ class OwnerHandle {
   private record: OwnerRecord | undefined;
   /** Settles when the record of the launch is on disk, or rejects with why it is not. */
   private written: Promise<void> = Promise.resolve();
+  /** Set as soon as the record write is known to have failed, so a start that waits for health sees it at once. */
+  failure: Error | undefined;
   constructor(private readonly store: OwnerStore, private readonly note: (text: string) => void) {}
 
   private later(step: () => Promise<void> | void): void {
@@ -104,7 +106,7 @@ class OwnerHandle {
       this.store.write(this.record);
     };
     this.written = attempt();
-    this.written.catch(() => undefined); // a start that gives up before it asks (the process exited) must not leave an unhandled rejection
+    this.written.catch((e: unknown) => { this.failure = e instanceof Error ? e : new Error(String(e)); }); // also: a start that gives up before it asks must not leave an unhandled rejection
     this.later(() => this.written);
   }
 
@@ -183,6 +185,11 @@ export class ProcessManager {
       try {
         await this.deps.kill(e.child);
       } catch (killError) {
+        // a child that has exited meanwhile is stopped, whatever the kill said: nothing is kept
+        if (e.child.exitCode !== null || e.child.signalCode !== null) {
+          await e.owner?.end();
+          return;
+        }
         // a kill that failed proves nothing: the server may still run, so the host keeps its entry (a later stop can try again) and marks the record orphaned
         e.exited = false;
         this.entries.set(appId, e);
@@ -263,6 +270,7 @@ export class ProcessManager {
           this.entries.delete(app.id);
           throw new AppStartError(`${app.name} stopped before it was ready (exit code ${entry.code ?? "unknown"}).`, out);
         }
+        if (entry.owner?.failure) throw new AppStartError(`${app.name} was stopped because its process record could not be written (${entry.owner.failure.message}); a server with no record would outlive a crashed host unnoticed.`, entry.output.join(""));
         const healthy = await this.healthy(base, app);
         checkCancelled();
         if (healthy && !entry.exited) {
