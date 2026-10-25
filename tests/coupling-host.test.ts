@@ -117,6 +117,7 @@ describe("running a registered loop", () => {
     const out = await runCouplingFromHostFile(f.file, req(), s.builders);
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, verification: "unverified", purpose: "plumbing-test", grantId: "g-1" });
     if (!out.ok) return;
+    expect(out.claim).toContain("a plumbing test");
     expect(out.claim).toContain("not the physics");
     expect(out.outcome.state).toBe("converged");
     expect(out.outcome.result!.iterate[Q]).toBeCloseTo(1000, 0);

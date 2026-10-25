@@ -51,7 +51,7 @@ The first loop is the one whose return transfer the app side can offer soonest. 
 - **Records:** one line per pass in a `couplings.jsonl` in the state folder (the quantities exchanged, the change from the last pass, the relaxation applied, the run ids of both apps), a hash-chained journal as for transfers, and a step in the live study record per loop (and a short one per pass) citing the runs. The report builder shows the pass history and refuses a coupled result with no convergence statement.
 - **Budget:** each pass is a run of each app under the study's per-case budget and counts against `maxCases` (a loop of 25 passes of two apps is 50 cases).
 
-**Built:** the pure controller of 4.3 and 4.5 is in `src/core/coupling.ts` ([coupling-controller.md](coupling-controller.md)), tested with scripted passes. Nothing else of this file is built.
+**Built:** the pure controller of 4.3 and 4.5 is in `src/core/coupling.ts` ([coupling-controller.md](coupling-controller.md)), tested with scripted passes; and, since 2026-10-25, the gate operation, the registration, the grant check and the journal of section 5 ([coupling-host.md](coupling-host.md)), also with scripted passes. Passes that run the real apps, the study-record step and the write-back are not built.
 
 ## 6. Tests the first build would need
 
