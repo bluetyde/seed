@@ -180,7 +180,7 @@ describe("propose and status", () => {
     back.source.runId = "run-002";
     back.source.resultsSha256 = sha256Hex(run2Text);
     back.source.revisionPins = [{ artifact: "dst-case", revision: sha256Hex(f.dstCase) }];
-    back.target = { ...back.target, artifact: "src-model", revision: sha256Hex(f.srcModel) };
+    back.target = { ...back.target, app: "srcapp", artifact: "src-model", revision: sha256Hex(f.srcModel) };
     const out = await propose(f, back);
     expect(codes(out as any).some((c) => c.startsWith("E_RECIPE_CYCLE")), JSON.stringify(out)).toBe(true);
   });

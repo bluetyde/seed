@@ -76,6 +76,22 @@ function world(over: Over = {}) {
 
 const flat = (r: { errors: { code: string; field: string }[] }) => r.errors.map((e) => `${e.code} ${e.field}`);
 
+describe("who owns the target and which run the index belongs to", () => {
+  it("a recipe cannot target an artifact that belongs to another app", () => {
+    const w = world();
+    const view = w.view({ artifactApps: { "pin-case": "auditapp", "openmc-model": "openmc" }, approvals: [w.approve()] });
+    const ev = evaluateTransfer(w.recipe, view);
+    expect(ev.state).toBe("invalid");
+    expect(flat(ev)).toContain("E_NOT_PERMITTED /target/app");
+    expect(evaluateTransfer(w.recipe, w.view({ artifactApps: { "pin-case": "feed", "openmc-model": "openmc" }, approvals: [w.approve(w.recipe, "appr-2")] })).state).toBe("approved");
+  });
+  it("a results index copied from another run is not the source run's", () => {
+    const w = world({ index: (i) => { i.runId = "run-002"; } });
+    const ev = evaluateTransfer(w.recipe, w.view());
+    expect(flat(ev)).toContain("E_STALE_REVISION /source/runId");
+  });
+});
+
 describe("recipe states", () => {
   it("a recipe with no approval is proposed; with one it is approved; once applied it is applied", () => {
     const w = world();
@@ -345,6 +361,21 @@ describe("applying through the target command (fake apps)", () => {
     const out = await apply(world(), "lossy");
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_CONSERVATION", source: "app-content" });
+  });
+
+  it.each(["dishonest", "dishonest-flag"])("a target command that answers ok with a conservation check outside the recipe's tolerance (%s) writes nothing", async (mode) => {
+    const out = await apply(world(), mode);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_CONSERVATION", source: "app-content" });
+  });
+
+  it("source data that change between the check and the read are refused: the mapper never sees unchecked bytes", async () => {
+    const w = world();
+    let reads = 0;
+    const real = w.view().readData;
+    const out = await apply(w, "good", { view: { readData: (p) => { reads++; return reads <= 1 ? real(p) : (real(p) ?? "").replace("1000000", "9999999"); } } });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.errors[0]).toMatchObject({ code: "E_STALE_REVISION", field: "/source" });
   });
 
   it("coverage: a bin the source does not have is refused, not extrapolated", async () => {

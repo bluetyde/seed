@@ -79,7 +79,8 @@ export function journalBlock(state: string, adapterId: string, adapterVersion: s
       if (e.verdict === "fail") open.set(row.hash, `a recorded oracle evaluation failed (${row.time})`);
       // a pass does not clear a failure: only a human's clearance does
     } else if (e.type === "clearance") {
-      if (typeof e.clears === "string") open.delete(e.clears);
+      // only a human's clearance counts: a row written by anyone else leaves the failure standing
+      if (typeof e.clears === "string" && e.actor !== null && typeof e.actor === "object" && e.actor.kind === "human") open.delete(e.clears);
     } else {
       return { blocked: true, reason: "the oracle journal has a row of an unknown kind" };
     }
@@ -116,6 +117,7 @@ export function recordEvaluation(state: string, adapter: { id: string; version: 
 
 /** Appends a clearance of the failure that is blocking now. Refused when `rowHash` is not that failure. The caller has checked the actor is a human. */
 export function clearFailure(state: string, adapter: { id: string; version: string }, currentPins: PinSet, rowHash: string, reason: string, actor: Actor) {
+  if (actor.kind !== "human") throw Error("only a human clears a recorded failure");
   if (typeof reason !== "string" || reason.trim().length < 3 || reason.length > 500) throw Error("a clearance needs a reason of 3 to 500 characters");
   const now = journalBlock(state, adapter.id, adapter.version, currentPins);
   if (!now.blocked || now.rowHash === undefined) throw Error("no recorded failure is blocking these pins");

@@ -119,7 +119,7 @@ function readText(abs: string, project: string): string | null {
   }
 }
 
-const artifactOf = (x: Ctx, id: string): { path: string; revision: { hash: string; counter: number } } | undefined => (x.manifest.artifacts as any[]).find((a) => a.id === id);
+const artifactOf = (x: Ctx, id: string): { app: string; path: string; revision: { hash: string; counter: number } } | undefined => (x.manifest.artifacts as any[]).find((a) => a.id === id);
 const currentRevisions = (x: Ctx): Record<string, string> => Object.fromEntries((x.manifest.artifacts as any[]).map((a) => [a.id, a.revision.hash]));
 
 function appliedFolder(x: Ctx, create: boolean): string | undefined {
@@ -166,6 +166,7 @@ function viewOf(x: Ctx, recipe: AnyRecipe, approvals = listApprovals(x.state, x.
     },
     currentRevisions: currentRevisions(x),
     artifactPaths: Object.fromEntries((x.manifest.artifacts as any[]).map((a) => [a.id, a.path])),
+    artifactApps: Object.fromEntries((x.manifest.artifacts as any[]).map((a) => [a.id, String(a.app)])),
     targetTransfers: x.c.apps[recipe.target.app]?.transfer?.fields,
     approvals, applied: listApplied(x)
   };
@@ -324,7 +325,7 @@ export function applyTransferFromHost(file: string, request: unknown): Promise<H
         const fresh = openProject(x.project);
         if (!fresh.ok) throw Error("the project cannot be reopened");
         const art = (fresh.value.manifest.artifacts as any[]).find((a) => a.id === recipe.target.artifact);
-        if (!art || art.revision.hash !== target.revision.hash || !realInside(x.project, abs.value) || readText(abs.value, x.project) !== targetContent) {
+        if (!art || art.path !== target.path || art.app !== target.app || art.revision.hash !== target.revision.hash || !realInside(x.project, abs.value) || readText(abs.value, x.project) !== targetContent) {
           throw Object.assign(Error("the target changed while the transfer ran"), { code: "E_STALE_REVISION" });
         }
         writeFileSync(tmp, out.content, { flag: "wx" });

@@ -103,6 +103,18 @@ describe("the journal alone", () => {
       expect(c.event).toMatchObject({ type: "clearance", clears: row.hash, actor: { kind: "human", name: "owner" } });
     });
 
+    it("an agent cannot clear a failure, and a clearance row written by one is ignored when the journal is read", () => {
+      const s = tmp();
+      const row = rec(s, failed());
+      expect(() => clearFailure(s, adapter, pins(), row.hash, "an agent clearing it", { kind: "agent", name: "bot" })).toThrow(/only a human/);
+      expect(block(s).blocked).toBe(true);
+      appendAdmission(journalRoot(s, adapter.id, true)!, { type: "clearance", clears: row.hash, reason: "forged by an agent", actor: { kind: "agent", name: "bot" } });
+      appendAdmission(journalRoot(s, adapter.id, true)!, { type: "clearance", clears: row.hash, reason: "no actor at all" });
+      expect(block(s)).toMatchObject({ blocked: true, rowHash: row.hash });
+      clearFailure(s, adapter, pins(), row.hash, "a person looked at it", human);
+      expect(block(s).blocked).toBe(false);
+    });
+
     it("a wrong row hash, a missing failure and a missing reason are refused", () => {
       const s = tmp();
       expect(() => clearFailure(s, adapter, pins(), sha("e"), "nothing to clear", human)).toThrow(/no recorded failure/);

@@ -115,6 +115,8 @@ export type TransferView = {
   applied: readonly AppliedRecord[];
   /** The project path of every artifact: a recipe's source pins must be inputs of the source run, which records paths and hashes. */
   artifactPaths: Record<string, string>;
+  /** The app that owns each artifact (the manifest's `app`): a recipe may only target an artifact of the app it names, so that app's checks are the ones that apply. */
+  artifactApps?: Record<string, string>;
 };
 
 type Eval = { state: TransferState; errors: TypedError[]; digest: string; approval?: Approval };
@@ -255,6 +257,7 @@ export function evaluateTransfer(recipeIn: unknown, view: TransferView): Eval {
     const vi = index ? validate("results-index", index) : { ok: false as const, errors: [err("E_SCHEMA_INVALID", "/source", "the source results index is not JSON")] };
     if (!vi.ok) invalid.push(...vi.errors);
     else if (view.sourceRunState !== "completed") invalid.push(err("E_OUTPUT_INCOMPLETE", "/source/runId", `the source run is ${view.sourceRunState ?? "unknown"}, not completed`));
+    else if (index.runId !== r.source.runId) invalid.push(err("E_STALE_REVISION", "/source/runId", `the results index in the folder of run ${r.source.runId} belongs to run ${String(index.runId).slice(0, 80)}`));
     else {
       if (sha256Hex(view.sourceIndex) !== r.source.resultsSha256) stale.push(err("E_STALE_REVISION", "/source/resultsSha256", "the source results differ from the ones the recipe pinned"));
       q = checkQuantity(r, index, r.source, "/source", false, view, invalid, stale);
@@ -303,6 +306,8 @@ function finishEvaluation(r: AnyRecipe, view: TransferView, digest: string, inva
   r.source.revisionPins.forEach((p, i) => {
     if (view.currentRevisions[p.artifact] !== p.revision) stale.push(err("E_STALE_REVISION", `/source/revisionPins/${i}`, `${p.artifact} is not at the pinned revision`));
   });
+  const owner = view.artifactApps?.[r.target.artifact];
+  if (owner !== undefined && owner !== r.target.app) invalid.push(err("E_NOT_PERMITTED", "/target/app", `${r.target.artifact} belongs to the app ${JSON.stringify(owner)}, not ${JSON.stringify(r.target.app)}: a recipe cannot write another app's input`));
   const appliedRec = view.applied.find((a) => a.recipeId === r.recipeId && a.recipeDigest === digest);
   const targetNow = view.currentRevisions[r.target.artifact];
   if (targetNow !== r.target.revision && !(appliedRec && targetNow === appliedRec.targetRevisionAfter)) {
@@ -611,7 +616,10 @@ export async function applyTransfer(opts: {
   const loaded: { role?: string; entry: any; data: QuantityData; selected?: Selected }[] = [];
   for (const sp of [{ role: undefined as string | undefined, spec: recipe.source }, ...(recipe.source.additional ?? []).map((a) => ({ role: a.role as string | undefined, spec: a }))]) {
     const entry = index.quantities.find((x: { name: string }) => x.name === sp.spec.quantity);
-    const read = readQuantityData(view.readData(entry.data.path)!, entry);
+    // the bytes the mapper receives are the bytes that were checked against the pin: read once more here, hashed again
+    const text = view.readData(entry.data.path);
+    if (text === null || sha256Hex(text) !== entry.data.sha256) return { ok: false, errors: [err("E_STALE_REVISION", "/source", "the source data changed while the transfer was being prepared")] };
+    const read = readQuantityData(text, entry);
     if (!read.ok) return { ok: false, errors: read.errors };
     const selected = read.data.kind === "series" && recipe.mapping.time.kind === "steady" ? selectSample(read.data, recipe.mapping.time.select) : undefined;
     if (typeof selected === "string") return { ok: false, errors: [err("E_TIME_MAPPING", "/mapping/time/select", selected)] };
@@ -632,6 +640,14 @@ export async function applyTransfer(opts: {
   }
   const after = sha256Hex(reply.output.content);
   if (reply.output.content === opts.targetContent) return { ok: false, errors: [err("E_APP_FAILED", "/output", "the transfer left the target unchanged", "app-content")] };
+  // The command's own conservation numbers are held to the recipe's tolerance, which a person approved, not to the one the command says it used.
+  const cons = (reply.checks as { conservation?: { ok?: unknown; relativeDifference?: unknown } } | undefined)?.conservation;
+  if (cons && typeof cons === "object") {
+    const diff = cons.relativeDifference;
+    if (cons.ok === false || (diff !== undefined && (typeof diff !== "number" || !Number.isFinite(diff) || Math.abs(diff) > recipe.tolerance.conservation))) {
+      return { ok: false, errors: [err("E_CONSERVATION", "/checks/conservation", `the transfer command reports a conservation difference of ${String(diff).slice(0, 40)}, outside the recipe's tolerance of ${recipe.tolerance.conservation}; nothing is written`, "app-content")] };
+    }
+  }
   return {
     ok: true, content: reply.output.content, contentSha256: after, ...(reply.checks ? { checks: reply.checks } : {}),
     provenance: { recipeId: recipe.recipeId, recipeDigest: ev.digest, approvalId: ev.approval.approvalId, sourceRunId: recipe.source.runId, sourceResultsSha256: recipe.source.resultsSha256, targetRevisionBefore: recipe.target.revision, targetRevisionAfter: after,
