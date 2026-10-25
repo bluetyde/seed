@@ -282,13 +282,14 @@ async function describe(reply, fail) {
       app: { id: "openmc-studio", name: "OpenMC Studio", version: String(d.version) },
       engine: { name: "OpenMC", version: String(d.openmc) },
       formats: [{ id: "openmc-studio-project", version: "1" }],
-      capabilities: ["validate", "run", "cancel", "collect", "fixed-source"],
+      capabilities: ["validate", "run", "cancel", "collect", "fixed-source", "eigenvalue"],
       parameters: [{ id: "threads", type: "integer", min: 1, max: MAX_THREADS }],
       // Tally results are per source particle; the unit follows the score (see scoreUnit).
       quantities: [
         { name: "tally:flux", unit: "cm", normalization: "per-source-particle" },
         { name: "tally:reaction", unit: "reaction", normalization: "per-source-particle" },
         { name: "tally:energy", unit: "eV", normalization: "per-source-particle" },
+        { name: "keff", unit: "1", normalization: "none" },
       ],
       oracleCoverage: oracleCoverage(),
       resources: resourcesFor("openmc"),
@@ -539,10 +540,13 @@ function collect(request, root, reply, fail) {
   if (!results || !results.summary || !Array.isArray(results.tallies) || !project || !project.settings) return incomplete("results.json is not a result of this project");
   const sm = results.summary;
   const st = project.settings;
-  if (sm.run_mode !== "fixed source" || sm.particles !== st.particles || sm.batches !== st.batches || sm.seed !== st.seed) {
-    return incomplete("the statepoint does not match the project's run mode, particles, batches and seed");
+  const eigenvalue = st.runMode === "eigenvalue";
+  if (sm.run_mode !== (eigenvalue ? "eigenvalue" : "fixed source") || sm.particles !== st.particles || sm.batches !== st.batches || sm.seed !== st.seed || (eigenvalue && sm.inactive !== st.inactive)) {
+    return incomplete("the statepoint does not match the project's run mode, particles, batches, inactive batches and seed");
   }
-  if (results.tallies.length === 0) return incomplete("the run has no tallies");
+  const keff = eigenvalue && Array.isArray(sm.keff) && sm.keff.length === 2 && finite(sm.keff[0]) && finite(sm.keff[1]) && sm.keff[1] >= 0 ? sm.keff : null;
+  if (eigenvalue && !keff) return incomplete("the eigenvalue run has no finite k-eff with a standard deviation");
+  if (!eigenvalue && results.tallies.length === 0) return incomplete("the run has no tallies");
   const prov = readJson(path.join(outDir, "provenance.json"));
   const env = prov && prov.environment ? prov.environment : {};
 
@@ -581,6 +585,23 @@ function collect(request, root, reply, fail) {
     });
     return null;
   };
+  if (keff) {
+    // k-eff is dimensionless and not per source particle; its std is the standard error of the mean over the active batches (docs/seed-eigenvalue-runs.md in Studio).
+    // It has no analytic oracle, so it stays unverified. Name "keff" cannot clash with a tally quantity: those are "<tally>:<score>".
+    const body = {
+      schema: "seed.quantity-data/0.2", quantity: "keff", kind: "table", unit: "1",
+      columns: [{ name: "bin", unit: "1", role: "label" }, { name: "mean", unit: "1", role: "value" }, { name: "std", unit: "1", role: "std", of: "mean" }],
+      rows: [[["keff"], keff[0], keff[1]]],
+      meta: { normalization: "none", activeBatches: sm.batches - sm.inactive, particlesPerBatch: sm.particles },
+    };
+    names.add("keff");
+    const problem = addQuantity("keff", "1", body, {
+      dimension: "dimensionless", normalization: "none",
+      coordinates: { system: "tally-bins", axes: [{ name: "bin", unit: "1" }] },
+      uncertainty: { kind: "statistical", value: keff[1], unit: "1" },
+    });
+    if (problem) return incomplete(problem);
+  }
   for (const t of results.tallies) {
     const tallyLabel = JSON.stringify(String(t && t.name).slice(0, 60));
     if (t && t.kind === "mesh") {
@@ -658,7 +679,7 @@ function collect(request, root, reply, fail) {
     adapter: ADAPTER,
     engine: { name: "OpenMC", version: String(env.openmc && env.openmc.python ? env.openmc.python : "unknown") },
     inputHashes: job.inputs.map((i) => ({ path: i.path, sha256: i.sha256 })),
-    nativeStatus: { status: "finished", detail: "OpenMC fixed-source run: " + sm.batches + " batches of " + sm.particles + " particles, seed " + sm.seed },
+    nativeStatus: { status: "finished", detail: "OpenMC " + (eigenvalue ? "eigenvalue" : "fixed-source") + " run: " + sm.batches + " batches of " + sm.particles + " particles, seed " + sm.seed },
     quantities,
     extensions: {
       openmc: {
