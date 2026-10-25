@@ -153,6 +153,10 @@ else if (mode === "hang" && verb !== "cancel") {
       if (mode === "fuel-temperature-nan") slices[2].volumeMean = null;
       if (mode === "fuel-temperature-no-meaning") ft.meaning = "a temperature";
       if (mode === "fuel-temperature-origin") delete ft.axis.origin;
+      if (mode === "fuel-temperature-gap") { slices[2].zMin = 0.25; }
+      if (mode === "fuel-temperature-short") ft.geometry.heatedLength = 0.5;
+      if (mode === "fuel-temperature-wrong-quantity") ft.quantity = "temperature_peak_by_slice";
+      if (mode === "fuel-temperature-huge") { ft.slices = [{ index: 0, zMin: 0, zMax: 1e308, volumeMean: 800 }, { index: 1, zMin: 1e308, zMax: 1.7e308, volumeMean: 1000 }]; ft.geometry.heatedLength = null; }
       results.fuelTemperature = ft;
     }
     if (mode === "nodomain") delete results.domain;
