@@ -70,24 +70,30 @@ interface Entry { child?: ChildProcess; running: Running; output: string[]; exit
 /**
  * The process-owner record of one server the host started (runtime contract, "Process ownership"). It is written when the process starts, marked
  * running when it answers, and removed when it ends, so a host that is killed leaves the record behind for the next start to find (acceptance R4).
- * A server the host only attached to has no record: it was never the host's to stop (R5). A record that cannot be written never stops the app.
+ * A server the host only attached to has no record: it was never the host's to stop (R5). For a server the host STARTED the record is a required step
+ * (2026-10-25, the owner's call after a Codex review): if it cannot be written, the server is stopped and the start fails, because a server with no
+ * record would outlive a dead host with nobody able to find it. Without an owner store nothing is recorded and nothing is required.
  */
 class OwnerHandle {
   private chain: Promise<void> = Promise.resolve();
   private launchId = randomBytes(16).toString("hex");
   private record: OwnerRecord | undefined;
+  /** Settles when the record of the launch is on disk, or rejects with why it is not. */
+  private written: Promise<void> = Promise.resolve();
   constructor(private readonly store: OwnerStore, private readonly note: (text: string) => void) {}
 
   private later(step: () => Promise<void> | void): void {
     this.chain = this.chain.then(step).catch((e) => this.note(`(process record not kept: ${(e as Error).message})\n`));
   }
 
+  /** Begins writing the record; `ready()` says whether it was written. */
   start(app: AppEntry, child: ChildProcess, port: number): void {
     const pid = child.pid;
-    if (pid === undefined) return;
-    this.later(async () => {
+    const attempt = async (): Promise<void> => {
+      if (pid === undefined) throw new Error("the server has no process id");
       const [host, worker] = await Promise.all([identityOf(process.pid), identityOf(pid)]);
-      if (!host || !worker) return; // the process is already gone, or its start time cannot be read: no record is better than a record that could mislead
+      // the process is already gone, or its start time cannot be read: a record that could mislead is not written, and the start is not allowed to go on without one
+      if (!host || !worker) throw new Error("the start time of the server or of this host could not be read");
       this.record = {
         schema: "seed.process-owner/0.1", launchId: this.launchId, kind: "launch",
         // Until components are managed (W4) an app is its own runtime: the component is the app, at no version.
@@ -96,8 +102,14 @@ class OwnerHandle {
         generation: randomBytes(16).toString("hex"), state: "starting", startedAt: new Date().toISOString(),
       };
       this.store.write(this.record);
-    });
+    };
+    this.written = attempt();
+    this.written.catch(() => undefined); // a start that gives up before it asks (the process exited) must not leave an unhandled rejection
+    this.later(() => this.written);
   }
+
+  /** Resolves when the record is on disk; rejects with the reason when it is not. */
+  ready(): Promise<void> { return this.written; }
 
   running(): void { this.later(() => { if (this.record) this.store.mark(this.launchId, "running"); }); }
   end(): Promise<void> { this.later(() => { this.store.remove(this.launchId); this.record = undefined; }); return this.chain; }
@@ -253,7 +265,19 @@ export class ProcessManager {
         }
         const healthy = await this.healthy(base, app);
         checkCancelled();
-        if (healthy && !entry.exited) { entry.ready = true; entry.owner?.running(); return entry.running; }
+        if (healthy && !entry.exited) {
+          // the record of the launch is a required step: a server nobody can find again after a crash of this host is not allowed to run
+          try {
+            await entry.owner?.ready();
+          } catch (e) {
+            throw new AppStartError(`${app.name} was stopped because its process record could not be written (${(e as Error).message}); a server with no record would outlive a crashed host unnoticed.`, entry.output.join(""));
+          }
+          checkCancelled();
+          if (entry.exited) continue;
+          entry.ready = true;
+          entry.owner?.running();
+          return entry.running;
+        }
         await this.deps.sleep(250);
       }
       const out = entry.output.join("");
