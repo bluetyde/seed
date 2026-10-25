@@ -1,4 +1,4 @@
-// @covers R-XFER-01
+// @covers R-XFER-01, R-XFER-05, R-XFER-07, R-XFER-09
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

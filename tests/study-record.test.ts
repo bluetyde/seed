@@ -1,4 +1,4 @@
-// @covers R-STUDY-02
+// @covers R-STUDY-02, R-STUDY-10
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

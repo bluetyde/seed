@@ -1,4 +1,4 @@
-// @covers R-CORE-06, R-CORE-07, R-CORE-09
+// @covers R-CORE-06, R-CORE-07, R-CORE-09, R-CORE-14, R-CORE-15
 import { type ChildProcess, spawn } from "node:child_process";
 import {
   chmodSync,

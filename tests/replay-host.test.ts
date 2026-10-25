@@ -1,4 +1,4 @@
-// @covers R-STUDY-05
+// @covers R-STUDY-05, R-STUDY-11
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
