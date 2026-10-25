@@ -78,3 +78,10 @@ Design decisions with their reasons, newest last. A decision changes only by a n
 - **Decision (user):** "a now, then b later". (a) Reports label a verified quantity "verified (by name)" and carry a fixed note that SEED matches by quantity name only and does not check that the model resembles the oracle's case. (b) Later, an oracle entry names the model features it applies to and coverage counts only inside that scope.
 - **Why:** the gap was found by the suite-test session (a heavy-water model with an output named like a light-water oracle's would count as covered). (a) is cheap and hides nothing; (b) changes every app's oracle entries and the adapters, so it waits for the app sessions.
 - **Details:** [oracle-coverage.md](oracle-coverage.md). **Not decided:** when (b) starts, and the exact scope fields.
+
+## D12 (2026-10-24): An agent proposes a sampling; a person approves it
+
+- **Decision (user):** "go with the middle path". Plan 09 said agents design sampling studies; docs/sampling.md said only a person registers them. Now an agent proposes, a person approves the exact proposal, and only then can it run.
+- **Why:** the distributions of a sampling are physical claims. An agent that chooses and runs them can pick the ones that make the spread look small. A person who reads the definition (and the hash of it) keeps that judgement, and the agent still does the work of writing it.
+- **Consequence:** two agent verbs (`sampling-propose`, `sampling-status`; MCP `seed_propose_sampling`, `seed_sampling_status`), three human ones (`approve-sampling`, `reject-sampling`, `list-sampling-proposals`), and `sampling-proposals.jsonl` in the state folder. **Not decided:** withdrawing a proposal, expiry of an unreviewed one, and whether an approved proposal can be copied into the host configuration by a verb.
+- **Details:** [sampling.md](sampling.md).

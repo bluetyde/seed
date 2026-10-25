@@ -34,7 +34,7 @@ Sensitivity, sampling, uncertainty and feedback coupling. Milestone E5. Nothing 
 
 ## Agent role
 
-Agents can design and run sensitivity and sampling studies inside A1 bounds. They cannot enable a coupling loop. They must report noise and uncertainty as separate lines; the report builder rejects a result that lacks them.
+Agents can propose sensitivity and sampling studies inside A1 bounds, and run them once a person has approved the exact proposal (D12, [sampling.md](../sampling.md)). They cannot enable a coupling loop. They must report noise and uncertainty as separate lines; the report builder rejects a result that lacks them.
 
 ## Tests
 

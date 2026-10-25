@@ -20,9 +20,29 @@ A sampling is **registered by the host**, in the host configuration, like a swee
 ```
 
 - **`base`**: a registered case. Each point is a copy of it with the sampled values in its `params` and `settings`, id `<samplingId>-001`, `-002` and on.
-- **`design`**: `method` is `lhs` (Latin hypercube) or `random` (plain Monte Carlo); `n` the number of points (at least 2); `seed` a whole number from 0 to 4294967295. The same design and seed give the same points on every machine.
+- **`design`**: `method` is `lhs` (Latin hypercube), `random` (plain Monte Carlo), `sobol` or `morris` (the sensitivity designs, below); `n` the number of points (at least 2; for `sobol` the base size, at least 8; for `morris` the number of trajectories, at least 2); `seed` a whole number from 0 to 4294967295. The same design and seed give the same points on every machine.
 - **`parameters`**: study parameters (1 to 8) with human-declared bounds, each with a distribution. Only study parameters can be sampled.
 - **`outputs`**: 1 to 8 quantities of the base case's runs and how a series is reduced to one number: `last`, `first`, `min`, `max` or `mean`. A scalar quantity is itself. A table cannot be sampled.
+
+## Sensitivity designs (`sobol`, `morris`)
+
+These answer "which input causes the spread?" ([sensitivity.md](sensitivity.md) has the formulas and the tests against known answers).
+
+- **`sobol`** (`n` is the base size, at least 8): the Saltelli design, `n * (d + 2)` runs for `d` parameters, in the order A, B, AB1 ... ABd. The reply and the step give, per output and parameter, the **first-order** and **total-order** index with a bootstrap interval (200 resamples, 95%, seeded by the design's seed). The ordinary summary (mean, spread, noise, quantiles) stands on the A and B runs only: each is a plain sample of the declared distributions, and the AB runs are hybrids.
+- **`morris`** (`n` is the number of trajectories, at least 2): `n * (d + 1)` runs on a grid of four levels. The reply and the step give, per parameter, `mu`, `mu*` and `sigma` of the elementary effects, as a **ranking**, not a share of the variance. The points are a walk on a grid, not a sample, so the ordinary summary is over the grid, and says so.
+- The whole design counts against the study's `maxCases` (a Sobol design of n 8 and 3 parameters is 40 runs). A person raises `maxCases` for a larger one; the estimates of a small design are noisy, and the intervals show how much.
+- An output with a run that gave no number has **no indices** (the estimators need every row of the design): the reply says how many runs are missing. A constant output has no variance, so no indices; that is said, never `NaN`.
+- Indices are estimates and are not clamped: one can come out slightly outside 0 to 1. They describe the model over the declared distributions and assume independent inputs.
+
+## Who may design a sampling (D12)
+
+A person registers samplings in the host configuration, as above. An agent may also **propose** one, and a person **approves** it; nothing runs before that.
+
+- **Propose** (agent): CLI `sampling-propose` or MCP `seed_propose_sampling` with `{proposalId, definition, note?}`. The definition is the same as a registered one and is checked the same way now (study bounds, distributions, the case limit, no id that is already a case, a sweep or a sampling). At most 10 proposals wait for one agent. The proposal goes into `sampling-proposals.jsonl` of the host's state folder (hash-chained like the install grants; a damaged log registers nothing).
+- **Look** (anyone): CLI `sampling-status` or MCP `seed_sampling_status` shows a proposal's definition, who proposed it and its state.
+- **Decide** (a person only): admin CLI `approve-sampling {proposalId, definitionSha256}` or `reject-sampling {proposalId, reason?}`, under a human host identity. Approval names the hash of the proposal the person read, and is checked again against today's host configuration. No agent verb or MCP tool approves.
+- **Run:** an approved proposal is a registered sampling under its proposal id: `sample` / `seed_run_sampling` with `samplingId` set to it. Its points are registered cases (`<proposalId>-001` and on) and can be replayed like any other. They never replace a case the host registered.
+- What an agent still cannot do: run a definition nobody approved, change an approved one (it is fixed by its hash; propose a new id), approve its own proposal, or use a parameter without human-declared study bounds.
 
 ## Distributions
 
