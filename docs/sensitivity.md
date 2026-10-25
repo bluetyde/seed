@@ -1,6 +1,6 @@
 # Sensitivity analysis (Sobol and Morris)
 
-Status: the code is in `src/core/sensitivity.ts` with tests in `tests/sensitivity.test.ts`. **Nothing here is wired into the host yet.** No study, route, or screen calls it. This page says what the functions do so that the wiring can be done later without guessing.
+Status: the code is in `src/core/sensitivity.ts` with tests in `tests/sensitivity.test.ts`. **It is wired into the sampling study** as the `sobol` and `morris` design methods ([sampling.md](sampling.md)): the host makes the design, runs the points through the guarded path, and reports the indices or effects in the reply, the study step and the sampling log. No screen shows them yet. This page says what the functions do.
 
 ## What the two methods answer
 
