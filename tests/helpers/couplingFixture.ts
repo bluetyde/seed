@@ -58,7 +58,12 @@ export async function couplingFixture() {
   expect(saveProject(project, manifest, p.value.revision).ok).toBe(true);
   const apps = { openmc: await appOracles(root, "openmc", "openmc"), feed: await appOracles(root, "feed", "feed") };
   const inputs = { openmc: [{ artifact: "om-project", revision: sha256Hex(om) }], feed: [{ artifact: "pin-case", revision: sha256Hex(fe) }] };
-  const config = (actor: Actor, grants: unknown[] = []): CouplingHostConfig => ({
+  const config = (actor: Actor, grants: unknown[] = [], edit: (c: CouplingHostConfig) => void = () => {}): CouplingHostConfig => {
+    const c = built(actor, grants);
+    edit(c);
+    return c;
+  };
+  const built = (actor: Actor, grants: unknown[]): CouplingHostConfig => ({
     schema: "seed.coupling-host/0.1", projectRoot: project, stateRoot: state, actor,
     study: { studyId: "study-1", tier: "A2", budget: { maxWallSeconds: 900, maxCores: 1, maxMemoryMB: 4096, maxDiskMB: 1024, maxCases: 100 }, parameters: [] },
     grants: grants as never, apps,
@@ -74,12 +79,12 @@ export async function couplingFixture() {
       },
     },
   });
-  const grant = () => {
-    const validated = validateCouplingHostConfig(JSON.parse(JSON.stringify(config(agent))));
+  const grant = (edit: (c: CouplingHostConfig) => void = () => {}) => {
+    const validated = validateCouplingHostConfig(JSON.parse(JSON.stringify(config(agent, [], edit))));
     const g = issueGrant(human, { grantId: "g-1", studyId: "study-1", actor: { kind: agent.kind, name: agent.name }, operation: "enable_coupling", inputRevisions: [...inputs.openmc, ...inputs.feed, couplingRegistrationPin("lumped", validated.loops.lumped!)], issuedAt: "2026-10-25T00:00:00.000Z", expires: "2099-01-01T00:00:00.000Z" } as never);
     if (!g.ok) throw new Error(JSON.stringify(g.errors));
     return g.grant;
   };
   const file = join(root, "coupling-host.json");
-  return { root, project, state, file, config, grant, inputs, write: (actor: Actor, grants: unknown[] = []) => saveCouplingHostConfig(file, config(actor, grants)) };
+  return { root, project, state, file, config, grant, inputs, write: (actor: Actor, grants: unknown[] = [], edit: (c: CouplingHostConfig) => void = () => {}) => saveCouplingHostConfig(file, config(actor, grants, edit)) };
 }
