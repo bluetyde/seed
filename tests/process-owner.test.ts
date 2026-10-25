@@ -8,7 +8,7 @@ import * as http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { recoverOwners, type RecoveryDeps, type Worker } from "../src/core/ownerRecovery";
+import { recoverOwners, wslIdentityOf, type RecoveryDeps, type Worker } from "../src/core/ownerRecovery";
 import { OwnerStore, type OwnerRecord } from "../src/core/ownerStore";
 import { identityOf, identityOfStrict, linuxIdentity } from "../src/core/processIdentity";
 import { freePort } from "../src/main/processes";
@@ -341,4 +341,23 @@ describe("acceptance R5: what the host did not start, and records that are old",
     expect(report.results.map((r) => r.outcome)).toEqual(["stale-identity"]);
     expect(await alive(strangerId)).toBe(true);
   }, 60000);
+});
+
+describe("a lookup that failed is not a process that is gone (review 2026-10-25)", () => {
+  const ran = (code: number | null, stdout = "") => async () => ({ code, stdout });
+  it("on Windows an empty answer with exit 0 is no process, and a start time that could not be read is an error, never null", async () => {
+    expect(await identityOfStrict(1234, "win32", ran(0, ""))).toBeNull();
+    expect(await identityOfStrict(1234, "win32", ran(0, "2026-10-25T10:00:00.0000000Z"))).toEqual({ pid: 1234, startIdentity: "win:2026-10-25T10:00:00.0000000Z" });
+    await expect(identityOfStrict(1234, "win32", ran(3, ""))).rejects.toThrow(/lookup for pid 1234 failed/);
+    await expect(identityOfStrict(1234, "win32", ran(null, ""))).rejects.toThrow(/lookup for pid 1234 failed/);
+  });
+  const statLine = "123 (node) S 1 123 123 0 -1 4194560 100 0 0 0 1 1 0 0 20 0 1 0 987654 1000000 100 18446744073709551615";
+  const wsl = (stat: { ok: boolean; stdout: string; stderr: string }, boot = { ok: true, stdout: "boot-1", stderr: "" }) => async (_c: string, args: string[]) => (args.includes("/proc/sys/kernel/random/boot_id") ? boot : stat);
+  it("in a WSL distro only 'no such file' means gone; a timeout or a distro that stopped answering keeps the record by throwing", async () => {
+    expect(await wslIdentityOf("d", 123, wsl({ ok: true, stdout: statLine, stderr: "" }))).toEqual({ pid: 123, startIdentity: "linux:boot-1:987654" });
+    expect(await wslIdentityOf("d", 123, wsl({ ok: false, stdout: "", stderr: "cat: /proc/123/stat: No such file or directory" }))).toBeNull();
+    await expect(wslIdentityOf("d", 123, wsl({ ok: false, stdout: "", stderr: "" }))).rejects.toThrow(/could not be asked about pid 123/);
+    await expect(wslIdentityOf("d", 123, wsl({ ok: false, stdout: "", stderr: "wsl: the distro stopped" }))).rejects.toThrow(/could not be asked/);
+    await expect(wslIdentityOf("d", 123, wsl({ ok: true, stdout: statLine, stderr: "" }, { ok: false, stdout: "", stderr: "" }))).rejects.toThrow(/could not be asked/);
+  });
 });

@@ -35,17 +35,21 @@ export type RecoveryDeps = {
   killWorker: (worker: Worker) => Promise<void>;
 };
 
-function exec(command: string, args: string[], timeoutMs = 10000): Promise<{ ok: boolean; stdout: string }> {
-  return new Promise((resolve) => execFile(command, args, { timeout: timeoutMs, windowsHide: true, encoding: "utf8" }, (e, stdout) => resolve({ ok: !e, stdout: String(stdout ?? "") })));
-}
+type Exec = (command: string, args: string[], timeoutMs?: number) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
+const exec: Exec = (command, args, timeoutMs = 10000) =>
+  new Promise((resolve) => execFile(command, args, { timeout: timeoutMs, windowsHide: true, encoding: "utf8" }, (e, stdout, stderr) => resolve({ ok: !e, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") })));
 
 /** The identity of a process inside a WSL distro, from its /proc entry and the distro's boot id. */
-export async function wslIdentityOf(distro: string, pid: number): Promise<ProcessIdentity | null> {
+export async function wslIdentityOf(distro: string, pid: number, run: Exec = exec): Promise<ProcessIdentity | null> {
   // the boot id is read first: when the distro itself can not be asked, that is "unknown" (an error), never "the process is gone"
-  const boot = await exec("wsl.exe", ["-d", distro, "--exec", "cat", "/proc/sys/kernel/random/boot_id"]);
+  const boot = await run("wsl.exe", ["-d", distro, "--exec", "cat", "/proc/sys/kernel/random/boot_id"]);
   if (!boot.ok) throw new Error(`the distro ${distro} could not be asked about pid ${pid}`);
-  const stat = await exec("wsl.exe", ["-d", distro, "--exec", "cat", `/proc/${pid}/stat`]);
-  if (!stat.ok) return null;
+  const stat = await run("wsl.exe", ["-d", distro, "--exec", "cat", `/proc/${pid}/stat`]);
+  // only "there is no such file" means the process is gone; a timeout or a distro that stopped answering is "unknown", and unknown keeps the record
+  if (!stat.ok) {
+    if (/No such file or directory/i.test(stat.stderr)) return null;
+    throw new Error(`the distro ${distro} could not be asked about pid ${pid}: ${stat.stderr.trim().slice(0, 200) || "no answer"}`);
+  }
   const id = linuxIdentity(stat.stdout, boot.stdout);
   return id ? { pid, startIdentity: id } : null;
 }

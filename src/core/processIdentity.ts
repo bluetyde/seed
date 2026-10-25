@@ -50,12 +50,13 @@ export async function startIdentityOf(pid: number, platform: NodeJS.Platform = p
  * Like `identityOf`, but a lookup that FAILED (the tool timed out or errored, /proc or the boot id could not be read) throws instead of answering null:
  * "no such process" and "could not find out" are different answers, and only the first may authorize treating a process as gone.
  */
-export async function identityOfStrict(pid: number, platform: NodeJS.Platform = process.platform): Promise<ProcessIdentity | null> {
+export async function identityOfStrict(pid: number, platform: NodeJS.Platform = process.platform, runner: typeof run = run): Promise<ProcessIdentity | null> {
   if (!Number.isInteger(pid) || pid < 1) return null;
   let text: string | null;
   if (platform === "win32") {
-    const r = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().ToString('o') }; exit 0`]);
+    // no such process is an empty answer with exit 0; a process that exists but whose start time cannot be read (access denied) is exit 3, never "gone"
+    const r = await runner("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { try { $p.StartTime.ToUniversalTime().ToString('o') } catch { exit 3 } }; exit 0`]);
     if (r.code !== 0) throw new Error(`the process lookup for pid ${pid} failed (exit ${r.code})`);
     const t = r.stdout.trim();
     text = t ? `win:${t}` : null;
@@ -69,7 +70,7 @@ export async function identityOfStrict(pid: number, platform: NodeJS.Platform = 
     if (!id) throw new Error(`/proc/${pid}/stat could not be read as a process line`);
     text = id;
   } else {
-    const r = await run("ps", ["-o", "lstart=", "-p", String(pid)]);
+    const r = await runner("ps", ["-o", "lstart=", "-p", String(pid)]);
     const t = r.stdout.trim().replace(/\s+/g, " ");
     if (r.code === 0 && t) text = `ps:${t}`;
     else if (r.code === 1 && !t) text = null;

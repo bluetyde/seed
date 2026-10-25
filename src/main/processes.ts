@@ -168,7 +168,17 @@ export class ProcessManager {
     this.entries.delete(appId);
     if (e?.child && e.running.owned && !e.exited) {
       e.exited = true;
-      await this.deps.kill(e.child);
+      try {
+        await this.deps.kill(e.child);
+      } catch (killError) {
+        // a kill that failed proves nothing: the server may still run, so the host keeps its entry (a later stop can try again) and marks the record orphaned
+        e.exited = false;
+        this.entries.set(appId, e);
+        e.output.push(`(stopping the server failed: ${(killError as Error).message}; its process record is kept as orphaned)
+`);
+        await e.owner?.orphan();
+        throw killError;
+      }
       // the record is dropped only for a process that is shown to be gone; a kill that returned and left it running keeps the record (orphaned)
       if (e.child.exitCode === null && e.child.signalCode === null) {
         e.output.push("(the server could not be shown to have stopped; its process record is kept as orphaned)\n");
