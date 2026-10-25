@@ -1,4 +1,4 @@
-// @covers R-DISP-02, R-DISP-03, R-MCP-01
+// @covers R-DISP-02, R-DISP-03, R-MCP-01, R-CORE-16
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,4 +1,4 @@
-// @covers R-PROC-01, R-SHELL-07
+// @covers R-PROC-01, R-SHELL-07, R-PROC-02, R-PROC-03
 // W3 (runtime contract, "Process ownership"; plan 11 acceptance R4 and R5): the process-owner records, the start identity of a process, and the recovery that a
 // restarted host runs. The rules are tested with fake identities; the two acceptance cases run real processes: a fake host that is killed from outside, and a
 // server it only attached to. These tests start dist/ code: run `npm run build` first.
