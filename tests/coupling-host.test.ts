@@ -203,6 +203,42 @@ describe("running a registered loop", () => {
     expect(ph.at(-1)).toBe("outcome");
   });
 
+  it("a grant revoked or a registration edited in the host file while the loop runs stops it before the next pass", async () => {
+    for (const how of ["revoked", "edited"] as const) {
+      const f = await fixture();
+      f.write([f.grant()]);
+      const s = scripted((x, i) => {
+        if (i === 2) {
+          const c = JSON.parse(readFileSync(f.file, "utf8"));
+          if (how === "revoked") c.grants = [];
+          else c.loops.lumped.definition.maxPasses = 9;
+          writeHostJson(f.file, c);
+        }
+        return contraction(x, i);
+      });
+      const out = await runCouplingFromHostFile(f.file, req(), s.builders);
+      expect(out.ok && out.outcome.state, how).toBe("engine-failure");
+      expect(out.ok && out.outcome.passes, how).toHaveLength(2);
+      expect(s.calls.pass, how).toBe(2);
+    }
+  });
+
+  it("a file changed by the pass builder before pass 1 is caught before pass 1 runs", async () => {
+    const f = await fixture();
+    f.write([f.grant()]);
+    let ran = 0;
+    const builders: Record<string, PassBuilder> = {
+      scripted: () => {
+        writeFileSync(join(f.project, "models/b.json"), JSON.stringify({ case: "feed", changedByBuilder: true }));
+        return async (x) => { ran++; return contraction(x[Q] as number, 1); };
+      },
+    };
+    const out = await runCouplingFromHostFile(f.file, req(), builders);
+    expect(out.ok && out.outcome.state).toBe("engine-failure");
+    expect(ran).toBe(0);
+    expect(f.journal().map((r) => r.event as any).find((r) => r.phase === "pass").failed).toContain("before pass 1 the loop was no longer admissible");
+  });
+
   it("a project or an app that changes while the loop runs ends it before the next pass, the earlier passes kept", async () => {
     const f = await fixture();
     f.write([f.grant()]);

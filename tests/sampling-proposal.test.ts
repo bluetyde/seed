@@ -168,6 +168,16 @@ describe("running", () => {
     const r = await runSamplingFromHostFile(w.file, { requestId: "r-base", samplingId: "p1", budget });
     expect(r.ok ? "" : r.errors[0]!.message).toMatch(/is not the one the approved proposal p1 was made against; nothing was run/);
   }, 60000);
+  it("a proposal approved before proposals were bound to their base case does not run: propose it again", async () => {
+    const w = await world();
+    const state = w.config.stateRoot;
+    const d = def();
+    const human = { kind: "human", name: "the user" };
+    expect(appendProposalEvent(state, () => ({ event: { type: "proposed" as const, proposalId: "old", actor: { kind: "agent", name: "a" }, definition: d, definitionSha256: definitionHash(d) }, value: null })).ok).toBe(true);
+    expect(appendProposalEvent(state, () => ({ event: { type: "approved" as const, proposalId: "old", by: human, definitionSha256: definitionHash(d) }, value: null })).ok).toBe(true);
+    const r = await runSamplingFromHostFile(w.file, { requestId: "r-old", samplingId: "old", budget });
+    expect(r.ok ? "" : r.errors[0]!.message).toMatch(/made before proposals were bound to their base case/);
+  }, 60000);
   it("a case the host registers later under the id of an approved point keeps its own definition", async () => {
     const w = await world();
     const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));

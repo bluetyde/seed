@@ -829,6 +829,7 @@ describe("FEED adapter: the fuel temperature by slice (feed.fuel-temperature/0.1
     ["fuel-temperature-no-meaning", "does not state its meaning"],
     ["fuel-temperature-origin", "stated origin"],
     ["fuel-temperature-gap", "leave a gap: a slice is missing"],
+    ["fuel-temperature-shifted-gap", "leave a gap: a slice is missing"],
     ["fuel-temperature-short", "do not cover the stated heated length"],
     ["fuel-temperature-wrong-quantity", "not feed.fuel-temperature/0.1 in K"],
     ["fuel-temperature-huge", "too large to combine without overflow"],
