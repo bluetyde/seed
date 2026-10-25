@@ -170,6 +170,22 @@ describe("stopping a server the host started", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("a server whose process record cannot be written is stopped and the start fails: it never runs unrecorded", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
+    class FullDisk extends OwnerStore { override write(): void { throw new Error("disk full"); } }
+    const port = await freePort();
+    const m = new ProcessManager({ ...deps(async (c) => { c.kill("SIGKILL"); }), freePort: async () => port } as never, new FullDisk(dir));
+    managers.push(m);
+    try {
+      const failure = await m.ensure(app()).then(() => "started", (e: Error) => e.message);
+      expect(failure).toMatch(/process record could not be written \(disk full\)/);
+      expect(m.running("fake")).toBeUndefined();
+      for (let i = 0; i < 40 && (await answers(`http://127.0.0.1:${port}/health`)) !== 0; i++) await new Promise((r) => setTimeout(r, 100));
+      expect(await answers(`http://127.0.0.1:${port}/health`)).toBe(0); // the server is gone, not left running
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("a stop that did stop it removes the record", async () => {
     const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
     const owners = new OwnerStore(dir);

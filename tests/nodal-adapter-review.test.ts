@@ -21,6 +21,11 @@ const haveNodal =
 const goldenDir = join(repo, "schema", "vectors", "golden");
 const spec = { command: process.execPath, args: [join(__dirname, "..", "adapters", "nodal", "cli.cjs")], id: "nodal", version: "0.1.0" };
 const actor = { kind: "human" as const, name: "tester" };
+/** A run these tests collect from must have completed; when it did not, the failure says how it ended and what the adapter reported (a full-suite run once failed here with nothing left to explain it). */
+function mustComplete(out: { ok: boolean; state?: string; errors?: unknown; record?: { native?: unknown } }, label: string): asserts out is { ok: true; state: "completed"; runId: string } & typeof out {
+  if (!out.ok) throw new Error(`${label} was refused: ${JSON.stringify(out.errors)}`);
+  if (out.state !== "completed") throw new Error(`${label} ended ${String(out.state)}, not completed: ${JSON.stringify(out.record?.native ?? null)}`);
+}
 const budget: Budget = { maxWallSeconds: 300, maxCores: 1, maxMemoryMB: 1024, maxDiskMB: 1024 };
 type Vec = Record<string, any>;
 
@@ -212,7 +217,7 @@ describe.skipIf(!haveNodal)("NODAL adapter: review fixes (Codex, 2026-10-05)", (
     for (const [what, edit, message] of edits) {
       const p = nodalProject("rising-pipe");
       const out = await manager(p.root).start({ requestId: "req-miss", actor, artifact: p.artifact, inputs: p.inputs, budget, settings: p.settings });
-      if (!out.ok) throw new Error("refused");
+      mustComplete(out, "the NODAL run");
       const dir = join(p.root, "runs", out.runId, "native", "out", "nodal");
       const m = read(join(dir, "manifest.json"));
       edit(dir, m, read(join(dir, "results.json")));
@@ -226,7 +231,7 @@ describe.skipIf(!haveNodal)("NODAL adapter: review fixes (Codex, 2026-10-05)", (
   it("a linked series folder is refused at collect, and a linked output folder keeps the job from writing outside", async () => {
     const p = nodalProject("rising-pipe");
     const out = await manager(p.root).start({ requestId: "req-serieslink", actor, artifact: p.artifact, inputs: p.inputs, budget, settings: p.settings });
-    if (!out.ok) throw new Error("refused");
+    mustComplete(out, "the NODAL run");
     const native = join(p.root, "runs", out.runId, "native");
     rmSync(join(native, "series"), { recursive: true, force: true });
     const outside = tmpDir("seed-nodal-series-");
