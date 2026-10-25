@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { supervisedInstall, supervisedReplay, supervisedRun, supervisedSampling } from "./supervisor";
+import { supervisedCoupling, supervisedInstall, supervisedReplay, supervisedRun, supervisedSampling } from "./supervisor";
 import { listComponentsFromHost } from "../core/installHost";
 import { proposeSamplingFromHost, samplingProposalStatus } from "../core/samplingProposalHost";
 import { requestHostCancellation } from "../core/hostControl";
@@ -28,7 +28,7 @@ const requestSchema = z
   .strict();
 
 /** The path is selected once by the trusted process environment, never by MCP arguments. */
-export function createSeedMcpServer(hostConfig: string, transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG, installHostConfig = process.env.SEED_INSTALL_HOST_CONFIG): McpServer {
+export function createSeedMcpServer(hostConfig: string, transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG, installHostConfig = process.env.SEED_INSTALL_HOST_CONFIG, couplingHostConfig = process.env.SEED_COUPLING_HOST_CONFIG): McpServer {
   const studyHeader = process.env.SEED_STUDY_HEADER;
   const server = new McpServer(
     { name: "seed", version: "0.1.0" },
@@ -251,6 +251,25 @@ export function createSeedMcpServer(hostConfig: string, transferHostConfig = pro
       };
     },
   );
+  // Coupling loops: only when the trusted environment names a coupling host. Running a loop needs a human grant that names the loop's registration; there is no tool that issues one.
+  if (couplingHostConfig) {
+    server.registerTool(
+      "seed_run_coupling",
+      {
+        title: "Run a registered coupling loop",
+        description:
+          "Run a coupling loop the host registered (for example the lumped power-temperature loop between OpenMC Studio and FEED): each pass runs the apps, hands each the other's result and checks convergence. It works only inside a human grant that names the loop, its registration and the exact input revisions; without one the host refuses and says what is missing. A converged loop returns its result; a loop that does not converge returns the passes and no result. Every reply says the quantities are unverified and what the loop is (a plumbing test or a coupled calculation). The loop writes nothing to the project.",
+        inputSchema: z
+          .object({ requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/), loopId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/) })
+          .strict(),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      async request => {
+        const reply = { schema: "seed.mcp-reply/0.1", ...(await supervisedCoupling(couplingHostConfig, request)) };
+        return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], structuredContent: reply, isError: !reply.ok };
+      },
+    );
+  }
   // Components: only when the trusted environment names an install host. Granting, revoking and removing are human verbs of the admin CLI and have no tool here.
   if (installHostConfig) {
     const id = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);

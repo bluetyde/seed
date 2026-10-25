@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 // with the other ~30 files they compete for WSL and memory and fail on timing, not on behavior (observed 2026-10-05: a different one of these
 // failed in each of several full runs and passed alone, twice). Everything else runs in parallel as before.
 const runtime = [
+  "tests/coupling-lumped-real.test.ts",
   "tests/feed-adapter.test.ts",
   "tests/feed-oracles.test.ts",
   "tests/nodal-adapter.test.ts",
