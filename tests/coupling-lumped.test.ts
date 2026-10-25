@@ -25,7 +25,7 @@ const projectText = JSON.stringify({ materials: [{ id: "m_uo2" }, { id: "m_zirc"
 const caseText = JSON.stringify({ caseId: "pin", power: { linearHeatRate: { value: 1, unit: "kW/m" } } }, null, 2) + "\n";
 
 type Log = { op: string; detail?: any }[];
-function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean; problems: string[]; openmcFails: string; noMesh: boolean; feedRefuses: boolean; feedRunFails: string; noTemp: boolean; nanTemp: boolean; noKeff: boolean; studioLies: boolean; studioExtra: boolean; feedLies: boolean; feedNoConservation: boolean; feedBigConservation: boolean; feedWrongRate: boolean; degC: boolean; tamperedMesh: boolean }> = {}) {
+function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean; problems: string[]; openmcFails: string; noMesh: boolean; feedRefuses: boolean; feedRunFails: string; noTemp: boolean; nanTemp: boolean; noKeff: boolean; studioLies: boolean; studioExtra: boolean; feedLies: boolean; feedNoConservation: boolean; feedBigConservation: boolean; feedWrongRate: boolean; degC: boolean; degCIndexOnly: boolean; tamperedMesh: boolean }> = {}) {
   const log: Log = [];
   const requests: any[] = [];
   let lastT = NaN;
@@ -86,7 +86,7 @@ function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean;
       const quantities: any[] = [];
       if (!over.noTemp) {
         const t = write(root, `runs/${runId}/native/quantities/000.json`, { schema: "seed.quantity-data/0.2", quantity: EXCHANGED, kind: "scalar", unit: over.degC ? "degC" : "K", value: over.nanTemp ? null : 600 + 0.1 * lastT });
-        quantities.push({ name: EXCHANGED, unit: over.degC ? "degC" : "K", dimension: "temperature", normalization: "none", data: { path: t.path, sha256: t.sha256 } });
+        quantities.push({ name: EXCHANGED, unit: over.degC || over.degCIndexOnly ? "degC" : "K", dimension: "temperature", normalization: "none", data: { path: t.path, sha256: t.sha256 } });
       }
       return { ok: true, runId, root, index: { runId, quantities } };
     },
@@ -190,6 +190,7 @@ describe("the passes of the lumped loop (fake apps)", () => {
     ["FEED's case does not hold the registered power", { feedWrongRate: true }, /does not hold the registered power as a heat rate of 19841/, ["openmc"]],
     ["the heating mesh is not the file its index describes", { tamperedMesh: true }, /not the file its index describes/, ["openmc"]],
     ["the FEED temperature is in degrees Celsius", { degC: true }, /not a finite number in K/, ["feed", "openmc"]],
+    ["the FEED index says degrees Celsius while the data say K", { degCIndexOnly: true }, /not a finite number in K/, ["feed", "openmc"]],
     ["the FEED run has no fuel temperature", { noTemp: true }, /FEED run has no temperature_fuel_mean/, ["feed", "openmc"]],
     ["the FEED fuel temperature is not a number", { nanTemp: true }, /not a finite number/, ["feed", "openmc"]],
   ])("a pass fails with the reason, and the runs it made, when %s", async (_n, over, reason, runApps) => {
