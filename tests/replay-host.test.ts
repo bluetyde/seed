@@ -196,7 +196,7 @@ describe("what is refused before anything runs", () => {
     // the same sweep as when it ran still replays
     writeHostJson(f.file, f.config);
     const same = await replayFromHostFile(f.file, replayRequest({ requestId: "rep9", originalRequestId: "s1.t-002" }), policies(EXACT));
-    expect(same.ok && same.result.verdict).toBe("reproduced");
+    expect(same.ok ? same.result.verdict : JSON.stringify(same.errors)).toBe("reproduced");
   });
 
   it("refuses a replay request id that was already used for a replay of another original: nothing is launched, the first replay is not handed back", async () => {
