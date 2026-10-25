@@ -56,7 +56,8 @@ describe("the runs of a design", () => {
     const m = expand(def("morris", 20));
     expect(m.ok).toBe(true);
     if (!m.ok) return;
-    for (const c of m.cases) for (const v of c.values) { expect(v.value).toBeGreaterThanOrEqual(0); expect(v.value).toBeLessThanOrEqual(10); }
+    // strictly inside: a grid point at exactly 0 or 1 is moved a hair in (openUnit), so that a distribution with unbounded tails is never asked for probability 0 or 1
+    for (const c of m.cases) for (const v of c.values) { expect(v.value).toBeGreaterThan(0); expect(v.value).toBeLessThan(10); }
   });
   it("the whole design counts against the study's case limit, not n alone", () => {
     const r = expand(def("sobol", 8), 39);
