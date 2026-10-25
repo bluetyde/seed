@@ -152,6 +152,24 @@ describe("stopping a server the host started", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("a kill that fails keeps the server's entry and marks the record orphaned, then reports the failure", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
+    const owners = new OwnerStore(dir);
+    const m = new ProcessManager(deps(async () => { throw new Error("taskkill refused"); }) as never, owners);
+    let pid = 0;
+    try {
+      await m.ensure(app());
+      for (let i = 0; i < 100 && owners.list().records.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+      pid = owners.list().records[0]!.worker!.identity.pid;
+      await expect(m.stop("fake")).rejects.toThrow(/taskkill refused/);
+      expect(owners.list().records[0]!.state).toBe("orphaned");
+      expect(m.running("fake")).toBeDefined(); // still the host's to stop: a later stop can try again
+      expect(m.output("fake")).toContain("stopping the server failed");
+    } finally {
+      if (pid > 0) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("a stop that did stop it removes the record", async () => {
     const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
     const owners = new OwnerStore(dir);
