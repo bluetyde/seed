@@ -14,7 +14,7 @@ const request = { requestId: "cli1", samplingId: "uq", budget };
 describe("the sample verb", () => {
   it("is in the usage line and needs the trusted host configuration like every verb", async () => {
     const usage = await runCli(["nonsense"], input({}), "/x");
-    expect(JSON.stringify(usage.reply)).toContain("run|sweep|sample|replay");
+    expect(JSON.stringify(usage.reply)).toContain("run|sweep|sample|sampling-propose|sampling-status|replay");
     expect(await runCli(["sample"], input(request), undefined)).toMatchObject({ code: 2, reply: { ok: false, errors: [{ code: "E_SETUP_REQUIRED" }] } });
   });
   it("runs a registered sampling: exit 0, the cases, the summary, the caveats", async () => {
