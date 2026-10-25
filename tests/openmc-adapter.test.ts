@@ -124,6 +124,11 @@ describe.skipIf(SETUP)("OpenMC adapter against the real runner", () => {
       expect(r.result.quantities.every((q: { normalization: string }) => q.normalization === "per-source-particle")).toBe(true);
     }, 180000);
 
+    it("describe passes on the transfer the runner accepts as a receiving end (the fuel temperature from FEED)", async () => {
+      const r = okReply(await ask(tmpDir(), { verb: "describe" }));
+      expect(r.result.transfers).toEqual(expect.arrayContaining([expect.objectContaining({ field: "fuel-temperature", accepts: [expect.objectContaining({ dimension: "temperature", normalization: "none" })] })]));
+    }, 180000);
+
     it("validate accepts a good project and names what is wrong with others", async () => {
       const good = openmcProject();
       const v = okReply(await ask(good.root, { verb: "validate", artifact: good.artifact }));
