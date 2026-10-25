@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import { runFromHostFile } from "../core/fileRunHost";
 import { runSweepFromHostFile } from "../core/sweepHost";
 import { replayFromHostFile } from "../core/replayHost";
+import { runCouplingFromHostFile } from "../core/couplingHost";
 import { runSamplingFromHostFile } from "../core/samplingHost";
 import { proposeSamplingFromHost, samplingProposalStatus } from "../core/samplingProposalHost";
 import { addStudyNote } from "../core/studyNoteHost";
@@ -56,6 +57,7 @@ export async function runCli(
   hostConfig = process.env.SEED_HOST_CONFIG,
   transferHostConfig = process.env.SEED_TRANSFER_HOST_CONFIG,
   installHostConfig = process.env.SEED_INSTALL_HOST_CONFIG,
+  couplingHostConfig = process.env.SEED_COUPLING_HOST_CONFIG,
 ): Promise<{ code: number; reply: unknown }> {
   const failure = (message: string, code = "E_SCHEMA_INVALID") => ({
     code: 2,
@@ -66,20 +68,25 @@ export async function runCli(
     },
   });
   const transferVerbs = ["transfer-propose", "transfer-status", "transfer-apply"];
-  if (argv.length !== 1 || !["run", "sweep", "sample", "sampling-propose", "sampling-status", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", "list-components", ...transferVerbs].includes(argv[0]!))
+  if (argv.length !== 1 || !["run", "sweep", "sample", "sampling-propose", "sampling-status", "replay", "note", "query", "cancel", "report", "draft-conclusion", "install-component", "list-components", "couple", ...transferVerbs].includes(argv[0]!))
     return failure(
-      "usage: node dist/cli/seed.js run|sweep|sample|sampling-propose|sampling-status|replay|note|query|cancel|report|draft-conclusion|install-component|list-components|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
+      "usage: node dist/cli/seed.js run|sweep|sample|sampling-propose|sampling-status|replay|note|query|cancel|report|draft-conclusion|install-component|list-components|couple|transfer-propose|transfer-status|transfer-apply; request JSON on stdin; no approval or configuration verbs",
       "E_VERB_UNKNOWN",
     );
   const isTransfer = transferVerbs.includes(argv[0]!);
   if (isTransfer && !transferHostConfig) return failure("set SEED_TRANSFER_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
   if ((argv[0] === "install-component" || argv[0] === "list-components") && !installHostConfig) return failure("set SEED_INSTALL_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
-  if (!isTransfer && argv[0] !== "install-component" && argv[0] !== "list-components" && !hostConfig) return failure("set SEED_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
+  if (argv[0] === "couple" && !couplingHostConfig) return failure("set SEED_COUPLING_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
+  if (!isTransfer && argv[0] !== "install-component" && argv[0] !== "list-components" && argv[0] !== "couple" && !hostConfig) return failure("set SEED_HOST_CONFIG in the trusted host environment", "E_SETUP_REQUIRED");
   let request: unknown;
   try {
     request = await readRequest(stream);
   } catch (e) {
     return failure(e instanceof Error ? e.message : "invalid input");
+  }
+  if (argv[0] === "couple") {
+    const coupled = await runCouplingFromHostFile(couplingHostConfig!, request);
+    return { code: !coupled.ok ? 2 : coupled.outcome.state === "converged" ? 0 : 1, reply: { schema: "seed.cli-reply/0.1", ...coupled } };
   }
   if (argv[0] === "list-components") {
     const listed = listComponentsFromHost(installHostConfig!, request);

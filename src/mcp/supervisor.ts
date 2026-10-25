@@ -5,9 +5,10 @@ import { runFromHostFile } from "../core/fileRunHost";
 import { replayFromHostFile, type ReplayOutcome, type ReplayRequest } from "../core/replayHost";
 import { installFromHost, type InstallRequestOutcome } from "../core/installHost";
 import { runSamplingFromHostFile, type SamplingOutcome } from "../core/samplingHost";
+import { runCouplingFromHostFile, type CouplingHostOutcome } from "../core/couplingHost";
 import type { RunOutcome } from "../core/runManager";
 
-type Verb = "run" | "replay" | "install" | "sample";
+type Verb = "run" | "replay" | "install" | "sample" | "couple";
 
 /** A detached, per-call owner survives a client's termination of the MCP process. Used for every call that starts a calculation. */
 function supervised<T>(hostEnv: Record<string, string>, verb: Verb, request: unknown): Promise<T> {
@@ -62,6 +63,10 @@ export function supervisedSampling(hostConfig: string, request: unknown): Promis
 export function supervisedInstall(installHostConfig: string, request: unknown): Promise<InstallRequestOutcome> {
   return supervised<InstallRequestOutcome>({ SEED_INSTALL_HOST_CONFIG: installHostConfig }, "install", request);
 }
+/** A coupling loop is many runs of two apps: a detached owner holds it, so a client that disconnects does not stop an admitted loop half way. */
+export function supervisedCoupling(couplingHostConfig: string, request: unknown): Promise<CouplingHostOutcome> {
+  return supervised<CouplingHostOutcome>({ SEED_COUPLING_HOST_CONFIG: couplingHostConfig }, "couple", request);
+}
 if (require.main === module) {
   // IPC disconnect does not cancel an admitted host operation. Its timers/children own its lifetime.
   process.once("message", async (message: { verb?: Verb; request?: unknown }) => {
@@ -69,6 +74,8 @@ if (require.main === module) {
     const outcome =
       message?.verb === "install"
         ? await installFromHost(process.env.SEED_INSTALL_HOST_CONFIG ?? "", message.request)
+        : message?.verb === "couple"
+        ? await runCouplingFromHostFile(process.env.SEED_COUPLING_HOST_CONFIG ?? "", message.request)
         : message?.verb === "sample"
           ? await runSamplingFromHostFile(file, message.request)
           : message?.verb === "replay"
