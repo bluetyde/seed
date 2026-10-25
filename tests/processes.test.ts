@@ -186,6 +186,36 @@ describe("stopping a server the host started", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("a record that cannot be written is noticed at once, not at the health deadline, when the server never answers", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
+    class FullDisk extends OwnerStore { override write(): void { throw new Error("disk full"); } }
+    const m = new ProcessManager(deps(async (c) => { c.kill("SIGKILL"); }) as never, new FullDisk(dir));
+    managers.push(m);
+    try {
+      const started = Date.now();
+      const failure = await m.ensure(app(["--delay", "60000"])).then(() => "started", (e: Error) => e.message);
+      expect(failure).toMatch(/process record could not be written \(disk full\)/);
+      expect(Date.now() - started).toBeLessThan(8000); // the app's start timeout is 10 s
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
+  it("a kill that fails after the child has already exited is a stop: the entry is not kept and the record is removed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
+    const owners = new OwnerStore(dir);
+    const m = new ProcessManager(deps(async (c) => { c.kill("SIGKILL"); await new Promise((r) => c.once("exit", r)); throw new Error("late failure"); }) as never, owners);
+    managers.push(m);
+    try {
+      await m.ensure(app());
+      for (let i = 0; i < 100 && owners.list().records.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+      await m.stop("fake"); // resolves: the process is gone
+      expect(m.running("fake")).toBeUndefined();
+      for (let i = 0; i < 40 && owners.list().records.length > 0; i++) await new Promise((r) => setTimeout(r, 50));
+      expect(owners.list().records).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
   it("a stop that did stop it removes the record", async () => {
     const dir = mkdtempSync(join(tmpdir(), "seed-owners-"));
     const owners = new OwnerStore(dir);
