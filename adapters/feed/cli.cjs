@@ -55,6 +55,15 @@ const QUANTITIES = [
   { name: "heat_flux_outer", unit: "W/m2" },
   { name: "energy_balance_residual", unit: "1" },
 ];
+// A steady run whose result carries `fuelTemperature` (feed.fuel-temperature/0.1, docs/seed-fuel-temperature.md in FEED) adds these four, all in K, absolute,
+// dimension temperature: the volume-mean fuel temperature of each axial slice (a series against z) and three single numbers from it. Only a steady stack or
+// a one-slice case whose heat rate a heating transfer set has it; a number that is not shown to agree with its slices is refused, never passed on.
+const FUEL_TEMPERATURE_QUANTITIES = [
+  { name: "temperature_fuel_mean_by_slice", unit: "K", slices: true },
+  { name: "temperature_fuel_mean_slice_max", unit: "K" },
+  { name: "temperature_fuel_mean_slice_min", unit: "K" },
+  { name: "temperature_fuel_mean", unit: "K" },
+];
 // A transient run (feed.results/0.2) has these instead: time series carry their time axis in "t", scalars are one value.
 // temperature_peak_max is the hottest cell-centre value over the whole run; energy_balance_gap is the largest relative gap
 // between the energy deposited and stored plus rejected, which includes the first-order error of the time stepping.
@@ -227,6 +236,36 @@ function cleanTransfers(list) {
   return out;
 }
 
+/**
+ * The fuel temperature record of a steady result, checked: the schema and kind, K and absolute, the slices in order and not overlapping with finite
+ * volume means, and the three scalars equal to what the slices say (max, min and the length-weighted mean). A string is what is wrong. The scalars are
+ * recomputed here and compared, so a number FEED reports that its own slices do not support is never passed on as a result.
+ */
+function fuelTemperatureOf(ft) {
+  const finite = (x) => typeof x === "number" && Number.isFinite(x);
+  if (!ft || ft.schema !== "feed.fuel-temperature/0.1" || ft.unit !== "K" || ft.dimension !== "temperature" || ft.normalization !== "none") return "the fuel temperature record is not feed.fuel-temperature/0.1 in K, dimension temperature, normalization none";
+  if (!ft.axis || ft.axis.name !== "z" || ft.axis.unit !== "m" || typeof ft.axis.origin !== "string") return "the fuel temperature axis is not z in metres with a stated origin";
+  if (ft.state !== "steady-state") return "the fuel temperature is for a steady state only";
+  if (!Array.isArray(ft.slices) || ft.slices.length < 1 || ft.slices.length > 1000) return "the fuel temperature has no slices";
+  let last = -Infinity;
+  for (const s of ft.slices) {
+    if (!s || !finite(s.zMin) || !finite(s.zMax) || !(s.zMax > s.zMin) || s.zMin < last - 1e-12 || !finite(s.volumeMean) || !(s.volumeMean > 0)) return "a slice of the fuel temperature has no usable bounds or volume mean";
+    last = s.zMax;
+  }
+  const values = ft.slices.map((s) => s.volumeMean), lengths = ft.slices.map((s) => s.zMax - s.zMin);
+  const total = lengths.reduce((a, b) => a + b, 0);
+  const mean = values.reduce((a, v, i) => a + v * lengths[i], 0) / total;
+  const want = { temperature_fuel_mean_slice_max: Math.max(...values), temperature_fuel_mean_slice_min: Math.min(...values), temperature_fuel_mean: mean };
+  const scalars = {};
+  for (const [name, expected] of Object.entries(want)) {
+    const got = ft.scalars && ft.scalars[name] && ft.scalars[name].value;
+    if (!finite(got) || Math.abs(got - expected) > 1e-9 * Math.max(1, Math.abs(expected))) return "the fuel temperature scalar " + name + " does not agree with its slices";
+    scalars[name] = got;
+  }
+  if (typeof ft.meaning !== "string" || !/volume/i.test(ft.meaning)) return "the fuel temperature does not state its meaning (the volume mean)";
+  return { slices: ft.slices, scalars, origin: ft.axis.origin, frame: ft.axis.frame === undefined ? null : ft.axis.frame, geometry: ft.geometry ?? null, meaning: ft.meaning.slice(0, 1000), final: typeof ft.final === "string" ? ft.final.slice(0, 500) : null };
+}
+
 async function describe(reply, fail) {
   const bundle = bundlePath();
   if (!bundle) return fail(setupError());
@@ -243,7 +282,7 @@ async function describe(reply, fail) {
       formats: [{ id: d.caseFormat.format, version: String(d.caseFormat.version) }],
       capabilities: [d.engine.capability, "validate", "run", "cancel", "collect", "thermal-only", "thermo-elastic", "transient-pulse"],
       parameters: PARAMETERS,
-      quantities: QUANTITIES.concat(TRANSIENT_QUANTITIES, [LIMIT_QUANTITY], MECHANICS_QUANTITIES, [STRESS_LIMIT_QUANTITY]).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
+      quantities: QUANTITIES.concat(FUEL_TEMPERATURE_QUANTITIES, TRANSIENT_QUANTITIES, [LIMIT_QUANTITY], MECHANICS_QUANTITIES, [STRESS_LIMIT_QUANTITY]).map((q) => ({ name: q.name, unit: q.unit, normalization: "none" })),
       oracleCoverage: oracleCoverage(),
       resources: resourcesFor("feed"),
       ...(cleanTransfers(d.transfers).length > 0 ? { transfers: cleanTransfers(d.transfers) } : {}),
@@ -518,6 +557,28 @@ function collect(request, root, reply, fail) {
       });
     }
   }
+  // the fuel temperature by slice (steady only): the slices are written as a series against z, the three numbers as scalars, after they are shown to agree
+  if (results.fuelTemperature !== undefined) {
+    if (isTransient) return incomplete("a transient result with a fuel temperature is not supported by this adapter", "/quantities/temperature_fuel_mean_by_slice");
+    const ft = fuelTemperatureOf(results.fuelTemperature);
+    if (typeof ft === "string") return incomplete(ft, "/quantities/temperature_fuel_mean_by_slice");
+    for (const q of FUEL_TEMPERATURE_QUANTITIES) {
+      const common = { schema: "seed.quantity-data/0.2", quantity: q.name, unit: "K" };
+      const body = q.slices
+        ? { ...common, kind: "series", axis: { name: "z", unit: "m" }, x: ft.slices.map((s) => (s.zMin + s.zMax) / 2), values: ft.slices.map((s) => s.volumeMean),
+            meta: { slices: ft.slices.map((s) => ({ zMin: s.zMin, zMax: s.zMax })), origin: ft.origin, frame: ft.frame, geometry: ft.geometry, meaning: ft.meaning, final: ft.final, note: "x is the middle of each slice; the volume mean of the fuel in the slice, absolute, not a Doppler-effective temperature" } }
+        : { ...common, kind: "scalar", value: ft.scalars[q.name], meta: { meaning: ft.meaning, final: ft.final } };
+      const text = json(body);
+      atomicWrite(path.join(nativeDir, "series", q.name + ".json"), text);
+      quantities.push({
+        name: q.name, unit: q.unit, normalization: "none", dimension: "temperature",
+        provenance: { runId, inputRevisions },
+        data: { path: request.runDir + "/native/series/" + q.name + ".json", sha256: sha256(text) },
+        verification: "unverified",
+        ...(q.slices ? { coordinates: { system: "axial", axes: [{ name: "z", unit: "m" }] } } : {}),
+      });
+    }
+  }
   const margins = limitChecks.filter((c) => c.value !== null).map((c) => c.value);
   if (margins.length > 0) {
     const text = json({ quantity: LIMIT_QUANTITY.name, unit: LIMIT_QUANTITY.unit, values: [Math.min(...margins)], note: "the smallest margin over the limit rules that applied in this run (limit minus hottest cell, K); negative means exceeded; each rule's own margin is in extensions.feed.limits; not an integrity assessment" });
@@ -545,7 +606,8 @@ function collect(request, root, reply, fail) {
     });
   }
   const index = {
-    schema: "seed.results-index/0.1",
+    // a quantity dimension (the fuel temperature has one, so a transfer can use it) needs the 0.2 index; a result without one stays 0.1
+    schema: quantities.some((q) => q.dimension !== undefined) ? "seed.results-index/0.2" : "seed.results-index/0.1",
     runId,
     status: "completed",
     adapter: ADAPTER,

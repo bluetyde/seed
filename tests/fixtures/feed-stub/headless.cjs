@@ -135,6 +135,26 @@ else if (mode === "hang" && verb !== "cancel") {
       const names = ["fuel-flat-1GPa", "clad-304"];
       stressModes[mode].forEach((c, i) => results.checks.push({ id: "stressLimit:" + names[i], label: "Stress limit", unit: "Pa", ...c }));
     }
+    // the fuel temperature by slice of a steady stack (feed.fuel-temperature/0.1): three slices of 0.1 m, the three scalars derived from them; the modes break one thing each
+    if (mode.startsWith("fuel-temperature")) {
+      const slices = [{ index: 0, zMin: 0, zMax: 0.1, volumeMean: 800 }, { index: 1, zMin: 0.1, zMax: 0.2, volumeMean: 1000 }, { index: 2, zMin: 0.2, zMax: 0.3, volumeMean: 900 }];
+      const ft = {
+        schema: "feed.fuel-temperature/0.1", quantity: "temperature_fuel_mean_by_slice", unit: "K", dimension: "temperature", normalization: "none",
+        axis: { name: "z", unit: "m", origin: "z = 0 at the bottom of the heated length", frame: null }, state: "steady-state", final: "the converged state",
+        geometry: { kind: "pin", fuelRadius: 0.0041, fuelInnerRadius: 0, claddingInnerRadius: 0.0042, claddingOuterRadius: 0.0048, fuelCells: 2, heatedLength: 0.3 },
+        slices,
+        scalars: { temperature_fuel_mean_slice_max: { value: 1000, slice: 1 }, temperature_fuel_mean_slice_min: { value: 800, slice: 0 }, temperature_fuel_mean: { value: 900 } },
+        meaning: "the volume-mean fuel temperature of each slice (cell-centre temperature times cell volume over the fuel volume); not an effective Doppler temperature", notCovered: [],
+      };
+      if (mode === "fuel-temperature-scalar-wrong") ft.scalars.temperature_fuel_mean.value = 950;
+      if (mode === "fuel-temperature-max-wrong") ft.scalars.temperature_fuel_mean_slice_max.value = 1100;
+      if (mode === "fuel-temperature-unit") ft.unit = "degC";
+      if (mode === "fuel-temperature-overlap") slices[1].zMin = 0.05;
+      if (mode === "fuel-temperature-nan") slices[2].volumeMean = null;
+      if (mode === "fuel-temperature-no-meaning") ft.meaning = "a temperature";
+      if (mode === "fuel-temperature-origin") delete ft.axis.origin;
+      results.fuelTemperature = ft;
+    }
     if (mode === "nodomain") delete results.domain;
     if (mode === "nan") results.summary.maxT = null;
     const files = {
