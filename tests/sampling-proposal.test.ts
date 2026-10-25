@@ -101,6 +101,13 @@ describe("approving", () => {
     expect(msg(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }))).toMatch(/p1-001 of this proposal now has the id of a case/);
     expect(w.config.cases["p1-001"]).toBeUndefined();
   });
+  it("is refused when the person's host resolves the base case to another case than the proposal was made against", async () => {
+    const w = await world();
+    const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
+    const other = { ...w.config.cases.approved!, settings: { ...(w.config.cases.approved!.settings as object), delayMs: 123 } };
+    saveHostConfiguration(w.humanFile, { ...w.config, actor: { kind: "human", name: "the user" }, cases: { ...w.config.cases, approved: other } });
+    expect(msg(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }))).toMatch(/not the one the proposal was made against/);
+  });
   it("works through the admin CLI: list, approve, reject", async () => {
     const w = await world();
     const a = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
@@ -151,6 +158,15 @@ describe("running", () => {
     expect(r.ok).toBe(false);
     expect(r.ok ? "" : r.errors[0]!.code).toBe("E_REQUEST_CONFLICT");
     expect(r.ok ? "" : r.errors[0]!.message).toMatch(/p1-001 of the sampling p1 is not the case registered under that id/);
+  }, 60000);
+  it("an approved sampling does not run when the host now resolves its base case to another case", async () => {
+    const w = await world();
+    const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
+    must(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }));
+    const other = { ...w.config.cases.approved!, settings: { ...(w.config.cases.approved!.settings as object), delayMs: 123 } };
+    saveHostConfiguration(w.file, { ...w.config, cases: { ...w.config.cases, approved: other } });
+    const r = await runSamplingFromHostFile(w.file, { requestId: "r-base", samplingId: "p1", budget });
+    expect(r.ok ? "" : r.errors[0]!.message).toMatch(/is not the one the approved proposal p1 was made against; nothing was run/);
   }, 60000);
   it("a case the host registers later under the id of an approved point keeps its own definition", async () => {
     const w = await world();

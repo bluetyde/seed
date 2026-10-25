@@ -13,7 +13,7 @@ import type { SamplingDefinition } from "./sampling";
  */
 export type ProposalActor = { kind: string; name: string; model?: string };
 export type ProposalEvent =
-  | { type: "proposed"; proposalId: string; actor: ProposalActor; definition: SamplingDefinition; definitionSha256: string; note?: string }
+  | { type: "proposed"; proposalId: string; actor: ProposalActor; definition: SamplingDefinition; definitionSha256: string; note?: string; /** digest of the registered base case the definition was checked against; approval and every run compare it */ baseCaseSha256?: string }
   | { type: "approved"; proposalId: string; by: ProposalActor; definitionSha256: string }
   | { type: "rejected"; proposalId: string; by: ProposalActor; reason?: string }
   | { type: "withdrawn"; proposalId: string; by: ProposalActor };
@@ -58,13 +58,13 @@ export function readProposalLog(stateRoot: string): ProposalRow[] {
   return rows;
 }
 
-export type ProposalState = { proposalId: string; state: "pending" | "approved" | "rejected" | "withdrawn"; proposedBy: ProposalActor; definition: SamplingDefinition; definitionSha256: string; note?: string; decidedBy?: ProposalActor; reason?: string };
+export type ProposalState = { proposalId: string; state: "pending" | "approved" | "rejected" | "withdrawn"; proposedBy: ProposalActor; definition: SamplingDefinition; definitionSha256: string; baseCaseSha256?: string; note?: string; decidedBy?: ProposalActor; reason?: string };
 
 /** Every proposal as the log leaves it, in the order they were made. */
 export function foldProposals(rows: readonly ProposalRow[]): ProposalState[] {
   const out = new Map<string, ProposalState>();
   for (const { event: e } of rows) {
-    if (e.type === "proposed") out.set(e.proposalId, { proposalId: e.proposalId, state: "pending", proposedBy: e.actor, definition: e.definition, definitionSha256: e.definitionSha256, ...(e.note ? { note: e.note } : {}) });
+    if (e.type === "proposed") out.set(e.proposalId, { proposalId: e.proposalId, state: "pending", proposedBy: e.actor, definition: e.definition, definitionSha256: e.definitionSha256, ...(e.baseCaseSha256 ? { baseCaseSha256: e.baseCaseSha256 } : {}), ...(e.note ? { note: e.note } : {}) });
     else {
       const s = out.get(e.proposalId);
       if (!s) continue;
@@ -81,6 +81,15 @@ export function approvedSampling(stateRoot: string, id: string): SamplingDefinit
   const s = foldProposals(readProposalLog(stateRoot)).find((p) => p.proposalId === id);
   return s?.state === "approved" ? s.definition : undefined;
 }
+
+/** The digest of the base case an approved proposal was made against, or undefined (not approved, or a proposal from before the digest was kept). */
+export function approvedBaseDigest(stateRoot: string, id: string): string | undefined {
+  const s = foldProposals(readProposalLog(stateRoot)).find((p) => p.proposalId === id);
+  return s?.state === "approved" ? s.baseCaseSha256 : undefined;
+}
+
+/** The digest that stands for a registered case: the same case under the same id in another host configuration has the same digest. */
+export const caseDigest = (registered: unknown) => sha256Hex(canonicalJson(registered));
 
 /** Every approved definition with its id, in the order they were proposed. A damaged log throws. */
 export function approvedSamplings(stateRoot: string): [string, SamplingDefinition][] {
