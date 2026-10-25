@@ -42,6 +42,7 @@ const {
   hasArg,
   typed,
   jobState,
+  cleanTransfers,
 } = require("../shared/util.cjs");
 const { resourcesFor } = require("../shared/resources.cjs");
 const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
@@ -291,6 +292,8 @@ async function describe(reply, fail) {
       ],
       oracleCoverage: oracleCoverage(),
       resources: resourcesFor("openmc"),
+      // the transfers the runner declares as a receiving end (fuel-temperature); a malformed entry is dropped, never repaired
+      ...(cleanTransfers(d.transfers).length > 0 ? { transfers: cleanTransfers(d.transfers) } : {}),
     },
   });
 }
