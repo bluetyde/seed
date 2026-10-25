@@ -227,18 +227,23 @@ function oracleCoverage() {
  */
 function fuelTemperatureOf(ft) {
   const finite = (x) => typeof x === "number" && Number.isFinite(x);
-  if (!ft || ft.schema !== "feed.fuel-temperature/0.1" || ft.unit !== "K" || ft.dimension !== "temperature" || ft.normalization !== "none") return "the fuel temperature record is not feed.fuel-temperature/0.1 in K, dimension temperature, normalization none";
+  if (!ft || ft.schema !== "feed.fuel-temperature/0.1" || ft.quantity !== "temperature_fuel_mean_by_slice" || ft.unit !== "K" || ft.dimension !== "temperature" || ft.normalization !== "none") return "the fuel temperature record is not feed.fuel-temperature/0.1 in K, dimension temperature, normalization none";
   if (!ft.axis || ft.axis.name !== "z" || ft.axis.unit !== "m" || typeof ft.axis.origin !== "string") return "the fuel temperature axis is not z in metres with a stated origin";
   if (ft.state !== "steady-state") return "the fuel temperature is for a steady state only";
   if (!Array.isArray(ft.slices) || ft.slices.length < 1 || ft.slices.length > 1000) return "the fuel temperature has no slices";
   let last = -Infinity;
   for (const s of ft.slices) {
     if (!s || !finite(s.zMin) || !finite(s.zMax) || !(s.zMax > s.zMin) || s.zMin < last - 1e-12 || !finite(s.volumeMean) || !(s.volumeMean > 0)) return "a slice of the fuel temperature has no usable bounds or volume mean";
+    // the slices are one stack: each starts where the one before ends, so a slice that is missing is a gap, not a shorter pin
+    if (last !== -Infinity && s.zMin > last + 1e-9 * Math.max(1, Math.abs(last))) return "the slices of the fuel temperature leave a gap: a slice is missing";
     last = s.zMax;
   }
   const values = ft.slices.map((s) => s.volumeMean), lengths = ft.slices.map((s) => s.zMax - s.zMin);
   const total = lengths.reduce((a, b) => a + b, 0);
   const mean = values.reduce((a, v, i) => a + v * lengths[i], 0) / total;
+  if (!finite(total) || !(total > 0) || !finite(mean) || !ft.slices.every((s) => finite((s.zMin + s.zMax) / 2))) return "the fuel temperature slices are too large to combine without overflow";
+  const heated = ft.geometry && ft.geometry.heatedLength;
+  if (finite(heated) && heated > 0 && Math.abs(total - heated) > 1e-6 * heated) return "the slices of the fuel temperature do not cover the stated heated length";
   const want = { temperature_fuel_mean_slice_max: Math.max(...values), temperature_fuel_mean_slice_min: Math.min(...values), temperature_fuel_mean: mean };
   const scalars = {};
   for (const [name, expected] of Object.entries(want)) {

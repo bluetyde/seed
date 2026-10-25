@@ -828,6 +828,10 @@ describe("FEED adapter: the fuel temperature by slice (feed.fuel-temperature/0.1
     ["fuel-temperature-nan", "no usable bounds"],
     ["fuel-temperature-no-meaning", "does not state its meaning"],
     ["fuel-temperature-origin", "stated origin"],
+    ["fuel-temperature-gap", "leave a gap: a slice is missing"],
+    ["fuel-temperature-short", "do not cover the stated heated length"],
+    ["fuel-temperature-wrong-quantity", "not feed.fuel-temperature/0.1 in K"],
+    ["fuel-temperature-huge", "too large to combine without overflow"],
   ])("%s: the run is not collected, with the reason, and nothing is passed on", async (mode, reason) => {
     const { p, out } = await collectedWith(mode);
     expect(out.ok && out.state).toBe("failed");

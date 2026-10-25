@@ -42,7 +42,7 @@ const {
   hasArg,
   typed,
   jobState,
-  cleanTransfers,
+  cleanTransfers, droppedTransfers,
 } = require("../shared/util.cjs");
 const { resourcesFor } = require("../shared/resources.cjs");
 const { serve, startJob, statusJob, cancelJob } = require("../shared/flow.cjs");
@@ -275,6 +275,8 @@ async function describe(reply, fail) {
   if (!d.openmc) return fail(setupError("openmc is not importable in the configured Python"));
   const warnings = [];
   if (!d.nuclearData || !d.nuclearData.sha256) warnings.push(typed("W_DATA_MISSING", "", "the nuclear data file was not found: run will be refused", "seed"));
+  const dropped = droppedTransfers(d.transfers);
+  if (dropped.length > 0) warnings.push(typed("W_TRANSFER_DROPPED", "", "the runner declared transfers this adapter could not pass on as written, and left them out: " + dropped.join(", "), "seed"));
   reply({
     ok: true,
     warnings,

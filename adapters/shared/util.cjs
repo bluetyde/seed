@@ -330,8 +330,17 @@ function cleanTransfers(list) {
   return out;
 }
 
+/** The transfers the runner declared that `cleanTransfers` did not pass on, one short label each (the field when it has one), so that a describe reply can say what it left out. */
+function droppedTransfers(list) {
+  if (!Array.isArray(list)) return [];
+  const label = (t, i) => (t && typeof t.field === "string" ? JSON.stringify(t.field.slice(0, 64)) : "entry " + (i + 1));
+  const out = list.slice(0, 20).map((t, i) => [t, i]).filter(([t]) => cleanTransfers([t]).length === 0).map(([t, i]) => label(t, i));
+  if (list.length > 20) out.push(String(list.length - 20) + " further entries beyond the first 20");
+  return out;
+}
+
 module.exports = {
-  cleanTransfers, BACKSLASH, MAX_CAPTURE, HEARTBEAT_FRESH_MS, STARTUP_GRACE_MS, win, sameOrInside, winDir, portableRel, isAlive, commandLine, killTree, waitDead,
+  cleanTransfers, droppedTransfers, BACKSLASH, MAX_CAPTURE, HEARTBEAT_FRESH_MS, STARTUP_GRACE_MS, win, sameOrInside, winDir, portableRel, isAlive, commandLine, killTree, waitDead,
   atomicWrite, json, readJson, insideRoot, containedBelow, jobsDir, jobIdFor, jobIndexPath, findJob, snapshotProblem, appFailed, sha256,
   argvOf, hasArg, normPath, canonical, typed, jobState, ownsJobProcess,
 };
