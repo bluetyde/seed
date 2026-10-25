@@ -9,6 +9,36 @@
       "wireSchema": "studio.depletion/0.1",
       "summary": "A depletion run's time steps, power or flux normalisation, k at each step, per-material nuclide densities and provenance, on a heavy-metal basis.",
       "manual": "In OpenMC Studio, run a depletion (the Reactor Physics package; it needs the depletion chain file) and save its depletion record, a studio.depletion JSON written next to the statepoint. Give that file to the app that asks for it."
+    },
+    {
+      "record": "fusion-source",
+      "version": 1,
+      "owner": "plow",
+      "status": "defined",
+      "wireSchema": "plow.fusion-source/0.1",
+      "schemaSha256": "c9b41b77a0c5b8141ec6a9d0f561bbf0ae068d13852574f3cf14aa2b431d64a0",
+      "summary": "A D-T neutron source of a tokamak design point: poloidal cells with rate in neutrons per second, ion temperature and energy spread, the plasma boundary, and the total rate that turns a per-source-particle tally into a per-second one.",
+      "manual": "In PLOW, open the design point and run `python -m plow records point.json --out-dir out` (or the Records tab in the editor). The file out/<name>.fusion-source.json is the record. To make one by hand, write the JSON described in docs/records.md of the PLOW repository: the cells need r_m, z_m, volume_m3, rate_n_s, ti_kev and energy_std_mev. It is an educational result, not validated for design, safety or licensing use."
+    },
+    {
+      "record": "first-wall-geometry",
+      "version": 1,
+      "owner": "plow",
+      "status": "defined",
+      "wireSchema": "plow.first-wall-geometry/0.1",
+      "schemaSha256": "87af7ad6c3de2868b373ab32e2449b2f6f20850e0bcfbd5d65212c814558755c",
+      "summary": "The first-wall contour of a tokamak design point in the poloidal plane: a counter-clockwise polygon in R and Z, and for each segment its midpoint, length, outward normal and area as a band of revolution.",
+      "manual": "In PLOW, run `python -m plow records point.json --out-dir out`. The file out/<name>.first-wall-geometry.json is the record. By hand: list the wall polygon in metres (R, Z, counter-clockwise) and give each segment's length, normal and area 2 pi R_mid L, as described in docs/records.md of the PLOW repository. It is an educational result, not validated for design, safety or licensing use."
+    },
+    {
+      "record": "blanket-heat-load",
+      "version": 1,
+      "owner": "plow",
+      "status": "defined",
+      "wireSchema": "plow.blanket-heat-load/0.1",
+      "schemaSha256": "0c8389b5e4322ae01cb96e2744b6fe4452e73763af014d648aec0c536cb81d75",
+      "summary": "The heat flux on each first-wall segment of a tokamak design point in MW per square metre: direct 14 MeV neutron wall load by line of sight, core radiation, and their sum with a blanket energy multiplication. Names the hashes of the two records it came from.",
+      "manual": "In PLOW, run `python -m plow records point.json --out-dir out`. The file out/<name>.blanket-heat-load.json is the record. It needs the fusion-source and first-wall-geometry records first: the wall load comes from them. Hand-made records must carry their SHA-256 hashes, see docs/records.md of the PLOW repository. It is an educational result, not validated for design, safety or licensing use."
     }
   ]
 }
