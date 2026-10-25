@@ -18,6 +18,7 @@ import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import Ajv2020 from "ajv/dist/2020";
 import { canonicalJson, sha256Hex } from "./canonical";
+import { LUMPED_KIND, lumpedPowerTemperature } from "./couplingLumped";
 import { runCoupling, validateLoop, type CouplingOutcome, type LoopDefinition, type PassFunction } from "./coupling";
 import { appendAdmission, inside, readAdmissions, regularFile, safeChild, writeHostJson } from "./hostFiles";
 import { loadOracleAuthority, oracleFlags, type OracleSource } from "./oracleAuthority";
@@ -37,7 +38,10 @@ export type CouplingLoopRegistration = {
   inputs: Record<string, Revision[]>;
   definition: unknown;
   start: Record<string, number>;
+  /** What the pass builder of this `kind` needs to know (artifact ids, material, slices, power); part of the registration pin, so a grant covers exactly these. */
+  options?: Record<string, unknown>;
 };
+export type CouplingCommand = { command: string; args: string[]; timeoutSeconds?: number };
 export type CouplingHostConfig = {
   schema: "seed.coupling-host/0.1";
   projectRoot: string;
@@ -45,7 +49,7 @@ export type CouplingHostConfig = {
   actor: Actor;
   study: PolicyStudy;
   grants?: Grant[];
-  apps: Record<string, { adapter: { id: string; version: string }; oracles: OracleSource; acceptedPins: PinSet }>;
+  apps: Record<string, { adapter: { id: string; version: string }; oracles: OracleSource; acceptedPins: PinSet; runner?: CouplingCommand; transfer?: CouplingCommand }>;
   loops: Record<string, CouplingLoopRegistration>;
 };
 export type CouplingRequest = { requestId: string; loopId: string };
@@ -63,8 +67,8 @@ export type PassContext = {
 };
 export type PassBuilder = (ctx: PassContext) => PassFunction | { ok: false; errors: TypedError[] };
 
-/** Builders by `kind`. Passes that run real apps are registered here by their own module. */
-export const PASS_BUILDERS: Record<string, PassBuilder> = {};
+/** Builders by `kind`. */
+export const PASS_BUILDERS: Record<string, PassBuilder> = { [LUMPED_KIND]: lumpedPowerTemperature };
 
 export type CouplingHostOutcome =
   | {
@@ -106,15 +110,15 @@ export const flatInputs = (loop: CouplingLoopRegistration): Revision[] => loop.a
  * was edited after the grant needs a new one. Compute it from the validated configuration; a person reads the registration it hashes.
  */
 export function couplingRegistrationPin(loopId: string, loop: CouplingLoopRegistration): Revision {
-  const { purpose, kind, apps, inputs, definition, start } = loop;
-  return { artifact: `coupling:${loopId}`, revision: sha256Hex(canonicalJson({ loopId, purpose, kind, apps, inputs, definition, start })) };
+  const { purpose, kind, apps, inputs, definition, start, options } = loop;
+  return { artifact: `coupling:${loopId}`, revision: sha256Hex(canonicalJson({ loopId, purpose, kind, apps, inputs, definition, start, ...(options === undefined ? {} : { options }) })) };
 }
 
 export function validateCouplingHostConfig(value: unknown): CouplingHostConfig {
   if (!check(value)) throw Error("invalid seed.coupling-host/0.1 configuration: " + ajv.errorsText(check.errors));
   const c = structuredClone(value) as CouplingHostConfig;
   const paths = [c.projectRoot, c.stateRoot];
-  for (const a of Object.values(c.apps)) paths.push(a.oracles.repository, a.oracles.entriesDir, a.oracles.inputsRoot, a.oracles.evidenceFile);
+  for (const a of Object.values(c.apps)) paths.push(a.oracles.repository, a.oracles.entriesDir, a.oracles.inputsRoot, a.oracles.evidenceFile, ...(a.runner ? [a.runner.command] : []), ...(a.transfer ? [a.transfer.command] : []));
   if (paths.some((p) => !isAbsolute(p))) throw Error("host paths must be absolute");
   const seen = new Set<string>();
   for (const b of c.study.parameters) {
@@ -278,7 +282,7 @@ export async function runCouplingFromHostFile(file: string, request: unknown, bu
         } catch (e) {
           res = { ok: false, reason: "the pass threw: " + (e instanceof Error ? e.message : String(e)) };
         }
-        audit({ phase: "pass", ...base, index, iterate, ...(res.ok ? { calc: res.calc, ...(res.noise ? { noise: res.noise } : {}), ...(res.conservation ? { conservation: res.conservation } : {}) } : { failed: res.reason }), ...(res.runs ? { runs: res.runs } : {}) });
+        audit({ phase: "pass", ...base, index, iterate, ...(res.ok ? { calc: res.calc, ...(res.noise ? { noise: res.noise } : {}), ...(res.conservation ? { conservation: res.conservation } : {}), ...(res.info ? { info: res.info } : {}) } : { failed: res.reason }), ...(res.runs ? { runs: res.runs } : {}) });
         return res;
       };
       const outcome = await runCoupling(def, loop.start, wrapped);
