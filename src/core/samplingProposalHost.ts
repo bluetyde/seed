@@ -107,6 +107,10 @@ function decide(file: string, request: unknown, kind: "approved" | "rejected"): 
         // the definition must still be valid under today's host configuration (study bounds and budget can have changed since it was proposed)
         const again = expandSampling(id, p.definition, c.cases, c.study);
         if (!again.ok) return { refuse: "the proposal no longer fits this host: " + again.errors.map((e) => e.message).join("; ") };
+        // a case registered since the proposal may now hold the id of one of its points; allCases would keep that case and the sampling would run it
+        const taken = allCases(c);
+        const clash = again.cases.find((x) => Object.hasOwn(taken, x.caseId));
+        if (clash) return { refuse: `the point ${clash.caseId} of this proposal now has the id of a case that is registered; nothing is approved` };
         return { event: { type: "approved" as const, proposalId: id, by: actorOf(c), definitionSha256: p.definitionSha256 }, value: undefined };
       }
       return { event: { type: "rejected" as const, proposalId: id, by: actorOf(c), ...(typeof r.reason === "string" ? { reason: r.reason } : {}) }, value: undefined };

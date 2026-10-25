@@ -93,6 +93,14 @@ describe("approving", () => {
     saveHostConfiguration(w.humanFile, { ...w.config, actor: { kind: "human", name: "the user" }, study: { ...w.config.study, parameters: [{ id: "delayMs", min: 0, max: 30 }] } });
     expect(msg(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }))).toMatch(/no longer fits this host/);
   });
+  it("is refused when a case registered since the proposal has the id of one of its points", async () => {
+    const w = await world();
+    const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
+    const mine = { ...w.config.cases.approved!, settings: { ...(w.config.cases.approved!.settings as object), delayMs: 999 } };
+    saveHostConfiguration(w.humanFile, { ...w.config, actor: { kind: "human", name: "the user" }, cases: { ...w.config.cases, "p1-001": mine } });
+    expect(msg(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }))).toMatch(/p1-001 of this proposal now has the id of a case/);
+    expect(w.config.cases["p1-001"]).toBeUndefined();
+  });
   it("works through the admin CLI: list, approve, reject", async () => {
     const w = await world();
     const a = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
@@ -132,6 +140,17 @@ describe("running", () => {
       expect(r.ok).toBe(false);
     }
     expect(readFileSync(join(w.state, "samplings.jsonl"), "utf8").includes("\"phase\":\"summary\"")).toBe(false);
+  }, 60000);
+  it("a sampling whose point id was taken by a case after approval is refused whole: the other case is not run under the point's values", async () => {
+    const w = await world();
+    const p = must(proposeSamplingFromHost(w.file, { proposalId: "p1", definition: def() }));
+    must(approveSamplingFromHost(w.humanFile, { proposalId: "p1", definitionSha256: p.definitionSha256 }));
+    const mine = { ...w.config.cases.approved!, settings: { ...(w.config.cases.approved!.settings as object), delayMs: 999 } };
+    saveHostConfiguration(w.file, { ...w.config, cases: { ...w.config.cases, "p1-001": mine } });
+    const r = await runSamplingFromHostFile(w.file, { requestId: "r-clash", samplingId: "p1", budget });
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.errors[0]!.code).toBe("E_REQUEST_CONFLICT");
+    expect(r.ok ? "" : r.errors[0]!.message).toMatch(/p1-001 of the sampling p1 is not the case registered under that id/);
   }, 60000);
   it("a case the host registers later under the id of an approved point keeps its own definition", async () => {
     const w = await world();

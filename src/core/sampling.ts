@@ -309,8 +309,10 @@ export type SensitivityResult =
       method: "sobol"; n: number; d: number; mean: number; variance: number;
       parameters: { id: string; first: number; total: number; firstInterval?: [number, number]; totalInterval?: [number, number] }[];
       bootstrap?: { resamples: number; level: number; skipped: number };
+      /** Present when the noise the adapter reported is more than half of the spread of this output over the design: the indices may then be noise. */
+      noiseNote?: string;
     }
-  | { method: "morris"; r: number; d: number; parameters: { id: string; mu: number; muStar: number; sigma: number }[] }
+  | { method: "morris"; r: number; d: number; parameters: { id: string; mu: number; muStar: number; sigma: number }[]; noiseNote?: string }
   | { method: "sobol" | "morris"; unavailable: string };
 
 /**
@@ -320,6 +322,19 @@ export type SensitivityResult =
  */
 export function summaryRunsOf(design: SamplingDesign, runs: readonly SampleRun[]): SampleRun[] {
   return design.method === "sobol" ? runs.slice(0, 2 * design.n) : runs.slice();
+}
+
+const finiteNumbers = (xs: readonly (number | undefined)[]) => xs.every((x) => x === undefined || Number.isFinite(x));
+
+/** A sentence when the noise the adapter reported rivals the spread of the output over the design (then an effect may be run noise, not the input). Nothing when no run reported noise. */
+function noiseQualification(runs: readonly SampleRun[], key: string, values: readonly number[]): string | undefined {
+  const stds = runs.map((r) => r.outputs[key]?.std).filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+  if (stds.length === 0 || values.length < 2) return undefined;
+  const rms = Math.sqrt(stds.reduce((a, x) => a + x * x, 0) / stds.length);
+  const mean = values.reduce((a, x) => a + x, 0) / values.length;
+  const sd = Math.sqrt(values.reduce((a, x) => a + (x - mean) * (x - mean), 0) / (values.length - 1));
+  if (!Number.isFinite(rms) || !Number.isFinite(sd) || !(sd > 0) || rms <= 0.5 * sd) return undefined;
+  return `the sampling noise the adapter reported (${rms.toPrecision(3)} rms) is more than half of the spread of this output over the design (${sd.toPrecision(3)}): these figures may describe run noise, not the inputs`;
 }
 
 /**
@@ -345,14 +360,24 @@ export function sensitivityOf(def: SamplingDefinition, runs: readonly SampleRun[
       if (method === "sobol") {
         const { fA, fB, fAB } = sobolSplit(values as number[], def.design.n, ids.length);
         const r = sobolIndices(fA, fB, fAB, { bootstrap: { seed: def.design.seed } });
+        const every = [r.mean, r.variance, ...r.parameters.flatMap((p) => [p.first, p.total, ...(p.firstInterval ?? []), ...(p.totalInterval ?? [])])];
+        if (!finiteNumbers(every)) {
+          out[key] = { method, unavailable: "the estimators overflowed for this output (its values are too large to square); no index is given" };
+          continue;
+        }
         out[key] = {
           method, n: r.n, d: r.d, mean: r.mean, variance: r.variance,
           parameters: r.parameters.map((p, j) => ({ id: ids[j] as string, first: p.first, total: p.total, ...(p.firstInterval ? { firstInterval: p.firstInterval } : {}), ...(p.totalInterval ? { totalInterval: p.totalInterval } : {}) })),
-          ...(r.bootstrap ? { bootstrap: r.bootstrap } : {})
+          ...(r.bootstrap ? { bootstrap: r.bootstrap } : {}),
+          ...(noiseQualification(runs, key, values as number[]) ? { noiseNote: noiseQualification(runs, key, values as number[]) as string } : {})
         };
       } else {
         const eff = morrisEffects(values as number[], design.morris as MorrisDesign);
-        out[key] = { method, r: def.design.n, d: ids.length, parameters: eff.map((e, j) => ({ id: ids[j] as string, mu: e.mu, muStar: e.muStar, sigma: e.sigma })) };
+        if (!finiteNumbers(eff.flatMap((e) => [e.mu, e.muStar, e.sigma]))) {
+          out[key] = { method, unavailable: "the effects overflowed for this output (its values are too large to square); no effect is given" };
+          continue;
+        }
+        out[key] = { method, r: def.design.n, d: ids.length, parameters: eff.map((e, j) => ({ id: ids[j] as string, mu: e.mu, muStar: e.muStar, sigma: e.sigma })), ...(noiseQualification(runs, key, values as number[]) ? { noiseNote: noiseQualification(runs, key, values as number[]) as string } : {}) };
       }
     } catch (e) {
       out[key] = { method, unavailable: e instanceof Error ? e.message : "the estimators refused these numbers" };

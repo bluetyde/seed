@@ -104,6 +104,34 @@ describe("the indices of a linear model (S_i = ST_i = a_i^2 / sum a^2)", () => {
     const out = sensitivityOf(x, runs)!["y:last"]!;
     expect("unavailable" in out && out.unavailable).toMatch(/2 of the 40 runs gave no number/);
   });
+  it("values so large that squaring them overflows give no index and say why, never Infinity or NaN", () => {
+    for (const method of ["sobol", "morris"] as const) {
+      const x = def(method, method === "sobol" ? 16 : 10);
+      // modest A and B outputs, finite but enormous hybrid (AB) or later-trajectory outputs: only their squares overflow
+      const runs = runsOf(x, model);
+      const from = method === "sobol" ? 2 * 16 : 12;
+      runs.forEach((r, i) => { if (i >= from) r.outputs["y:last"]!.value = 1e200 * (1 + (i % 3)); });
+      const out = sensitivityOf(x, runs)!["y:last"]!;
+      expect("unavailable" in out ? out.unavailable : JSON.stringify(out)).toMatch(/overflowed|too large/);
+    }
+  });
+  it("noise the adapter reported that rivals the spread of the output is carried with the indices and said in the study step", () => {
+    const x = def("sobol", 32);
+    const runs = runsOf(x, model);
+    const spread = Math.sqrt(runs.reduce((s, r) => s + (r.outputs["y:last"]!.value - 30) ** 2, 0) / runs.length);
+    for (const r of runs) r.outputs["y:last"]!.std = spread; // reported noise as large as the spread itself
+    const out = sensitivityOf(x, runs)!["y:last"]!;
+    if (!("noiseNote" in out) || out.noiseNote === undefined) throw new Error("expected a noise note");
+    expect(out.noiseNote).toMatch(/more than half of the spread/);
+    // a small reported noise carries no note
+    for (const r of runs) r.outputs["y:last"]!.std = spread / 100;
+    expect("noiseNote" in sensitivityOf(x, runs)!["y:last"]!).toBe(false);
+    for (const r of runs) r.outputs["y:last"]!.std = spread;
+    const facts: SamplingFacts = { samplingId: "uq", requestId: "r", design: x.design, parameters: x.parameters.map((p) => ({ id: p.id, distribution: p.distribution })), planned: runs.length, completed: runs.length, runIds: [],
+      outputs: [{ key: "y:last", n: runs.length, mean: 30, inputSpread: spread, noise: { rms: spread, reportedRuns: runs.length }, quantiles: null, sensitivity: sensitivityOf(x, runs)!["y:last"] as never }] };
+    const step = samplingStepDraft({ actor: FIXTURE_HUMAN, time: "2026-10-25T00:00:00.000Z", facts });
+    expect(JSON.stringify(step)).toMatch(/Caution: the sampling noise the adapter reported/);
+  });
   it("a constant output has no indices: the estimator's refusal is said, never NaN", () => {
     const x = def("sobol", 8);
     const out = sensitivityOf(x, runsOf(x, () => 3))!["y:last"]!;

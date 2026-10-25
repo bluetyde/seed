@@ -266,7 +266,8 @@ export function compareReplay(req: { original: ReplayRun; replay: ReplayRun; pol
     if (res.verdict === "differs") differences.push({ kind: "value", field: name, detail: res.reason, original: undefined, replay: undefined });
   }
   if (quantities.length === 0) notes.push("the runs have no quantities to compare");
-  const verdict = quantities.reduce<ReplayVerdict>((worst, q) => (RANK[q.verdict] > RANK[worst] ? q.verdict : worst), "reproduced");
+  // nothing compared is not a reproduction: with no quantity in either run there is no evidence either way
+  const verdict = quantities.length === 0 ? "not-comparable" : quantities.reduce<ReplayVerdict>((worst, q) => (RANK[q.verdict] > RANK[worst] ? q.verdict : worst), "reproduced");
   return { ok: true, verdict, ...base, quantities, differences, notes };
 }
 

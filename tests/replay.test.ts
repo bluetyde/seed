@@ -266,9 +266,9 @@ describe("the verdict of the whole replay is the worst quantity's", () => {
     expect(verdictOf(base, two(scalar(2), gridOff.quantities[1]!.data))).toBe("differs");
   });
 
-  it("a replay with no quantities at all says so", () => {
+  it("a replay with no quantities at all says so and is not called reproduced", () => {
     const r = ok(compareReplay({ original: { ...run("a"), quantities: [] }, replay: { ...run("b"), quantities: [] }, policy: exact }));
-    expect(r.verdict).toBe("reproduced");
+    expect(r.verdict).toBe("not-comparable");
     expect(r.notes.join(" ")).toMatch(/no quantities/);
   });
 });

@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { canonicalJson, sha256Hex } from "./canonical";
-import { validateHostConfiguration, type HostConfiguration } from "./fileRunHost";
+import { allCases, validateHostConfiguration, type HostConfiguration } from "./fileRunHost";
 import { appendSamplingRecord, inside, readAdmissions, readHostJson, safeChild } from "./hostFiles";
 import { loadRunEvidence } from "./runEvidence";
 import { recordSamplingInStudy, type SamplingFacts } from "./studyRecordHost";
@@ -52,6 +52,20 @@ function registeredSampling(c: HostConfiguration, id: string): SamplingDefinitio
   return approvedSampling(realpathSync(c.stateRoot), id);
 }
 
+/**
+ * Every point of a sampling must be the case registered under its id. `allCases` keeps a case that was registered first (a person's case is never
+ * replaced by a proposal's point), so a point whose id is taken would run that other case and be reported under the sampling's planned values: the
+ * whole sampling is refused instead, before anything runs.
+ */
+function withoutCollisions(c: HostConfiguration, id: string, expanded: ReturnType<typeof expandSampling>): ReturnType<typeof expandSampling> {
+  if (!expanded.ok) return expanded;
+  const taken = allCases(c);
+  const clash = expanded.cases.find((x) => !Object.hasOwn(taken, x.caseId) || canonicalJson(taken[x.caseId]) !== canonicalJson(x.registered));
+  return clash
+    ? { ok: false, errors: [{ code: "E_REQUEST_CONFLICT", field: "/samplingId", message: `the point ${clash.caseId} of the sampling ${id} is not the case registered under that id (another case holds it); nothing was run`, source: "seed" }] }
+    : expanded;
+}
+
 const SAMPLING_MODE: ListMode = {
   kind: "sampling",
   idKey: "samplingId",
@@ -60,7 +74,7 @@ const SAMPLING_MODE: ListMode = {
     const def = registeredSampling(c, id);
     return def === undefined
       ? undefined
-      : { base: def.base, expand: () => expandSampling(id, def, c.cases, c.study), admitted: { design: def.design, parameters: def.parameters.map((p) => p.id), outputs: def.outputs.map(outputKey) } };
+      : { base: def.base, expand: () => withoutCollisions(c, id, expandSampling(id, def, c.cases, c.study)), admitted: { design: def.design, parameters: def.parameters.map((p) => p.id), outputs: def.outputs.map(outputKey) } };
   }
 };
 
