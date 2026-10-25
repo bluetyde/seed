@@ -10,7 +10,7 @@ import { loadOracleEntries, runOracleSet, type OracleEntry } from "../src/core/o
 import { issueGrant, type Actor, type Grant } from "../src/core/policy";
 import { createProject, openProject, saveProject } from "../src/core/projectStore";
 import type { PassFunction } from "../src/core/coupling";
-import { runCouplingFromHostFile, saveCouplingHostConfig, validateCouplingHostConfig, type CouplingHostConfig, type PassBuilder } from "../src/core/couplingHost";
+import { couplingRegistrationPin, runCouplingFromHostFile, saveCouplingHostConfig, validateCouplingHostConfig, type CouplingHostConfig, type PassBuilder } from "../src/core/couplingHost";
 
 // The coupling host with scripted apps: a pass is a function with a known fixed point (x -> 0.5 x + 500, so 1000), so the number of passes and the
 // answer are exact. Real project store, real oracle evidence per app (a git repository, an entry, a passing set), real gate, real journal.
@@ -63,7 +63,8 @@ async function fixture(over: { blockedApp?: boolean; maxCases?: number; maxPasse
   ];
   expect(saveProject(project, manifest, p.value.revision).ok).toBe(true);
   const apps = { appa: await appOracles(root, "a", "appa"), appb: await appOracles(root, "b", "appb", { blocked: over.blockedApp }) };
-  const inputs = [{ artifact: "a-model", revision: sha256Hex(a) }, { artifact: "b-case", revision: sha256Hex(b) }];
+  const inputs = { appa: [{ artifact: "a-model", revision: sha256Hex(a) }], appb: [{ artifact: "b-case", revision: sha256Hex(b) }] };
+  const flat = [...inputs.appa, ...inputs.appb];
   const config = (actor: Actor, grants: Grant[] = []): CouplingHostConfig => ({
     schema: "seed.coupling-host/0.1", projectRoot: project, stateRoot: state, actor,
     study: { studyId: "study-1", tier: "A2", budget: { ...budget, maxCases: over.maxCases ?? 100 }, parameters: [] },
@@ -74,11 +75,22 @@ async function fixture(over: { blockedApp?: boolean; maxCases?: number; maxPasse
         definition: { exchanged: [{ id: Q, tolerance: 1e-3, min: 250, max: 2500 }], maxPasses: over.maxPasses ?? 10, relaxation: 1, consecutive: 2 },
         start: { [Q]: 900 },
       },
+      other: {
+        purpose: "plumbing-test", kind: "scripted", apps: ["appa", "appb"], inputs,
+        definition: { exchanged: [{ id: Q, tolerance: 1e-3, min: 250, max: 2500 }], maxPasses: 5, relaxation: 1, consecutive: 2 },
+        start: { [Q]: 900 },
+      },
     },
   });
+  /** The registration pin a grant names beside the input revisions, computed from the validated registration. */
+  const pinOf = (loopId = "lumped", edit: (c: CouplingHostConfig) => void = () => {}) => {
+    const c = config(agent);
+    edit(c);
+    return couplingRegistrationPin(loopId, validateCouplingHostConfig(JSON.parse(JSON.stringify(c))).loops[loopId]!);
+  };
   const grant = (over2: Partial<Grant> = {}): Grant => {
     const g = issueGrant(human, {
-      grantId: "g-1", studyId: "study-1", actor: { kind: agent.kind, name: agent.name }, operation: "enable_coupling", inputRevisions: inputs,
+      grantId: "g-1", studyId: "study-1", actor: { kind: agent.kind, name: agent.name }, operation: "enable_coupling", inputRevisions: [...flat, pinOf()],
       issuedAt: "2026-10-25T00:00:00.000Z", expires: "2099-01-01T00:00:00.000Z", ...over2,
     } as any);
     if (!g.ok) throw Error(JSON.stringify(g.errors));
@@ -90,7 +102,7 @@ async function fixture(over: { blockedApp?: boolean; maxCases?: number; maxPasse
     edit(c);
     saveCouplingHostConfig(file, c);
   };
-  return { root, project, state, file, config, grant, write, inputs, a, b, journal: () => readAdmissions(join(state, "coupling-journal")) };
+  return { root, project, state, file, config, grant, write, inputs, flat, pinOf, a, b, journal: () => readAdmissions(join(state, "coupling-journal")) };
 }
 type F = Awaited<ReturnType<typeof fixture>>;
 const codes = (r: { ok: boolean; errors?: { code: string; field: string }[] }) => (r.ok ? [] : r.errors!.map((e) => `${e.code} ${e.field}`));
@@ -178,17 +190,32 @@ describe("running a registered loop", () => {
     expect((await runCouplingFromHostFile(f.file, req(), s.builders)).ok).toBe(true);
   });
 
-  it("a second request for a loop that is running is refused, not interleaved, and the first finishes whole", async () => {
+  it("a second request while a loop runs is refused, even for another loop or with the same request id; the first finishes whole", async () => {
     const f = await fixture();
-    f.write([f.grant()]);
+    f.write([f.grant(), f.grant({ grantId: "g-2", inputRevisions: [...f.flat, f.pinOf("other")] })]);
     const s = scripted(async (x, i) => { await new Promise((r) => setTimeout(r, 15)); return contraction(x, i); });
-    const [p, q] = await Promise.all([runCouplingFromHostFile(f.file, req(), s.builders), runCouplingFromHostFile(f.file, req(), s.builders)]);
+    const [p, q] = await Promise.all([runCouplingFromHostFile(f.file, { requestId: "same", loopId: "lumped" }, s.builders), runCouplingFromHostFile(f.file, { requestId: "same", loopId: "other" }, s.builders)]);
     expect([p.ok, q.ok].sort()).toEqual([false, true]);
     expect(codes(p.ok ? q : p)).toEqual(["E_PROJECT_LOCKED "]);
     const ph = phases(f);
     expect(ph.filter((x) => x === "start")).toHaveLength(1);
     expect(ph.filter((x) => x === "outcome")).toHaveLength(1);
     expect(ph.at(-1)).toBe("outcome");
+  });
+
+  it("a project or an app that changes while the loop runs ends it before the next pass, the earlier passes kept", async () => {
+    const f = await fixture();
+    f.write([f.grant()]);
+    const s = scripted((x, i) => {
+      if (i === 2) writeFileSync(join(f.project, "models/b.json"), JSON.stringify({ case: "feed", edited: true }));
+      return contraction(x, i);
+    });
+    const out = await runCouplingFromHostFile(f.file, req(), s.builders);
+    expect(out.ok && out.outcome.state).toBe("engine-failure");
+    expect(out.ok && out.outcome.passes).toHaveLength(2);
+    const failed = f.journal().map((r) => r.event as any).find((r) => r.failed);
+    expect(failed.failed).toContain("before pass 3 the loop was no longer admissible");
+    expect(s.calls.pass).toBe(2);
   });
 });
 
@@ -207,8 +234,10 @@ describe("who may run a loop", () => {
   it.each<[string, (f: F) => Grant]>([
     ["expired", (f) => f.grant({ issuedAt: "2019-01-01T00:00:00.000Z", expires: "2020-01-01T00:00:00.000Z" })],
     ["another actor's", (f) => f.grant({ actor: { kind: "agent", name: "someone-else" } })],
-    ["for other input revisions", (f) => f.grant({ inputRevisions: [{ artifact: "a-model", revision: "f".repeat(64) }, f.inputs[1]!] })],
-    ["for fewer inputs", (f) => f.grant({ inputRevisions: [f.inputs[0]!] })],
+    ["for other input revisions", (f) => f.grant({ inputRevisions: [{ artifact: "a-model", revision: "f".repeat(64) }, f.flat[1]!, f.pinOf()] })],
+    ["for fewer inputs", (f) => f.grant({ inputRevisions: [f.flat[0]!, f.pinOf()] })],
+    ["without the loop's registration", (f) => f.grant({ inputRevisions: f.flat })],
+    ["for another loop's registration", (f) => f.grant({ inputRevisions: [...f.flat, f.pinOf("other")] })],
     ["revoked", (f) => ({ ...f.grant(), revoked: true })],
   ])("a grant that is %s does not open the loop", async (_n, make) => {
     const f = await fixture();
@@ -216,6 +245,22 @@ describe("who may run a loop", () => {
     const s = scripted(contraction);
     expect((await runCouplingFromHostFile(f.file, req(), s.builders)).ok).toBe(false);
     expect(s.calls.builder).toBe(0);
+  });
+
+  it("editing the loop's registration after the grant (more passes) needs a new grant", async () => {
+    const f = await fixture();
+    f.write([f.grant()], (c) => { (c.loops.lumped!.definition as any).maxPasses = 12; });
+    const s = scripted(contraction);
+    expect(codes(await runCouplingFromHostFile(f.file, req(), s.builders))).toEqual(["E_NOT_PERMITTED /operation"]);
+    expect(s.calls.builder).toBe(0);
+  });
+
+  it("a host whose actor is a human is the person acting: no grant is needed, and the journal says via tier", async () => {
+    const f = await fixture();
+    saveCouplingHostConfig(f.file, f.config(human));
+    const out = await runCouplingFromHostFile(f.file, req(), scripted(contraction).builders);
+    expect(out.ok).toBe(true);
+    expect(f.journal()[0]!.event as any).toMatchObject({ phase: "start", via: "tier" });
   });
 
   it("a grant for another operation does not open it", async () => {
@@ -240,6 +285,15 @@ describe("who may run a loop", () => {
     g.write([g.grant()]);
     expect(codes(await runCouplingFromHostFile(g.file, req(), s.builders))).toEqual(["E_NOT_PERMITTED /operation"]);
     expect((g.journal()[0]!.event as any).gateStop.rule).toBe("oracle-failed");
+  });
+
+  it("a file replaced in place, with the manifest unchanged, is not the granted revision", async () => {
+    const f = await fixture();
+    f.write([f.grant()]);
+    writeFileSync(join(f.project, "models/a.json"), JSON.stringify({ model: "openmc", tampered: true }));
+    const s = scripted(contraction);
+    expect(codes(await runCouplingFromHostFile(f.file, req(), s.builders))).toEqual(["E_STALE_REVISION /loopId"]);
+    expect(s.calls.builder).toBe(0);
   });
 
   it("a project that moved on since the loop was registered makes it stale", async () => {
@@ -291,12 +345,15 @@ describe("the request and the setup", () => {
 
   it("a prototype key cannot name a pass builder", async () => {
     const f = await fixture();
-    f.write([f.grant()], (c) => { (c.loops.lumped as any).kind = "constructor"; });
+    const edit = (c: CouplingHostConfig) => { (c.loops.lumped as any).kind = "constructor"; };
+    f.write([f.grant({ inputRevisions: [...f.flat, f.pinOf("lumped", edit)] })], edit);
     expect(codes(await runCouplingFromHostFile(f.file, req(), {}))).toEqual(["E_SETUP_REQUIRED /loopId"]);
   });
 
   it.each<[string, (c: CouplingHostConfig) => void, RegExp]>([
     ["a loop naming an app that is not configured", (c) => { c.loops.lumped!.apps = ["appa", "ghost"]; }, /not configured/],
+    ["a loop that pins no input for one of its apps", (c) => { c.loops.lumped!.inputs = { appa: c.loops.lumped!.inputs.appa!, appb: [] }; }, /invalid seed\.coupling-host/],
+    ["a loop that pins inputs for an app it does not name", (c) => { (c.loops.lumped!.inputs as any).appc = c.loops.lumped!.inputs.appa; }, /exactly the apps it names|invalid seed\.coupling-host/],
     ["a loop without a start value for an exchanged quantity", (c) => { c.loops.lumped!.start = { other: 1 }; }, /no start value/],
     ["a start value for a quantity that is not exchanged", (c) => { c.loops.lumped!.start = { [Q]: 900, extra: 1 }; }, /not exchanged/],
     ["a definition over the hard ceiling of passes", (c) => { (c.loops.lumped!.definition as any).maxPasses = 26; }, /ceiling/],
@@ -307,6 +364,14 @@ describe("the request and the setup", () => {
     const c = f.config(agent);
     edit(c);
     expect(() => validateCouplingHostConfig(JSON.parse(JSON.stringify(c)))).toThrow(why);
+  });
+
+  it("a project inside the state folder is refused: the journal would be written into the project", async () => {
+    const f = await fixture();
+    f.write([f.grant()], (c) => { c.stateRoot = f.root; });
+    const s = scripted(contraction);
+    expect(codes(await runCouplingFromHostFile(f.file, req(), s.builders))).toEqual(["E_SETUP_REQUIRED "]);
+    expect(s.calls.builder).toBe(0);
   });
 
   it("the configuration must live outside the project", async () => {
