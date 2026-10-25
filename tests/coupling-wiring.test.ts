@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli/seed";
+import { PASS_BUILDERS } from "../src/core/couplingHost";
 import { agent, couplingFixture, coupledDirs, human } from "./helpers/couplingFixture";
 import { connectSeedMcp } from "./helpers/mcp-client";
 import { fixture, fixtureDirs } from "./helpers/replayFixture";
@@ -56,6 +57,23 @@ describe("the CLI verb couple", () => {
     expect(r.code).toBe(2);
     expect(first(r)).toBe(expected);
   });
+
+  it("exits 0 for a loop that converged and 1 for one that ran and did not, and gives no result for the second", async () => {
+    const f = await couplingFixture();
+    const edit = (c: any) => { c.loops.lumped.kind = "scripted"; c.loops.lumped.definition.maxPasses = 8; };
+    f.write(agent, [f.grant(edit)], edit);
+    try {
+      PASS_BUILDERS.scripted = () => async (it) => ({ ok: true, calc: { temperature_fuel_mean: 0.01 * (it.temperature_fuel_mean as number) + 500 } });
+      const converged = await cli(f.file, asked({ requestId: "r-converge", loopId: "lumped" }));
+      expect(converged.code).toBe(0);
+      expect(converged.reply).toMatchObject({ ok: true, outcome: { state: "converged" }, verification: "unverified" });
+      PASS_BUILDERS.scripted = () => async (it) => ({ ok: true, calc: { temperature_fuel_mean: (it.temperature_fuel_mean as number) + 100 } });
+      const stuck = await cli(f.file, asked({ requestId: "r-stuck" }));
+      expect(stuck.code).toBe(1);
+      expect(stuck.reply).toMatchObject({ ok: true, outcome: { state: "not-converged" } });
+      expect(stuck.reply.outcome.result).toBeUndefined();
+    } finally { delete PASS_BUILDERS.scripted; }
+  }, 60000);
 
   it("a host whose actor is a human is the person acting: the same refusal comes from the missing commands, not from a grant", async () => {
     const f = await couplingFixture();
