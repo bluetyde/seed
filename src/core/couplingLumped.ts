@@ -16,9 +16,10 @@
 import { createRequire } from "node:module";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sha256Hex } from "./canonical";
+import { canonicalJson, sha256Hex } from "./canonical";
 import type { PassFunction } from "./coupling";
 import type { CouplingHostConfig, CouplingLoopRegistration, PassBuilder, PassContext } from "./couplingHost";
+import { resolveInside } from "./paths";
 import type { Actor, Revision } from "./policy";
 import { openProject } from "./projectStore";
 import { readQuantityData } from "./quantityData";
@@ -78,10 +79,46 @@ export function checkLumpedOptions(loop: CouplingLoopRegistration): { ok: true; 
 }
 
 const messageOf = (r: TransferReply) => (r.ok ? "" : (r.errors ?? []).slice(0, 3).map((x) => `${x.code}${x.field ? " " + x.field : ""}: ${x.message}`).join("; ") || "no reason given");
+/** A kelvin scalar and nothing else: a value in another unit is not converted here, it is refused (the exchanged quantity is absolute K). */
 const scalarOf = (text: string, entry: any): number | null => {
   const r = readQuantityData(text, entry);
-  return r.ok && r.data.kind === "scalar" && num(r.data.value) ? r.data.value : null;
+  return entry.unit === "K" && r.ok && r.data.kind === "scalar" && r.data.unit === "K" && num(r.data.value) ? r.data.value : null;
 };
+/** A file of a run, by the path its index gives: inside the scratch project, and the bytes the index's hash names. Null when it is not. */
+const readChecked = (root: string, rel: unknown, sha: unknown): string | null => {
+  if (typeof rel !== "string" || typeof sha !== "string") return null;
+  const abs = resolveInside(root, rel);
+  if (!abs.ok) return null;
+  try {
+    const text = readFileSync(abs.value, "utf8");
+    return sha256Hex(text) === sha ? text : null;
+  } catch {
+    return null;
+  }
+};
+/** What Studio returned must be the project it was given with the temperature of the one material set, and nothing else changed. */
+export function studioProjectProblem(original: string, returned: string, material: string, T: number): string | null {
+  let before: any, after: any;
+  try { before = JSON.parse(original); after = JSON.parse(returned); } catch { return "Studio's project is not JSON"; }
+  const m = Array.isArray(before?.materials) ? before.materials.find((x: any) => x?.id === material) : undefined;
+  if (!m) return `the project has no material ${material}`;
+  m.temperature = T;
+  return canonicalJson(before) === canonicalJson(after) ? null : `the project Studio returned is not the one it was given with the temperature of ${material} set to ${T} K and nothing else changed`;
+}
+/** What FEED returned must be a changed case whose heat rate is the registered power over the slice (when one slice takes all the power), with a conservation check inside the recipe's tolerance. */
+export function feedCaseProblem(original: string, reply: { output: { content: string }; checks?: unknown }, o: LumpedOptions["feed"], tolerance: number): string | null {
+  if (reply.output.content === original) return "FEED returned the case unchanged";
+  let after: any;
+  try { after = JSON.parse(reply.output.content); } catch { return "FEED's case is not JSON"; }
+  const cons = (reply.checks as { conservation?: { relativeDifference?: unknown } } | undefined)?.conservation;
+  if (!cons || typeof cons.relativeDifference !== "number" || !Number.isFinite(cons.relativeDifference)) return "FEED's reply carries no conservation check";
+  if (Math.abs(cons.relativeDifference) > tolerance) return `FEED reports a conservation difference of ${cons.relativeDifference}, outside the recipe's tolerance of ${tolerance}`;
+  if (o.slices.length === 1) {
+    const s = o.slices[0]!, want = o.totalPowerW / (s.z.max - s.z.min), got = after?.power?.linearHeatRate;
+    if (!got || got.unit !== "W/m" || !num(got.value) || Math.abs(got.value - want) / want > 1e-6) return `FEED's case does not hold the registered power as a heat rate of ${want} W/m (it has ${JSON.stringify(got ?? null)})`;
+  }
+  return null;
+}
 const tableRow = (text: string, entry: any): (string | number | string[])[] | null => {
   const r = readQuantityData(text, entry);
   return r.ok && r.data.kind === "table" && r.data.rows.length === 1 ? (r.data.rows[0] as (string | number | string[])[]) : null;
@@ -117,6 +154,8 @@ export function makeLumpedPass(args: { loopId: string; requestId: string; option
     if (!toStudio.ok) return fail("OpenMC Studio refused the temperature " + T + " K: " + messageOf(toStudio));
     const applied = (toStudio.checks as { applied?: { temperatureK?: number }[] } | undefined)?.applied?.[0]?.temperatureK;
     if (applied !== T) return fail(`OpenMC Studio set ${String(applied)} K where ${T} K was asked`);
+    const projectProblem = studioProjectProblem(args.openmcProject, toStudio.output.content, o.openmc.material, T);
+    if (projectProblem) return fail(projectProblem);
 
     // 2. model.py of that project, and the OpenMC run
     const omRoot = join(base, "openmc");
@@ -134,13 +173,15 @@ export function makeLumpedPass(args: { loopId: string; requestId: string; option
     const info: Record<string, number | string> = { temperatureAppliedK: T };
     const keff = om.index.quantities.find((q: any) => q.name === "keff");
     if (keff) {
-      const row = tableRow(readFileSync(join(om.root, keff.data.path), "utf8"), keff);
+      const keffText = readChecked(om.root, keff.data.path, keff.data.sha256);
+      const row = keffText === null ? null : tableRow(keffText, keff);
       if (row && num(row[1]) && num(row[2])) { info.keff = row[1] as number; info.keffStd = row[2] as number; }
     }
 
     // 3. the heating into the FEED case, by FEED's transfer command
     const caseRevision = sha256Hex(args.feedCase);
-    const meshText = readFileSync(join(om.root, mesh.data.path), "utf8");
+    const meshText = readChecked(om.root, mesh.data.path, mesh.data.sha256);
+    if (meshText === null) return fail("the heating mesh of the OpenMC run is not the file its index describes (missing, outside the run or another hash)", runs);
     const meshData = readQuantityData(meshText, mesh);
     if (!meshData.ok) return fail("the heating mesh of the OpenMC run cannot be read: " + meshData.errors.map((x) => x.message).join("; "), runs);
     const heatRecipe: Recipe = {
@@ -159,6 +200,8 @@ export function makeLumpedPass(args: { loopId: string; requestId: string; option
       source: { quantity: mesh, data: meshData.data }, target: { artifact: "pin-case", revision: caseRevision, content: args.feedCase },
     });
     if (!toFeed.ok) return fail("FEED refused the heating of the OpenMC run: " + messageOf(toFeed), runs);
+    const caseProblem = feedCaseProblem(args.feedCase, toFeed, o.feed, heatRecipe.tolerance.conservation);
+    if (caseProblem) return fail(caseProblem, runs);
 
     // 4. the FEED run, and its fuel temperature
     const feRoot = join(base, "feed");
@@ -168,8 +211,9 @@ export function makeLumpedPass(args: { loopId: string; requestId: string; option
     runs[o.feed.app] = fe.runId;
     const q = fe.index.quantities.find((x: any) => x.name === EXCHANGED);
     if (!q) return fail(`the FEED run has no ${EXCHANGED}`, runs);
-    const value = scalarOf(readFileSync(join(fe.root, q.data.path), "utf8"), q);
-    if (value === null) return fail(`${EXCHANGED} of the FEED run is not a finite number`, runs);
+    const tempText = readChecked(fe.root, q.data.path, q.data.sha256);
+    const value = tempText === null ? null : scalarOf(tempText, q);
+    if (value === null) return fail(`${EXCHANGED} of the FEED run is not a finite number in K, or not the file its index describes`, runs);
     return { ok: true, calc: { [EXCHANGED]: value }, runs, info: { ...info, heatingPowerW: o.feed.totalPowerW } };
   };
 }
@@ -210,7 +254,12 @@ export function realLumpedDeps(config: CouplingHostConfig, options: LumpedOption
       const out = await mgr.start({ requestId, actor: config.actor, artifact: { path: first.path, revision: { hash: first.sha256, counter: 1 } }, inputs, budget, settings });
       if (!out.ok) return { ok: false, reason: out.errors.slice(0, 3).map((e) => `${e.code}: ${e.message}`).join("; "), ...(out.runId ? { runId: out.runId } : {}) };
       if (out.state !== "completed") return { ok: false, reason: `the run ended ${out.state}: ${JSON.stringify((out.record as { native?: unknown }).native ?? null)}`, runId: out.runId };
-      return { ok: true, runId: out.runId, root, index: JSON.parse(readFileSync(join(root, "runs", out.runId, "results.json"), "utf8")) };
+      // the index the run manager validated (its path and hash are in the run record), not a file this code names itself
+      const outputs = (out.record as { outputs?: { path?: string; sha256?: string }[] }).outputs;
+      const entry = Array.isArray(outputs) ? outputs[0] : undefined;
+      const text = entry ? readChecked(root, entry.path, entry.sha256) : null;
+      if (text === null) return { ok: false, reason: "the validated results index of the run could not be read back", runId: out.runId };
+      return { ok: true, runId: out.runId, root, index: JSON.parse(text) };
     },
   };
 }

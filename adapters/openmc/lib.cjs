@@ -67,14 +67,15 @@ function launchSpec(cfg, verbArgs) {
 function runSpec(spec, timeoutMs) {
   return new Promise((resolve) => {
     let child;
+    let stdinError; // the request could not be delivered (the program closed its input early): said in the result, never swallowed
     try {
       child = spawn(spec.command, spec.args, { env: spec.env ? { ...process.env, ...spec.env } : process.env, stdio: [spec.input === undefined ? "ignore" : "pipe", "pipe", "pipe"], windowsHide: true });
       if (spec.input !== undefined) {
-        child.stdin.on("error", () => undefined);
+        child.stdin.on("error", (err) => { stdinError = String(err && err.message); });
         child.stdin.end(spec.input);
       }
     } catch (err) {
-      return resolve({ code: null, stdout: "", stderr: String(err && err.message), timedOut: false });
+      return resolve({ code: null, stdout: "", stderr: String(err && err.message), timedOut: false, stdinError });
     }
     let stdout = "";
     let stderr = "";
@@ -87,7 +88,7 @@ function runSpec(spec, timeoutMs) {
       } catch {
         // already gone
       }
-      resolve({ code: null, stdout, stderr, timedOut: true });
+      resolve({ code: null, stdout, stderr, timedOut: true, stdinError });
     }, timeoutMs);
     child.stdout.on("data", (d) => {
       if (stdout.length < MAX_CAPTURE) stdout += d.toString("utf8");
@@ -99,13 +100,13 @@ function runSpec(spec, timeoutMs) {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: stderr + String(err.message), timedOut: false });
+      resolve({ code: null, stdout, stderr: stderr + String(err.message), timedOut: false, stdinError });
     });
     child.on("close", (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut: false });
+      resolve({ code, stdout, stderr, timedOut: false, stdinError });
     });
   });
 }
@@ -164,11 +165,13 @@ async function regenerate(cfg, projectAbs, outAbs) {
  * Studio's own transfer command (`headless transfer`): a seed.transfer-request/0.2 on stdin, one reply line on stdout. Returns the parsed reply, or
  * {ok: false, errors} when the command could not run or did not answer in JSON.
  */
-async function studioTransfer(cfg, request, timeoutMs = 120000) {
-  const res = await runSpec({ ...launchSpec(cfg, ["transfer"]), input: JSON.stringify(request) }, timeoutMs);
+async function studioTransfer(cfg, request, timeoutMs = 120000, run = runSpec, launch = launchSpec) {
+  const res = await run({ ...launch(cfg, ["transfer"]), input: JSON.stringify(request) }, timeoutMs);
   const reply = parseLast(res.stdout);
+  // Studio's command exits 0 for every answer (docs/seed-fuel-temperature.md in Studio): a reply from a command that timed out or exited otherwise is not an answer
+  if (res.timedOut || res.code !== 0) return { ok: false, errors: [{ code: "E_APP_FAILED", message: "the Studio transfer command " + (res.timedOut ? "timed out" : "exited with " + res.code) + (res.stdinError ? " (the request could not be delivered: " + res.stdinError + ")" : "") + (reply ? "; its reply is not used" : ((res.stderr || "").trim() ? ": " + (res.stderr || "").trim().slice(-200) : "")) }] };
   if (reply && typeof reply === "object" && typeof reply.ok === "boolean") return reply;
-  return { ok: false, errors: [{ code: "E_APP_FAILED", message: "the Studio transfer command did not answer: " + (res.timedOut ? "timed out" : ((res.stderr || "").slice(-200) || "exit " + res.code)) }] };
+  return { ok: false, errors: [{ code: "E_APP_FAILED", message: "the Studio transfer command did not answer in JSON" + (res.stdinError ? " (the request could not be delivered: " + res.stdinError + ")" : (res.stderr || "").trim() ? ": " + (res.stderr || "").trim().slice(-200) : "") }] };
 }
 
 module.exports = { toWsl, config, rt, launchSpec, runSpec, parseLast, regenerate, studioTransfer };

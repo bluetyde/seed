@@ -25,7 +25,7 @@ const projectText = JSON.stringify({ materials: [{ id: "m_uo2" }, { id: "m_zirc"
 const caseText = JSON.stringify({ caseId: "pin", power: { linearHeatRate: { value: 1, unit: "kW/m" } } }, null, 2) + "\n";
 
 type Log = { op: string; detail?: any }[];
-function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean; problems: string[]; openmcFails: string; noMesh: boolean; feedRefuses: boolean; feedRunFails: string; noTemp: boolean; nanTemp: boolean; noKeff: boolean }> = {}) {
+function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean; problems: string[]; openmcFails: string; noMesh: boolean; feedRefuses: boolean; feedRunFails: string; noTemp: boolean; nanTemp: boolean; noKeff: boolean; studioLies: boolean; studioExtra: boolean; feedLies: boolean; feedNoConservation: boolean; feedBigConservation: boolean; feedWrongRate: boolean; degC: boolean; tamperedMesh: boolean }> = {}) {
   const log: Log = [];
   const requests: any[] = [];
   let lastT = NaN;
@@ -44,14 +44,17 @@ function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean;
         if (over.studioRefuses) return { ok: false, errors: [{ code: "E_TEMPERATURE_RANGE", field: "/source/data", message: "outside the library" }] };
         const T = request.source.data.value;
         lastT = T;
+        if (over.studioLies) return { ok: true, output: { content: request.target.content }, checks: { applied: [{ material: "m_uo2", temperatureK: T }] } };
         const p = JSON.parse(request.target.content);
         p.materials[0].temperature = over.studioSetsOther ? T + 1 : T;
+        if (over.studioExtra) p.materials[1].temperature = 500;
         return { ok: true, output: { content: JSON.stringify(p, null, 2) + "\n" }, checks: { applied: [{ material: "m_uo2", temperatureK: over.studioSetsOther ? T + 1 : T }] } };
       }
       if (over.feedRefuses) return { ok: false, errors: [{ code: "E_CONSERVATION", message: "lost 3 %" }] };
+      if (over.feedLies) return { ok: true, output: { content: request.target.content }, checks: { conservation: { relativeDifference: 0 } } };
       const c = JSON.parse(request.target.content);
-      c.power.linearHeatRate = { value: request.recipe.normalization.value.value / 0.0126, unit: "W/m" };
-      return { ok: true, output: { content: JSON.stringify(c, null, 2) + "\n" }, checks: { conservation: { relativeDifference: 0, tolerance: 1e-6 } } };
+      c.power.linearHeatRate = { value: (request.recipe.normalization.value.value / 0.0126) * (over.feedWrongRate ? 2 : 1), unit: "W/m" };
+      return { ok: true, output: { content: JSON.stringify(c, null, 2) + "\n" }, ...(over.feedNoConservation ? {} : { checks: { conservation: { relativeDifference: over.feedBigConservation ? 0.1 : 0, tolerance: 1e-6 } } }) };
     },
     generateModel: async (projectFile, modelFile) => {
       log.push({ op: "generate" });
@@ -70,6 +73,7 @@ function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean;
             columns: [{ name: "xy", unit: "1", role: "label" }, { name: "z_min", unit: "cm", role: "coordinate" }, { name: "z_max", unit: "cm", role: "coordinate" }, { name: "mean", unit: "eV", role: "value" }, { name: "std", unit: "eV", role: "std", of: "mean" }],
             rows: [[["1,1"], -0.63, -0.315, 100, 1], [["1,1"], -0.315, 0, 200, 1], [["1,1"], 0, 0.315, 200, 1], [["1,1"], 0.315, 0.63, 100, 1]], meta: { frame: "openmc-model" },
           });
+          if (over.tamperedMesh) writeFileSync(join(root, mesh.path), JSON.stringify({ tampered: true }));
           quantities.push({ name: "Pin mesh:heating", unit: "eV", dimension: "energy", normalization: "per-source-particle", data: { path: mesh.path, sha256: mesh.sha256 } });
         }
         if (!over.noKeff) {
@@ -81,8 +85,8 @@ function fakes(over: Partial<{ studioRefuses: boolean; studioSetsOther: boolean;
       if (over.feedRunFails) return { ok: false, reason: over.feedRunFails, runId };
       const quantities: any[] = [];
       if (!over.noTemp) {
-        const t = write(root, `runs/${runId}/native/quantities/000.json`, { schema: "seed.quantity-data/0.2", quantity: EXCHANGED, kind: "scalar", unit: "K", value: over.nanTemp ? null : 600 + 0.1 * lastT });
-        quantities.push({ name: EXCHANGED, unit: "K", dimension: "temperature", normalization: "none", data: { path: t.path, sha256: t.sha256 } });
+        const t = write(root, `runs/${runId}/native/quantities/000.json`, { schema: "seed.quantity-data/0.2", quantity: EXCHANGED, kind: "scalar", unit: over.degC ? "degC" : "K", value: over.nanTemp ? null : 600 + 0.1 * lastT });
+        quantities.push({ name: EXCHANGED, unit: over.degC ? "degC" : "K", dimension: "temperature", normalization: "none", data: { path: t.path, sha256: t.sha256 } });
       }
       return { ok: true, runId, root, index: { runId, quantities } };
     },
@@ -178,6 +182,14 @@ describe("the passes of the lumped loop (fake apps)", () => {
     ["the OpenMC run has no heating mesh", { noMesh: true }, /no quantity "Pin mesh:heating"/, ["openmc"]],
     ["FEED refuses the heating", { feedRefuses: true }, /FEED refused the heating of the OpenMC run: E_CONSERVATION/, ["openmc"]],
     ["the FEED run does not complete", { feedRunFails: "E_NOT_CONVERGED" }, /FEED run did not complete: E_NOT_CONVERGED/, ["feed", "openmc"]],
+    ["Studio hands back the project unchanged while claiming the temperature", { studioLies: true }, /not the one it was given with the temperature of m_uo2 set to 900 K/, []],
+    ["Studio changes more than the one temperature", { studioExtra: true }, /nothing else changed/, []],
+    ["FEED hands back the case unchanged", { feedLies: true }, /FEED returned the case unchanged/, ["openmc"]],
+    ["FEED's reply carries no conservation check", { feedNoConservation: true }, /carries no conservation check/, ["openmc"]],
+    ["FEED reports a conservation difference over the tolerance", { feedBigConservation: true }, /conservation difference of 0.1, outside the recipe's tolerance of 0.000001/, ["openmc"]],
+    ["FEED's case does not hold the registered power", { feedWrongRate: true }, /does not hold the registered power as a heat rate of 19841/, ["openmc"]],
+    ["the heating mesh is not the file its index describes", { tamperedMesh: true }, /not the file its index describes/, ["openmc"]],
+    ["the FEED temperature is in degrees Celsius", { degC: true }, /not a finite number in K/, ["feed", "openmc"]],
     ["the FEED run has no fuel temperature", { noTemp: true }, /FEED run has no temperature_fuel_mean/, ["feed", "openmc"]],
     ["the FEED fuel temperature is not a number", { nanTemp: true }, /not a finite number/, ["feed", "openmc"]],
   ])("a pass fails with the reason, and the runs it made, when %s", async (_n, over, reason, runApps) => {
