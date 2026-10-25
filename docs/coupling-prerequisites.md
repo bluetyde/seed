@@ -57,13 +57,26 @@ The first loop is the one whose return transfer the app side can offer soonest. 
 
 A scripted fake pair of apps whose exchange has a known fixed point (so convergence, the number of passes and the answer are exact), with: convergence in a stated number of passes; a contraction slower than the maximum (`not-converged`, no result); a diverging map (`diverged`); an alternating map (`oscillating`); a noise floor above the tolerance (`stalled`); a failing engine mid-loop (`engine-failure`, the earlier passes kept as evidence); a conservation break (`conservation`); the same loop twice from the same start giving the same passes; an agent that tries to start an unapproved loop (refused, logged); relaxation factor effects on the fake map; and the report refusing a coupled result without its convergence statement. Then breakage checks as for every module.
 
-## 7. Decisions only the user can take
+## 7. Decisions
 
-1. **Which loop first.** Power-temperature (OpenMC and FEED), the coolant loop (NODAL and FEED), or the triple. The choice decides which app session has to offer a return transfer first.
-2. **Where the iterates live.** Each pass writing a new revision of the target's input file (as a transfer does now) leaves a trail of revisions in the project; the alternative is a scratch copy of the inputs inside the loop's own record, and only a **converged** state is written back as one new revision (approved by a person, like a transfer). I recommend the second: it keeps the project's revision history to the states a person accepted. It needs the transfer code to be able to apply into a scratch location.
-3. **Steady only first?** I recommend yes (4.2).
-4. **The ceiling of 25 passes and the default relaxation of 1.** Defaults, changeable by the person who registers a loop.
-5. **Who asks the apps.** The return transfer fields are the apps' to add; SEED can post the request to the OpenMC Studio, FEED and NODAL logs on the user's word.
+**Decided by the user on 2026-10-25** (recommendations accepted as written; the first loop is a plumbing test, not a physics result):
+
+1. **First loop: power-temperature, OpenMC and FEED, lumped.** One OpenMC fuel material (transfer field `fuel-temperature`, one volume-mean temperature per material) and one FEED slice (`heating-to-pin` into a one-slice case; FEED returns `temperature_fuel_mean`). Both app sides are built and merged (OpenMC Studio `8b36055`, FEED `08e2213`, SEED adapters on main). **What the first loop proves and what it does not:** the power is fixed and the heating is normalized to it, so the temperature does not change the heating; the loop converges in two or three passes and temperature feeds back only into k-eff (Doppler). The first loop tests the plumbing (exchange, scratch iterates, records, gate, grant), and every record and report says so. It is not a physics result and its quantities stay `unverified` (4.6).
+2. **Where the iterates live: a scratch copy inside the loop's own record.** Only a converged state is written back, as one new revision approved by a person, like a transfer.
+3. **Steady only first.**
+4. **Defaults of the first loop**, changeable by the person who registers a loop (the hard ceiling of 25 passes is not):
+
+   | Setting | Value |
+   |---|---|
+   | Quantity the loop converges on | `temperature_fuel_mean` only; k-eff is reported with its standard deviation, not converged on |
+   | Relative tolerance | 1e-3 (about 1 K at 1000 K) |
+   | Bounds | min 250 K, max 2500 K (the range OpenMC accepts) |
+   | Consecutive passes within tolerance | 2 |
+   | Maximum passes | 10 |
+   | Relaxation | 1 (about 0.7 if a run ends `oscillating`) |
+
+   If a later loop converges on k-eff, a tolerance below about twice the noise of the run (534 pcm at the minimum size, so about 1e-2 relative) cannot be met and ends `stalled`.
+5. **Who triggers the exchange: the SEED host, as part of the registered loop.** It uses recipes a person approved once, and the loop runs under a human grant that names the actor, the loop, the exact input revisions of every app, an expiry and a ceiling on passes. The apps do not post requests to each other; an agent can ask to run an approved loop and cannot approve one. For OpenMC and FEED no app change is needed any more. For NODAL's coolant loop, SEED posts the request to NODAL's log when the user says so.
 
 ## 8. Not covered
 
