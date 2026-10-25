@@ -24,7 +24,7 @@ The `report` verb also accepts only the original requestId. With a trusted exter
 
 Configuration, state and oracle evidence must reside outside the project. Protect these locations using the host account's filesystem permissions. The host rechecks configuration and runtime bytes, actual oracle files and inputs, app commit and evidence before admission. Revocation is read on the next request. The project manifest selects the runs folder. RAFT's runtime environment override is supplied by the host for each adapter process.
 
-This is a trusted local file format, not a signed policy format. Configuration authors can change authority and accepted evidence. Who signs production policies and the final policy format remain open decisions.
+**The environment is part of the trust boundary.** The files that give a process its authority are chosen by environment variables of that process (`SEED_HOST_CONFIG`, `SEED_INSTALL_HOST_CONFIG`, `SEED_REPLAY_POLICY_DIR` and the like), and a configuration whose actor is a human is the person acting (no grant is needed). An agent that can set the environment of the CLI or of the MCP server, or read a human's configuration file, can pick a human's authority: run the agent's processes under an account and an environment the agent does not control, and keep the human's configurations where that account cannot read them (Codex review of 2026-10-25, finding on the CLI surface). This is a trusted local file format, not a signed policy format. Configuration authors can change authority and accepted evidence. Who signs production policies and the final policy format remain open decisions.
 
 ## Records and process ownership
 
