@@ -165,13 +165,16 @@ export type SamplingFacts = {
 };
 /** The indices or effects of one output as the step and the log keep them (the same figures as the reply). */
 export type SensitivityFacts =
-  | { method: "sobol"; n: number; d: number; parameters: { id: string; first: number; total: number; firstInterval?: [number, number]; totalInterval?: [number, number] }[]; bootstrap?: { resamples: number; level: number; skipped: number } }
-  | { method: "morris"; r: number; d: number; parameters: { id: string; mu: number; muStar: number; sigma: number }[] }
+  | { method: "sobol"; n: number; d: number; parameters: { id: string; first: number; total: number; firstInterval?: [number, number]; totalInterval?: [number, number] }[]; bootstrap?: { resamples: number; level: number; skipped: number }; noiseNote?: string }
+  | { method: "morris"; r: number; d: number; parameters: { id: string; mu: number; muStar: number; sigma: number }[]; noiseNote?: string }
   | { method: "sobol" | "morris"; unavailable: string };
 const MAX_CITED_RUNS = 100;
 const range = (i: [number, number] | undefined) => (i ? ` [${num(i[0])}, ${num(i[1])}]` : "");
 /** One sentence on the indices or effects of an output; it never contains the word that starts the next output block. */
 function sensitivityText(s: SensitivityFacts): string {
+  return sensitivityBody(s) + ("noiseNote" in s && s.noiseNote ? ` Caution: ${s.noiseNote}.` : "");
+}
+function sensitivityBody(s: SensitivityFacts): string {
   if ("unavailable" in s) return ` ${s.method === "sobol" ? "Sobol indices" : "Morris effects"} are not available: ${s.unavailable}.`;
   if (s.method === "sobol") {
     const first = s.parameters.map((p) => `${p.id} ${num(p.first)}${range(p.firstInterval)}`).join(", ");
