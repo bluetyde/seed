@@ -104,12 +104,12 @@ const study = { studyId: "s1", tier: "A3" as const, budget, parameters: [] };
 const gate = (blocked: boolean) => evaluateGate({ operation: "run_case", actor, studyId: "s1" }, { study, oracleBlocked: blocked });
 
 describe.skipIf(!have)("OpenMC oracle set through the SEED adapter (real OpenMC)", () => {
-  it("loads 9 entries (6 analytic good, 3 bad input), all pinned and valid", () => {
+  it("loads 10 entries (6 analytic good, 4 bad input: the two eigenvalue refusals are among them), all pinned and valid", () => {
     const r = loadOracleEntries(join(base, "entries"));
     expect(r.errors).toEqual([]);
-    expect(r.entries).toHaveLength(9);
+    expect(r.entries).toHaveLength(10);
     expect(r.entries.filter(i => i.entry.tag === "good")).toHaveLength(6);
-    expect(r.entries.filter(i => i.entry.tag === "bad-input")).toHaveLength(3);
+    expect(r.entries.filter(i => i.entry.tag === "bad-input")).toHaveLength(4);
     expect(r.entries.filter(i => i.entry.source.kind === "analytic")).toHaveLength(6);
   });
 
@@ -176,7 +176,7 @@ describe.skipIf(!have)("OpenMC oracle set through the SEED adapter (real OpenMC)
     e.tolerance = { abs: 1, rel: 1 };
     writeFileSync(file, JSON.stringify(e, null, 2));
     const r = loadOracleEntries(copy);
-    expect(r.entries).toHaveLength(8);
+    expect(r.entries).toHaveLength(9);
     expect(r.errors[0]).toMatchObject({ code: "E_SCHEMA_INVALID", field: "openmc-b10-slab-thin-absorption.json/toleranceHash" });
     const { entries } = loadOracleEntries(join(base, "entries"));
     const accepted = pinsOf(entries, appCommit);
