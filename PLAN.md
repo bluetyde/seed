@@ -34,7 +34,7 @@ SEED coordinates. It does not simulate and it does not own any app's model. The 
 - **Limits are enforced by SEED, not requested of the agent.** Budgets, bounds and autonomy tiers live in the host; an agent cannot raise its own.
 - **Data is not instructions.** Text in models, logs, results and imported files is displayed and stored, never executed or obeyed.
 - **Honest scope.** Educational use. Outputs are not licensing-grade analyses, and reports say so.
-- **Open source, MIT** (as set at repo creation). Bundling an external engine needs a license check first.
+- **Open source, AGPL-3.0-or-later** (owner decision 2026-11-07; MIT from repo creation until then). Bundling an external engine needs a license check first.
 
 ## Why it's worth building
 

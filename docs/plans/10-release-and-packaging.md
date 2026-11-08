@@ -15,7 +15,7 @@ SEED itself is small. Apps publish versioned runtime recipes, compatibility meta
 
 ## Licensing and provenance
 
-- MIT for SEED. Do not bundle an external engine (SCRAM, OFFBEAT/OpenFOAM, OpenMC data) before its license and redistribution terms are checked and recorded; public binary redistribution needs corresponding-source obligations reviewed.
+- AGPL-3.0-or-later for SEED (MIT until 2026-11-07). Do not bundle an external engine (SCRAM, OFFBEAT/OpenFOAM, OpenMC data) before its license and redistribution terms are checked and recorded; public binary redistribution needs corresponding-source obligations reviewed.
 - `THIRD_PARTY_NOTICES.md` lists every bundled dependency with license, version and source.
 - Fonts and assets: bundled with their licenses; no remote font or script loading from the apps' views.
 - Nuclear data stays read-only and shared; never copied into a project.

@@ -2,6 +2,7 @@
   "name": "seed",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "SEED, System for Engineering and Experimental Design: desktop host that opens the suite apps as tabs",
   "main": "dist/main/main.js",
   "type": "commonjs",

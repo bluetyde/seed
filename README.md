@@ -87,7 +87,7 @@ SEED was made with the assistance of AI coding agents.
 
 ## Licence and third-party software
 
-SEED is released under the [MIT licence](LICENSE).
+SEED is free software, licensed under the GNU Affero General Public License, version 3 or (at your option) any later version ([LICENSE](LICENSE), SPDX `AGPL-3.0-or-later`). Under section 7(b) of the GNU Affero General Public License version 3, redistributions must preserve the attribution notice in AUTHORS. Versions published before 2026-11-07 were released under the MIT licence and stay under it.
 
 It depends on open source packages that keep their own licences: Electron, the Model Context Protocol SDK, Ajv, Zod, and (for development and tests) TypeScript, Vitest and Playwright. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists every package with its version, licence and licence text; it is generated from `package-lock.json`, and a test fails when the two disagree. SEED does not bundle the suite apps or any calculation engine; each is installed separately and carries its own licence and terms.
 
